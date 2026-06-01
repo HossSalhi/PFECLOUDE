@@ -140,12 +140,12 @@ public class KubernetesDeploymentWatcher {
                     logger.info("Watch: resourceVersion expired (410 Gone) — re-listing");
                     resourceVersion.set("");
                 } else {
-                    logger.warn("Watch: ApiException code={} — reconnecting in {}ms", ex.getCode(), backoffMs);
+                    logger.debug("Watch: ApiException code={} — reconnecting in {}ms", ex.getCode(), backoffMs);
                     sleepSafe(backoffMs);
                     backoffMs = Math.min(backoffMs * 2, 60_000);
                 }
             } catch (Exception ex) {
-                logger.warn("Watch: connection lost ({}) — reconnecting in {}ms", ex.getMessage(), backoffMs);
+                logger.debug("Watch: connection lost ({}) — reconnecting in {}ms", ex.getMessage(), backoffMs);
                 sleepSafe(backoffMs);
                 backoffMs = Math.min(backoffMs * 2, 60_000);
             }

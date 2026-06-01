@@ -319,10 +319,9 @@ public class AIOpsOrchestrationService {
         predictRequest.setNamespace(namespace);
         predictRequest.setApp(app);
         predictRequest.setWindowMinutes(windowMinutes);
+        predictRequest.setSkipLlm(true);
         predictRequest.setFeatureOverrides(
                 kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app));
-        predictRequest.setRemediationContext(
-                remediationHistoryContextService.buildContext(namespace, app));
 
         AIPredictResponse prediction = aiOpsClientService.predict(predictRequest);
 

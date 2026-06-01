@@ -23,6 +23,17 @@ public class AIPredictRequest {
     @JsonProperty("remediation_context")
     private Map<String, Object> remediationContext = new LinkedHashMap<>();
 
+    @JsonProperty("skip_llm")
+    private boolean skipLlm = false;
+
+    public boolean isSkipLlm() {
+        return skipLlm;
+    }
+
+    public void setSkipLlm(boolean skipLlm) {
+        this.skipLlm = skipLlm;
+    }
+
     public String getNamespace() {
         return namespace;
     }

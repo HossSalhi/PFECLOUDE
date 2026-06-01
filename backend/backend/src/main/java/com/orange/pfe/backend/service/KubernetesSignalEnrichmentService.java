@@ -66,7 +66,7 @@ public class KubernetesSignalEnrichmentService {
 
             overrides.put("node_not_ready_count", Math.max(appNodeNotReadyCount, workerNodeNotReadyCount));
         } catch (ApiException | IOException ex) {
-            logger.warn(
+            logger.debug(
                     "Failed to enrich AI prediction with Kubernetes signals for {}/{}: {}",
                     namespace,
                     app,
