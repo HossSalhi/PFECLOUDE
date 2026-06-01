@@ -1,0 +1,31 @@
+{
+  "vmrun_path": "C:\\Program Files (x86)\\VMware\\VMware Workstation\\vmrun.exe",
+  "kubeconfig_path": "C:\\Users\\houss\\AppData\\Local\\Temp\\pfe-kubeconfig-master",
+  "kubectl_path": "kubectl",
+  "grace_period_seconds": 120,
+  "poll_interval_seconds": 30,
+  "watchdog_port": 9099,
+  "backend_api": "http://192.168.148.153:30808",
+  "backend_user": "operator",
+  "backend_password": "operator-change-me",
+  "nodes": {
+    "k8s-master": {
+      "ip": "192.168.148.153",
+      "vmx_path": "C:\\Users\\houss\\Documents\\Virtual Machines\\k8s-master\\k8s-master.vmx",
+      "ssh_user": "kube",
+      "ssh_password": "kube"
+    },
+    "k8s-worker1": {
+      "ip": "192.168.148.158",
+      "vmx_path": "C:\\Users\\houss\\Documents\\Virtual Machines\\k8s-worker1\\k8s-worker1.vmx",
+      "ssh_user": "kube",
+      "ssh_password": "kube"
+    },
+    "k8s-worker2": {
+      "ip": "192.168.148.155",
+      "vmx_path": "C:\\Users\\houss\\Documents\\Virtual Machines\\k8s-worker2\\k8s-worker2.vmx",
+      "ssh_user": "kube",
+      "ssh_password": "kube"
+    }
+  }
+}

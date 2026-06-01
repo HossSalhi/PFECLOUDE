@@ -1,0 +1,126 @@
+---
+# Worker Node HA Configuration
+# ==============================
+# worker1 (zone-a) ←→ worker2 (zone-b) : SYMMETRIC MUTUAL BACKUP
+# Applied via: kubectl apply -f worker-ha-config.yaml
+# Node labels applied separately (see setup commands below)
+#
+# Setup commands (run once, or re-apply when adding a new worker):
+#   kubectl label node k8s-worker1 node-type=worker topology.kubernetes.io/zone=zone-a --overwrite
+#   kubectl label node k8s-worker2 node-type=worker topology.kubernetes.io/zone=zone-b --overwrite
+#   kubectl label node k8s-worker1 node-role.kubernetes.io/worker= --overwrite
+#   kubectl label node k8s-worker2 node-role.kubernetes.io/worker= --overwrite
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: universal-ha-template
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: pfe-aiops-platform
+    purpose: ha-deployment-template
+data:
+  README: |
+    Universal HA Template — PFE AIOps Platform
+    ============================================
+    ARCHITECTURE: Active-Active HA — symmetric mutual backup
+
+      worker1 (192.168.148.158, zone-a) ←→ worker2 (192.168.148.155, zone-b)
+                EACH IS THE FULL BACKUP OF THE OTHER — EQUAL ROLE
+
+    Normal state  : workloads spread 50/50 across worker1 and worker2
+    worker1 fails : ALL workloads move automatically to worker2 (within 60s)
+    worker2 fails : ALL workloads move automatically to worker1 (within 60s)
+    Recovery      : workloads re-spread automatically when failed worker returns
+
+    Applies to: Orange AIOps platform AND any future application deployed here.
+
+  stateless-deployment-template: |
+    # Copy into spec.template.spec of any new Deployment:
+
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-type
+              operator: In
+              values: [worker]            # never on master
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: YOUR_APP            # spread replicas on different workers
+    topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway  # spread normally; tolerate single-node if one fails
+      labelSelector:
+        matchLabels:
+          app: YOUR_APP
+    tolerations:
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 60              # evict from dead node after 60s (default 5min)
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 60
+
+  pdb-template: |
+    apiVersion: policy/v1
+    kind: PodDisruptionBudget
+    metadata:
+      name: YOUR_APP-pdb
+      namespace: YOUR_NS
+    spec:
+      minAvailable: 1
+      selector:
+        matchLabels:
+          app: YOUR_APP
+
+  cnpg-database-template: |
+    # For ANY PostgreSQL database — use CloudNativePG for automatic HA
+    # primary runs on one worker, standby on the other
+    # If primary worker fails: standby auto-promoted — no manual action needed
+    apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    metadata:
+      name: YOUR_DB
+    spec:
+      instances: 2          # 1 primary + 1 standby on different workers
+      storage:
+        size: 5Gi
+        storageClass: local-path
+      affinity:
+        topologyKey: kubernetes.io/hostname
+
+---
+# PDB for Chromadb
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: chromadb-pdb
+  namespace: pfe
+spec:
+  minAvailable: 0
+  selector:
+    matchLabels:
+      app: chromadb
+
+---
+# PDB for Loki
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: loki-pdb
+  namespace: monitoring
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki

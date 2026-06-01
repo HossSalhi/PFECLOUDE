@@ -1,0 +1,191 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Remédiation</span>
+    </div>
+    <h1>Historique de <span>Remédiation</span></h1>
+    <div class="page-subtitle">Actions correctives exécutées sur le cluster Kubernetes</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="loadAll()" [disabled]="loadingActions">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loadingActions"></i> Actualiser
+    </button>
+  </div>
+</div>
+
+<!-- ── Time Window Filters ── -->
+<div class="filter-bar mb-24">
+  <span class="filter-label"><i class="fas fa-clock"></i> Fenêtre</span>
+  <button *ngFor="let h of [6, 12, 24, 48, 168]"
+          class="filter-pill"
+          [class.active]="hoursWindow === h"
+          (click)="setHours(h)">
+    {{ h === 168 ? '7 jours' : h + 'h' }}
+  </button>
+</div>
+
+<!-- ── Summary KPIs ── -->
+<div *ngIf="loadingSummary" style="padding:32px;text-align:center;">
+  <div class="spinner-orange"></div>
+</div>
+
+<div *ngIf="!loadingSummary && summary" class="grid-4 mb-24">
+
+  <div class="stat-card">
+    <div class="stat-header">
+      <div class="stat-icon-wrap"><i class="fas fa-bolt"></i></div>
+    </div>
+    <div class="stat-value">{{ summary.totalActions }}</div>
+    <div class="stat-label">Total Actions</div>
+  </div>
+
+  <div class="stat-card success">
+    <div class="stat-header">
+      <div class="stat-icon-wrap"><i class="fas fa-circle-check"></i></div>
+    </div>
+    <div class="stat-value">{{ summary.successfulActions }}</div>
+    <div class="stat-label">Réussies</div>
+  </div>
+
+  <div class="stat-card critical">
+    <div class="stat-header">
+      <div class="stat-icon-wrap"><i class="fas fa-circle-xmark"></i></div>
+    </div>
+    <div class="stat-value">{{ summary.failedActions }}</div>
+    <div class="stat-label">Échouées</div>
+  </div>
+
+  <div class="stat-card warning">
+    <div class="stat-header">
+      <div class="stat-icon-wrap"><i class="fas fa-hourglass-half"></i></div>
+    </div>
+    <div class="stat-value">{{ summary.pendingActions }}</div>
+    <div class="stat-label">En Attente</div>
+  </div>
+
+</div>
+
+<!-- ── Rate Charts ── -->
+<div *ngIf="!loadingSummary && summary" class="grid-2 mb-24">
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-chart-line"></i></div>
+        Taux de Succès
+      </div>
+      <span class="badge-status" [ngClass]="getSuccessRatePct() >= 80 ? 'success' : getSuccessRatePct() >= 50 ? 'medium' : 'critical'">
+        {{ getSuccessRatePct() }}%
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="progress-bar-wrap">
+        <div class="progress-header">
+          <span class="progress-label">{{ summary.successfulActions }} réussies / {{ summary.totalActions }} total</span>
+          <span class="progress-value">{{ getSuccessRatePct() }}%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill success" [style.width.%]="getSuccessRatePct()"></div>
+        </div>
+      </div>
+      <div class="text-muted mt-16" style="font-size:12px;">
+        Période : dernières {{ summary.hoursWindow }}h
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-robot"></i></div>
+        Taux d'Automatisation
+      </div>
+      <span class="badge-status ai">{{ getAutoRatePct() }}%</span>
+    </div>
+    <div class="card-body">
+      <div class="progress-bar-wrap">
+        <div class="progress-header">
+          <span class="progress-label">Actions exécutées automatiquement par l'IA</span>
+          <span class="progress-value">{{ getAutoRatePct() }}%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" [style.width.%]="getAutoRatePct()"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Actions Table ── -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <div class="card-title-icon"><i class="fas fa-list-check"></i></div>
+      Historique des Actions
+    </div>
+    <span class="text-muted" style="font-size:13px;">Page {{ currentPage + 1 }} / {{ totalPages || 1 }}</span>
+  </div>
+
+  <div *ngIf="loadingActions" style="padding:40px;text-align:center;">
+    <div class="spinner-orange"></div>
+  </div>
+
+  <div *ngIf="!loadingActions && actions.length === 0" class="empty-state">
+    <div class="empty-icon"><i class="fas fa-wrench"></i></div>
+    <div class="empty-title">Aucune action</div>
+    <div class="empty-text">Aucune action de remédiation enregistrée pour cette période.</div>
+  </div>
+
+  <div *ngIf="!loadingActions && actions.length > 0" class="data-table-wrapper">
+    <table class="orange-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Type d'Action</th>
+          <th>Statut</th>
+          <th>Incident</th>
+          <th>Mode</th>
+          <th>Exécuté le</th>
+          <th>Résultat</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let action of actions">
+          <td class="col-id">#{{ action.id }}</td>
+          <td>
+            <span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;">
+              {{ action.actionType || action.type }}
+            </span>
+          </td>
+          <td>
+            <span class="badge-status" [ngClass]="(action.status || '').toLowerCase()">{{ action.status }}</span>
+          </td>
+          <td class="col-id">#{{ action.incidentId }}</td>
+          <td>
+            <span class="badge-status" [ngClass]="(action.automationMode || action.automated) ? 'ai' : 'manual'">
+              <i class="fas" [ngClass]="(action.automationMode || action.automated) ? 'fa-robot' : 'fa-user'"></i>
+              {{ action.automationMode || (action.automated ? 'Automatique' : 'Manuel') }}
+            </span>
+          </td>
+          <td class="col-meta">{{ action.executedAt | date:'dd/MM/yy HH:mm' }}</td>
+          <td class="col-meta" style="max-width:180px;">{{ action.result || action.executorResult || '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div *ngIf="totalPages > 1" class="pagination">
+    <span class="page-info">Page {{ currentPage + 1 }} sur {{ totalPages }}</span>
+    <button class="page-btn" [disabled]="currentPage === 0" (click)="goToPage(currentPage - 1)">
+      <i class="fas fa-angle-left"></i>
+    </button>
+    <button class="page-btn" [disabled]="currentPage >= totalPages - 1" (click)="goToPage(currentPage + 1)">
+      <i class="fas fa-angle-right"></i>
+    </button>
+  </div>
+
+</div>

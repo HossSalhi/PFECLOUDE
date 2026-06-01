@@ -1,0 +1,146 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Incidents</span>
+    </div>
+    <h1>Gestion des <span>Incidents</span></h1>
+    <div class="page-subtitle">{{ totalElements }} incident(s) au total</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="exportCsv()">
+      <i class="fas fa-download"></i> Export CSV
+    </button>
+    <button class="btn btn-ghost btn-sm" (click)="loadIncidents()" [disabled]="loading">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i> Actualiser
+    </button>
+  </div>
+</div>
+
+<!-- ── Filters ── -->
+<div class="filter-bar mb-20">
+  <span class="filter-label"><i class="fas fa-filter"></i> Filtrer</span>
+  <button *ngFor="let f of filters"
+          class="filter-pill"
+          [class.active]="currentFilter === f"
+          (click)="setFilter(f)">
+    {{ f === 'ALL' ? 'Tous' : f.replace('_', ' ') | titlecase }}
+  </button>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="padding:60px;text-align:center;">
+  <div class="spinner-orange"></div>
+  <div class="text-muted" style="margin-top:14px;">Chargement des incidents…</div>
+</div>
+
+<!-- ── Table Card ── -->
+<div *ngIf="!loading" class="card">
+
+  <div class="card-header">
+    <div class="card-title">
+      <div class="card-title-icon"><i class="fas fa-triangle-exclamation"></i></div>
+      Incidents —
+      <span class="text-orange">{{ currentFilter === 'ALL' ? 'Tous' : currentFilter.replace('_', ' ') }}</span>
+    </div>
+    <span class="text-muted" style="font-size:13px;">
+      Page {{ currentPage + 1 }} / {{ totalPages || 1 }}
+    </span>
+  </div>
+
+  <div *ngIf="incidents.length === 0" class="empty-state">
+    <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
+    <div class="empty-title">Aucun incident</div>
+    <div class="empty-text">Aucun incident ne correspond au filtre sélectionné.</div>
+  </div>
+
+  <div *ngIf="incidents.length > 0" class="data-table-wrapper">
+    <table class="orange-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Titre</th>
+          <th>Namespace / App</th>
+          <th>Sévérité</th>
+          <th>Statut</th>
+          <th>Source</th>
+          <th>Créé le</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let inc of incidents">
+          <td class="col-id">#{{ inc.id }}</td>
+          <td class="col-title">{{ inc.title }}</td>
+          <td>
+            <div style="line-height:1.3;">
+              <div style="font-size:13px;font-weight:600;color:var(--gray-800);">{{ inc.namespace || '—' }}</div>
+              <div style="font-size:12px;color:var(--gray-500);">{{ inc.app || '' }}</div>
+            </div>
+          </td>
+          <td>
+            <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">
+              {{ inc.severity }}
+            </span>
+          </td>
+          <td>
+            <span class="badge-status" [ngClass]="(inc.status || '').toLowerCase()">
+              {{ inc.status }}
+            </span>
+          </td>
+          <td>
+            <span class="badge-status" [ngClass]="inc.source === 'AI' ? 'ai' : 'prometheus'">
+              <i class="fas" [ngClass]="inc.source === 'AI' ? 'fa-brain' : 'fa-bell'"></i>
+              {{ inc.source }}
+            </span>
+          </td>
+          <td class="col-meta">{{ inc.createdAt | date:'dd/MM/yy HH:mm' }}</td>
+          <td class="col-actions">
+            <div style="display:flex;gap:5px;justify-content:flex-end;">
+              <button class="btn btn-ghost btn-xs" (click)="viewDetail(inc.id)" title="Voir le détail">
+                <i class="fas fa-eye"></i>
+              </button>
+              <ng-container *ngFor="let s of statusOptions">
+                <button *ngIf="inc.status !== s"
+                        class="btn btn-xs"
+                        [class.btn-success]="s === 'RESOLVED'"
+                        [class.btn-info]="s === 'IN_PROGRESS'"
+                        [class.btn-ghost]="s === 'OPEN'"
+                        [disabled]="updatingId === inc.id"
+                        (click)="updateStatus(inc, s)"
+                        [title]="s">
+                  {{ s === 'IN_PROGRESS' ? 'Démarrer' : s === 'RESOLVED' ? 'Résoudre' : 'Rouvrir' }}
+                </button>
+              </ng-container>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div *ngIf="totalPages > 1" class="pagination">
+    <span class="page-info">
+      {{ totalElements }} incident(s) · Page {{ currentPage + 1 }} sur {{ totalPages }}
+    </span>
+    <button class="page-btn" [disabled]="currentPage === 0" (click)="goToPage(0)">
+      <i class="fas fa-angles-left"></i>
+    </button>
+    <button class="page-btn" [disabled]="currentPage === 0" (click)="goToPage(currentPage - 1)">
+      <i class="fas fa-angle-left"></i>
+    </button>
+    <button *ngFor="let p of getPages()" class="page-btn" [class.active]="p === currentPage" (click)="goToPage(p)">
+      {{ p + 1 }}
+    </button>
+    <button class="page-btn" [disabled]="currentPage >= totalPages - 1" (click)="goToPage(currentPage + 1)">
+      <i class="fas fa-angle-right"></i>
+    </button>
+    <button class="page-btn" [disabled]="currentPage >= totalPages - 1" (click)="goToPage(totalPages - 1)">
+      <i class="fas fa-angles-right"></i>
+    </button>
+  </div>
+
+</div>

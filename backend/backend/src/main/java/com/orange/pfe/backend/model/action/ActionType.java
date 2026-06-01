@@ -1,0 +1,17 @@
+package com.orange.pfe.backend.model.action;
+
+public enum ActionType {
+    NOTIFICATION,
+    REMEDIATION,
+    INVESTIGATION,
+    RESTART_POD,
+    SCALE_DEPLOYMENT,
+    SCALE_DOWN,
+    ROLLBACK_DEPLOYMENT,
+    DELETE_CRASHLOOPING_PODS,
+    CORDON_NODE,
+    DRAIN_NODE,
+    FORCE_RECREATE_DEPLOYMENT,
+    RESTART_VM,
+    ESCALATION
+}

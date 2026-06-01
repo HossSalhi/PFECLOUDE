@@ -1,0 +1,195 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Fine-Tuning</span>
+    </div>
+    <h1>Fine-Tuning <span>MLOps</span></h1>
+    <div class="page-subtitle">Réentraînement du modèle XGBoost avec les nouveaux incidents résolus</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="loadStatus()" [disabled]="loading">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i> Rafraîchir
+    </button>
+  </div>
+</div>
+
+<!-- ── Warning Banner ── -->
+<div class="alert-banner warning mb-24">
+  <i class="fas fa-triangle-exclamation alert-icon"></i>
+  <div class="alert-text">
+    <strong>Avertissement :</strong> Cette opération prend <strong>2 à 3 heures</strong> et utilise
+    <strong>100% du GPU</strong> sur la VM ai-camunda. Ne pas démarrer si le système est en cours d'utilisation.
+  </div>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="padding:60px;text-align:center;">
+  <div class="spinner-orange"></div>
+</div>
+
+<ng-container *ngIf="!loading">
+
+  <!-- ── Status + Trigger ── -->
+  <div class="grid-2 mb-24">
+
+    <!-- Status Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-gauge"></i></div>
+          Statut Actuel
+        </div>
+        <span class="badge-status" [ngClass]="status?.running ? 'running' : 'idle'">
+          <i class="fas" [ngClass]="status?.running ? 'fa-spinner fa-spin' : 'fa-pause'"></i>
+          {{ status?.running ? 'En cours' : (status?.status || 'Inactif') }}
+        </span>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="text-muted">État</span>
+            <span style="font-weight:700;" [style.color]="status?.running ? 'var(--color-success)' : 'var(--gray-500)'">
+              {{ status?.running ? 'ACTIF' : 'INACTIF' }}
+            </span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="text-muted">Démarré à</span>
+            <span class="mono" style="font-size:13px;">
+              {{ status?.startedAt ? (status?.startedAt | date:'dd/MM HH:mm:ss') : '—' }}
+            </span>
+          </div>
+          <div>
+            <div class="text-muted" style="margin-bottom:6px;">Dernier log</div>
+            <div style="font-size:13px;background:var(--gray-100);padding:10px 12px;border-radius:6px;border-left:2px solid var(--orange-primary);color:var(--gray-700);">
+              {{ status?.lastLog || 'Aucun log disponible.' }}
+            </div>
+          </div>
+        </div>
+
+        <div *ngIf="status?.running" style="margin-top:16px;">
+          <div class="progress-bar-wrap">
+            <div class="progress-header">
+              <span class="progress-label">Fine-tuning en cours…</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" style="width:100%;animation:progressAnim 2.5s ease-in-out infinite alternate;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trigger Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-play"></i></div>
+          Démarrer un Fine-Tuning
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div *ngIf="triggerSuccess" class="alert-banner success mb-16">
+          <i class="fas fa-circle-check alert-icon"></i>
+          <div class="alert-text">{{ triggerSuccess }}</div>
+        </div>
+        <div *ngIf="triggerError" class="alert-banner danger mb-16">
+          <i class="fas fa-circle-xmark alert-icon"></i>
+          <div class="alert-text">{{ triggerError }}</div>
+        </div>
+
+        <div class="form-group">
+          <label>
+            <i class="fas fa-hashtag" style="color:var(--orange-primary);"></i>
+            Incidents minimum requis
+          </label>
+          <input type="number" class="form-control" [(ngModel)]="minIncidents"
+                 min="1" max="1000"
+                 [disabled]="status?.running || triggering">
+        </div>
+
+        <div class="form-check mb-20">
+          <input type="checkbox" [(ngModel)]="forceRun" id="forceCheck"
+                 [disabled]="status?.running || triggering">
+          <label for="forceCheck">Forcer (ignorer le compte minimum d'incidents)</label>
+        </div>
+
+        <button class="btn btn-orange w-full"
+                style="width:100%;padding:14px;font-size:15px;"
+                (click)="trigger()"
+                [disabled]="status?.running || triggering">
+          <span *ngIf="triggering" class="spinner-orange spinner-sm"></span>
+          <i *ngIf="!triggering && !status?.running" class="fas fa-rocket"></i>
+          <i *ngIf="status?.running && !triggering" class="fas fa-hourglass-half"></i>
+          <span *ngIf="!triggering && !status?.running">Lancer le Fine-Tuning</span>
+          <span *ngIf="triggering">Soumission en cours…</span>
+          <span *ngIf="status?.running && !triggering">Fine-Tuning en cours…</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Progress Stages ── -->
+  <div class="card mb-24">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-bars-progress"></i></div>
+        Étapes du Pipeline
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="stages">
+        <ng-container *ngFor="let stage of stages; let i = index">
+          <div class="stage" [ngClass]="stage.done ? 'done' : stage.active ? 'active' : ''">
+            <div class="stage-dot">
+              <i *ngIf="stage.done" class="fas fa-check" style="font-size:12px;"></i>
+              <i *ngIf="stage.active && !stage.done" class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
+              <span *ngIf="!stage.done && !stage.active" style="font-size:12px;">{{ i + 1 }}</span>
+            </div>
+            <div class="stage-label">{{ stage.label }}</div>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Log Terminal ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-terminal"></i></div>
+        Terminal de Logs Temps Réel
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="live-dot" *ngIf="status?.running">Streaming</span>
+        <button class="btn btn-ghost btn-sm" (click)="clearLogs()">
+          <i class="fas fa-trash"></i> Effacer
+        </button>
+      </div>
+    </div>
+    <div style="padding:0;">
+      <div class="log-terminal" #terminal>
+        <div *ngIf="logs.length === 0" class="log-line info">
+          <span class="log-timestamp">[--:--:--]</span>
+          <span class="log-level" style="color:#79C0FF;">INFO</span>
+          En attente de logs... Démarrez un job pour voir la sortie en temps réel.
+        </div>
+        <div *ngFor="let log of logs" class="log-line" [ngClass]="log.type">
+          <span class="log-timestamp">[{{ log.timestamp }}]</span>
+          {{ log.text }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+</ng-container>
+
+<style>
+@keyframes progressAnim {
+  from { width: 15%; }
+  to   { width: 92%; }
+}
+</style>

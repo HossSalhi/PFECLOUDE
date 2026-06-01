@@ -1,0 +1,40 @@
+# Build artifacts
+backend/backend/target/
+frontend/node_modules/
+frontend/.angular/
+frontend/dist/
+
+# ML model binaries (too large for git)
+model_base/
+model_artifacts/*.bin
+model_artifacts/*.gguf
+model_artifacts/*.safetensors
+model_artifacts/*.pt
+model_artifacts/*.pth
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-*/
+*.egg-info/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Claude session data
+.claude/
+
+# Secrets / local config
+*.env
+.env*
+*.local
+
+# Logs
+*.log
+logs/

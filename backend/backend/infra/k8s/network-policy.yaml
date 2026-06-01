@@ -1,0 +1,198 @@
+---
+# Allow external traffic (NodePort) to reach the frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-ingress
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow frontend to reach backend only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-backend
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pfe
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow backend to reach PostgreSQL (CNPG pods)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-postgres
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: postgres
+---
+# Default deny all ingress for pfe namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pfe
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow external (NodePort) traffic to reach the backend directly
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-backend
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+# Allow CNPG operator (in cnpg-system) to manage the postgres cluster
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cnpg-controller-to-postgres
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 9187
+---
+# Allow external Prometheus (monitoring VM 192.168.148.160) to scrape postgres exporter
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape-postgres
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.148.160/32
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187
+---
+# Backend egress: PostgreSQL + AI service + Camunda + monitoring stack + DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-egress
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # External VMs: AI service (8000), Camunda REST (8088), Camunda gRPC (26500),
+    # Prometheus (9090), Grafana (3000), Loki read (3100), Loki push (3101),
+    # Alertmanager (9093), Ollama LLM (11434), backend/frontend NodePort (8080),
+    # Kubernetes API (6443), HTTPS (443)
+    - ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8088
+        - protocol: TCP
+          port: 26500
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 3100
+        - protocol: TCP
+          port: 3101
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 11434
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

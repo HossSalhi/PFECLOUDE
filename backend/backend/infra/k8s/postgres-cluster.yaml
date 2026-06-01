@@ -1,0 +1,103 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: pfe
+spec:
+  affinity:
+    podAntiAffinityType: preferred
+  backup:
+    retentionPolicy: 7d
+    target: prefer-standby
+    barmanObjectStore:
+      destinationPath: s3://cnpg-backups/postgres
+      endpointURL: http://192.168.148.160:9000
+      serverName: postgres
+      s3Credentials:
+        accessKeyId:
+          name: cnpg-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cnpg-backup-s3
+          key: SECRET_ACCESS_KEY
+        region:
+          name: cnpg-backup-s3
+          key: AWS_REGION
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: pfe_db
+      owner: postgres
+      secret:
+        name: postgres-app
+  enablePDB: true
+  enableSuperuserAccess: false
+  failoverDelay: 0
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 2
+  logLevel: info
+  maxSyncReplicas: 0
+  minSyncReplicas: 0
+  monitoring:
+    customQueriesConfigMap:
+      - key: queries
+        name: cnpg-default-monitoring
+    disableDefaultQueries: false
+    enablePodMonitor: true
+  postgresGID: 26
+  postgresUID: 26
+  postgresql:
+    parameters:
+      archive_mode: "on"
+      archive_timeout: 5min
+      dynamic_shared_memory_type: posix
+      full_page_writes: "on"
+      log_destination: csvlog
+      log_directory: /controller/log
+      log_filename: postgres
+      log_rotation_age: "0"
+      log_rotation_size: "0"
+      log_truncate_on_rotation: "false"
+      logging_collector: "on"
+      max_parallel_workers: "32"
+      max_replication_slots: "32"
+      max_worker_processes: "32"
+      shared_memory_type: mmap
+      shared_preload_libraries: ""
+      ssl_max_protocol_version: TLSv1.3
+      ssl_min_protocol_version: TLSv1.3
+      wal_keep_size: 512MB
+      wal_level: logical
+      wal_log_hints: "on"
+      wal_receiver_timeout: 60s
+      wal_sender_timeout: 60s
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateMethod: restart
+  primaryUpdateStrategy: unsupervised
+  probes:
+    liveness:
+      isolationCheck:
+        connectionTimeout: 1000
+        enabled: true
+        requestTimeout: 1000
+  replicationSlots:
+    highAvailability:
+      enabled: true
+      slotPrefix: _cnpg_
+    synchronizeReplicas:
+      enabled: true
+    updateInterval: 30
+  resources: {}
+  smartShutdownTimeout: 180
+  startDelay: 3600
+  stopDelay: 1800
+  storage:
+    resizeInUseVolumes: true
+    size: 5Gi
+  superuserSecret:
+    name: postgres-superuser
+  switchoverDelay: 3600

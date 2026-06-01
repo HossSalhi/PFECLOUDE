@@ -1,0 +1,608 @@
+<div class="login-page">
+
+  <!-- ── Left Panel (Brand) ── -->
+  <div class="login-left">
+    <div class="login-left-content">
+
+      <!-- Orange official logo + HELIOS branding -->
+      <div class="login-logo">
+        <app-orange-logo [size]="72" style="filter:drop-shadow(0 6px 18px rgba(255,121,0,.6));"></app-orange-logo>
+        <div class="logo-divider"></div>
+        <div class="logo-text">
+          <div class="logo-brand">HELIOS</div>
+          <div class="logo-sub">AIOps Platform</div>
+        </div>
+      </div>
+
+      <div class="login-hero">
+        <h1 class="hero-title">HELIOS <span>Platform</span></h1>
+        <p class="hero-tagline">by Orange Tunisie</p>
+        <p class="hero-desc">
+          Surveillance omnisciente, remédiation autonome et intelligence
+          artificielle pour votre infrastructure Kubernetes.
+        </p>
+      </div>
+
+      <div class="login-features">
+        <div class="feature-item">
+          <div class="feature-icon"><i class="fas fa-eye"></i></div>
+          <div class="feature-text">
+            <div class="feature-title">Surveillance omnisciente</div>
+            <div class="feature-sub">Watch API Kubernetes & analyse temps réel</div>
+          </div>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon"><i class="fas fa-brain"></i></div>
+          <div class="feature-text">
+            <div class="feature-title">Intelligence artificielle</div>
+            <div class="feature-sub">XGBoost + LLM Ollama — décisions autonomes</div>
+          </div>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon"><i class="fas fa-bolt"></i></div>
+          <div class="feature-text">
+            <div class="feature-title">Auto-remédiation</div>
+            <div class="feature-sub">8 types d'actions Kubernetes en 0 clic</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="login-footer-brand">
+        <span>© 2026 Orange Tunisie · HELIOS AIOps Platform</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right Panel (Form) ── -->
+  <div class="login-right">
+    <div class="login-form-wrap">
+
+      <div class="login-form-header">
+        <div class="form-header-logo">
+          <app-orange-logo [size]="60" style="filter:drop-shadow(0 4px 14px rgba(255,121,0,.5));display:block;margin:0 auto;"></app-orange-logo>
+        </div>
+        <h2 class="form-title">HELIOS</h2>
+        <p class="form-subtitle">Accédez à votre espace de supervision</p>
+      </div>
+
+      <!-- Step 1 — Credentials -->
+      <form *ngIf="step === 'credentials'" (ngSubmit)="submitCredentials()" novalidate class="login-form">
+
+        <div class="form-group">
+          <label for="username">
+            <i class="fas fa-user"></i> Identifiant
+          </label>
+          <div class="input-wrap">
+            <input id="username" type="text" class="form-control"
+                   [(ngModel)]="username" name="username"
+                   autocomplete="username" required autofocus
+                   placeholder="Votre identifiant">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="password">
+            <i class="fas fa-lock"></i> Mot de passe
+          </label>
+          <div class="input-wrap">
+            <input id="password" [type]="showPassword ? 'text' : 'password'"
+                   class="form-control"
+                   [(ngModel)]="password" name="password"
+                   autocomplete="current-password" required
+                   placeholder="Votre mot de passe">
+            <button type="button" class="input-eye" (click)="showPassword = !showPassword">
+              <i [class]="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+            </button>
+          </div>
+        </div>
+
+        <div *ngIf="error" class="login-error">
+          <i class="fas fa-circle-exclamation"></i> {{ error }}
+        </div>
+
+        <button type="submit" class="btn-login" [disabled]="loading || !username || !password">
+          <span *ngIf="loading" class="login-spinner"></span>
+          <span *ngIf="!loading"><i class="fas fa-arrow-right-to-bracket"></i></span>
+          {{ loading ? 'Connexion en cours…' : 'Se connecter' }}
+        </button>
+
+        <div class="login-hint">
+          <i class="fas fa-shield-halved"></i>
+          Accès sécurisé — Authentification JWT + 2FA
+        </div>
+
+        <div class="login-extra-links">
+          <a routerLink="/forgot-password" class="extra-link">
+            <i class="fas fa-key"></i> Mot de passe oublié ?
+          </a>
+          <span class="separator">•</span>
+          <a routerLink="/register" class="extra-link">
+            <i class="fas fa-user-plus"></i> Créer un compte
+          </a>
+        </div>
+      </form>
+
+      <!-- Step 2 — TOTP 2FA -->
+      <form *ngIf="step === '2fa'" (ngSubmit)="submitTotp()" novalidate class="login-form">
+
+        <div class="totp-header">
+          <div class="totp-icon"><i class="fas fa-shield-halved"></i></div>
+          <h3>Vérification en deux étapes</h3>
+          <p>Scannez le QR code avec <strong>Google Authenticator</strong>, puis saisissez le code à 6 chiffres.</p>
+        </div>
+
+        <!-- QR Code affiché à chaque fois -->
+        <div *ngIf="qrCodeDataUri" class="qr-section">
+          <div class="qr-label"><i class="fas fa-qrcode"></i> Scanner avec Google Authenticator</div>
+          <img [src]="qrCodeDataUri" alt="QR Code 2FA" class="qr-image">
+          <div class="qr-hint">Ouvrez Google Authenticator → <strong>+</strong> → Scanner un QR code</div>
+        </div>
+
+        <div class="totp-divider" *ngIf="qrCodeDataUri">
+          <span>puis entrez le code</span>
+        </div>
+
+        <div class="form-group">
+          <label for="totpCode"><i class="fas fa-key"></i> Code de vérification</label>
+          <input id="totpCode" type="text" class="form-control totp-input"
+                 [(ngModel)]="totpCode" name="totpCode"
+                 maxlength="6" pattern="\d{6}"
+                 autocomplete="one-time-code"
+                 placeholder="000 000" required autofocus>
+        </div>
+
+        <div *ngIf="error" class="login-error">
+          <i class="fas fa-circle-exclamation"></i> {{ error }}
+        </div>
+
+        <button type="submit" class="btn-login" [disabled]="loading || totpCode.length !== 6">
+          <span *ngIf="loading" class="login-spinner"></span>
+          <span *ngIf="!loading"><i class="fas fa-check-circle"></i></span>
+          {{ loading ? 'Vérification…' : 'Confirmer' }}
+        </button>
+
+        <button type="button" class="btn-back" (click)="backToCredentials()">
+          <i class="fas fa-arrow-left"></i> Retour à la connexion
+        </button>
+      </form>
+
+    </div>
+  </div>
+
+</div>
+
+<style>
+/* ═══════════════════════════════════════════════════════
+   Login Page — AIOps Platform  ·  Enterprise Design v3
+   ═══════════════════════════════════════════════════════ */
+
+.login-page {
+  display: flex;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #F1F3F7;
+}
+
+/* ── Left panel ── */
+.login-left {
+  width: 500px;
+  flex-shrink: 0;
+  background: #0F1117;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+}
+
+/* Decorative glows */
+.login-left::before {
+  content: '';
+  position: absolute;
+  top: -100px; left: -100px;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(255,121,0,.16) 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.login-left::after {
+  content: '';
+  position: absolute;
+  bottom: -120px; right: -80px;
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(124,58,237,.10) 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Grid texture overlay */
+.login-left-content {
+  position: relative;
+  z-index: 1;
+  padding: 48px 52px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 60px;
+}
+
+.orange-logo-svg {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 18px rgba(255,121,0,.60));
+}
+
+.orange-logo-sm {
+  width: 60px;
+  height: 60px;
+  display: block;
+  margin: 0 auto;
+  filter: drop-shadow(0 4px 14px rgba(255,121,0,.50));
+}
+
+.logo-divider {
+  width: 1px;
+  height: 44px;
+  background: rgba(255,255,255,.18);
+  flex-shrink: 0;
+}
+
+.logo-text { line-height: 1.2; }
+.logo-brand { font-size: 17px; font-weight: 900; color: #fff; letter-spacing: 2px; text-transform: uppercase; }
+.logo-sub   { font-size: 10px; color: rgba(255,255,255,.4); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 1px; }
+
+.login-hero { margin-bottom: 52px; }
+
+.hero-title {
+  font-size: 44px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  margin-bottom: 18px;
+}
+.hero-title span {
+  background: linear-gradient(135deg, #FF7900, #FFB347);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-tagline {
+  font-size: 11px;
+  font-weight: 600;
+  color: #FF7900;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 14px;
+  margin-top: -10px;
+}
+
+.hero-desc {
+  font-size: 14.5px;
+  color: rgba(255,255,255,.48);
+  line-height: 1.75;
+  max-width: 340px;
+}
+
+.login-features {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: auto;
+}
+
+.feature-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  transition: background .2s;
+}
+.feature-item:hover { background: rgba(255,255,255,.07); }
+
+.feature-icon {
+  width: 36px; height: 36px;
+  background: rgba(255,121,0,.14);
+  border: 1px solid rgba(255,121,0,.28);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FF7900;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.feature-title { font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,.88); margin-bottom: 2px; }
+.feature-sub   { font-size: 12px;   color: rgba(255,255,255,.36); line-height: 1.4; }
+
+.login-footer-brand {
+  margin-top: 48px;
+  font-size: 11px;
+  color: rgba(255,255,255,.18);
+  padding-top: 20px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+
+/* ── Right panel ── */
+.login-right {
+  flex: 1;
+  background: #F1F3F7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.login-form-wrap {
+  width: 100%;
+  max-width: 420px;
+}
+
+.login-form-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.form-header-logo { margin-bottom: 18px; }
+
+.form-title {
+  font-size: 28px;
+  font-weight: 900;
+  color: #111827;
+  margin-bottom: 6px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.form-subtitle { font-size: 14px; color: #9CA3AF; }
+
+.login-form { display: flex; flex-direction: column; gap: 18px; }
+
+.login-form .form-group label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 7px;
+}
+.login-form .form-group label i { color: #FF7900; font-size: 11px; }
+
+.input-wrap { position: relative; }
+
+.input-wrap .form-control {
+  width: 100%;
+  height: 46px;
+  padding: 0 16px;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 10px;
+  font-size: 14.5px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  transition: all .2s;
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+.input-wrap .form-control:focus {
+  border-color: #FF7900;
+  box-shadow: 0 0 0 3px rgba(255,121,0,.12);
+}
+.input-wrap .form-control::placeholder { color: #D1D5DB; }
+
+.input-eye {
+  position: absolute;
+  right: 14px; top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #9CA3AF;
+  cursor: pointer;
+  font-size: 15px;
+  padding: 0;
+  transition: color .2s;
+}
+.input-eye:hover { color: #FF7900; }
+
+.login-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-left: 3px solid #DC2626;
+  color: #DC2626;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  background: #FF7900;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 4px 16px rgba(255,121,0,.35);
+  margin-top: 4px;
+  letter-spacing: .1px;
+}
+.btn-login:hover:not(:disabled) {
+  background: #E86400;
+  box-shadow: 0 8px 24px rgba(255,121,0,.45);
+  transform: translateY(-1px);
+}
+.btn-login:active:not(:disabled) { transform: translateY(0); }
+.btn-login:disabled { opacity: .5; cursor: not-allowed; }
+
+.login-spinner {
+  width: 18px; height: 18px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin-login .65s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin-login { to { transform: rotate(360deg); } }
+
+.login-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #9CA3AF;
+}
+.login-hint i { color: #22C55E; }
+
+.login-extra-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+.extra-link {
+  font-size: 12.5px;
+  color: #9CA3AF;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color .2s;
+  font-weight: 500;
+}
+.extra-link:hover { color: #FF7900; }
+.extra-link i { font-size: 11px; }
+.separator { color: #E5E7EB; }
+
+/* 2FA */
+.totp-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.totp-icon {
+  width: 58px; height: 58px;
+  background: rgba(255,121,0,.1);
+  border: 2px solid rgba(255,121,0,.25);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FF7900;
+  font-size: 22px;
+  margin: 0 auto 16px;
+}
+.totp-header h3 { font-size: 20px; font-weight: 800; color: #111827; margin-bottom: 6px; letter-spacing: -.4px; }
+.totp-header p  { font-size: 13px; color: #6B7280; line-height: 1.6; }
+
+.totp-input {
+  text-align: center !important;
+  font-size: 30px !important;
+  font-weight: 800 !important;
+  letter-spacing: 12px !important;
+  padding: 0 !important;
+  height: 64px !important;
+}
+
+.btn-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  background: transparent;
+  color: #6B7280;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+  font-family: 'Inter', sans-serif;
+}
+.btn-back:hover { border-color: #FF7900; color: #FF7900; background: rgba(255,121,0,.04); }
+
+/* QR Code */
+.qr-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #fff;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 14px;
+  padding: 20px 16px;
+  margin-bottom: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.qr-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #FF7900;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+}
+.qr-image {
+  width: 176px; height: 176px;
+  border-radius: 10px;
+  border: 3px solid #FF7900;
+  box-shadow: 0 6px 20px rgba(255,121,0,.20);
+}
+.qr-hint {
+  font-size: 11.5px;
+  color: #9CA3AF;
+  margin-top: 12px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.totp-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  font-size: 12px;
+}
+.totp-divider::before,
+.totp-divider::after { content: ''; flex: 1; height: 1px; background: #E5E7EB; }
+.totp-divider span   { color: #9CA3AF; white-space: nowrap; font-weight: 500; }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .login-left { display: none; }
+}
+@media (max-width: 600px) {
+  .login-right { padding: 24px 20px; }
+  .form-title  { font-size: 22px; }
+}
+</style>

@@ -1,0 +1,2186 @@
+from dataclasses import dataclass
+import math
+
+import numpy as np
+
+from app.models.loader import ModelBundle
+
+
+@dataclass
+class InferenceResult:
+    incident: bool
+    noise: bool
+    incident_type: str
+    severity: str
+    recommended_action: str
+    final_executable_action: str | None
+    execution_mode: str
+    recommendation_only_reason: str | None
+    confidence: float
+    summary: str
+    decision_explanation: str
+    chosen_plan_id: str | None
+    top_recommended_plans: list[dict[str, object]]
+    decision_context: dict[str, object]
+    rule_score: float
+    model_score: float | None
+
+
+@dataclass
+class PlanOption:
+    plan_id: str
+    title: str
+    strategy: str
+    recommended_action: str
+    executable_action: str
+    safe_to_execute: bool
+    execution_mode: str
+    rationale: str
+    reasons: list[str]
+    advantages: list[str]
+    tradeoffs: list[str]
+    risk_score: float
+    cost_score: float
+    blast_radius_score: float
+    historical_effectiveness: float
+    novelty_score: float
+    priority_score: float
+    requires_approval: bool
+
+
+class InferenceEngine:
+    def __init__(
+        self,
+        model_bundle: ModelBundle,
+        llm_model: str = "aiops-sre",
+        llm_fallback_model: str = "qwen2.5:3b",
+        llm_second_fallback_model: str = "qwen2:0.5b",
+    ) -> None:
+        self.model_bundle = model_bundle
+        self._DEFAULT_LLM_MODEL = llm_model
+        self._FALLBACK_LLM_MODEL = llm_fallback_model
+        self._SECOND_FALLBACK_LLM_MODEL = llm_second_fallback_model
+
+    @property
+    def model_loaded(self) -> bool:
+        return self.model_bundle.loaded
+
+    def predict(
+        self,
+        features: dict[str, float],
+        remediation_context: dict[str, object] | None = None,
+    ) -> InferenceResult:
+        safe_features = {
+            key: self._finite(value)
+            for key, value in features.items()
+        }
+        remediation_context = remediation_context or {}
+        rule_score = self._finite(safe_features.get("overall_risk_score", 0.0))
+        model_score = self._predict_incident_score(safe_features)
+
+        if model_score is None:
+            confidence = rule_score
+        else:
+            confidence = (0.6 * rule_score) + (0.4 * model_score)
+
+        confidence = max(0.0, min(1.0, self._finite(confidence)))
+        memory_bytes = self._finite(safe_features.get("memory_working_set_bytes", 0.0))
+        cpu_cores = self._finite(safe_features.get("cpu_usage_cores", 0.0))
+        node_not_ready = self._finite(safe_features.get("node_not_ready_count", 0.0))
+        monitoring_vm_up = self._finite(safe_features.get("monitoring_vm_up", 1.0), default=1.0)
+        ai_vm_up = self._finite(safe_features.get("ai_vm_up", 1.0), default=1.0)
+        latency_p95 = self._finite(safe_features.get("http_latency_p95_seconds", 0.0))
+        http_5xx_ratio = self._finite(safe_features.get("http_5xx_ratio", 0.0))
+        pod_restarts = self._finite(safe_features.get("pod_restarts_total", 0.0))
+        error_ratio = self._finite(safe_features.get("error_ratio", 0.0))
+        log_line_count = self._finite(safe_features.get("log_line_count", 0.0))
+        error_line_count = self._finite(safe_features.get("error_line_count", 0.0))
+        unavailable_replicas = self._finite(safe_features.get("unavailable_replicas", 0.0))
+        db_keyword_hits = self._finite(safe_features.get("db_keyword_hits", 0.0))
+        metric_risk_score = self._finite(safe_features.get("metric_risk_score", 0.0))
+        db_pool_pending = self._finite(safe_features.get("db_pool_pending", 0.0))
+        db_pool_usage_ratio = self._finite(safe_features.get("db_pool_usage_ratio", 0.0))
+
+        # --- LLM full analysis via Ollama (local model) ---
+        # Includes past incident outcomes for in-context learning. Falls back to rule-based on failure.
+        llm_result = self._full_llm_predict(safe_features, remediation_context)
+
+        if llm_result is not None:
+            incident = llm_result["incident"]
+            incident_type = llm_result["incident_type"]
+            severity = llm_result["severity"]
+            confidence = llm_result["confidence"]
+            action = llm_result["recommended_action"]
+            execution_mode = llm_result["execution_mode"]
+            decision_explanation = llm_result["explanation"]
+            noise = not incident
+            final_executable_action = (
+                self._map_executable_action(action) if execution_mode == "AUTO_EXECUTE_CANDIDATE" else None
+            )
+            recommendation_only_reason = (
+                None if execution_mode == "AUTO_EXECUTE_CANDIDATE"
+                else f"LLM confidence {confidence:.2f} below auto-execute threshold (0.55) — human review required."
+            )
+            chosen_plan_id = None
+            ranked_plans = self._build_ranked_plans(
+                safe_features, incident_type, severity, confidence, incident, remediation_context
+            )
+            if ranked_plans:
+                chosen_plan_id = ranked_plans[0].plan_id
+        else:
+            # --- Rule-based fallback ---
+            incident = confidence >= 0.45
+            if not incident and node_not_ready >= 1.0 and confidence >= 0.30:
+                incident = True
+            if not incident and monitoring_vm_up < 0.5 and confidence >= 0.35:
+                incident = True
+            if not incident and ai_vm_up < 0.5 and confidence >= 0.35:
+                incident = True
+            if not incident and unavailable_replicas >= 1.0 and confidence >= 0.05:
+                incident = True
+            if not incident and memory_bytes >= 700_000_000 and confidence >= 0.10:
+                incident = True
+            if not incident and cpu_cores >= 0.55 and confidence >= 0.10:
+                incident = True
+            if not incident and pod_restarts >= 1.0 and confidence >= 0.05:
+                incident = True
+            if (
+                not incident
+                and db_keyword_hits >= 3.0
+                and (metric_risk_score >= 0.16 or self._finite(safe_features.get("overall_risk_score", 0.0)) >= 0.08)
+                and confidence >= 0.35
+            ):
+                incident = True
+            if (
+                not incident
+                and db_keyword_hits >= 8.0
+                and (metric_risk_score >= 0.20 or self._finite(safe_features.get("overall_risk_score", 0.0)) >= 0.12)
+                and confidence >= 0.10
+            ):
+                incident = True
+            if not incident and db_pool_pending >= 1.0:
+                incident = True
+            if not incident and db_pool_usage_ratio >= 0.75:
+                incident = True
+            if (not incident and db_keyword_hits >= 2.0 and db_pool_usage_ratio >= 0.45 and confidence >= 0.15):
+                incident = True
+            if not incident and http_5xx_ratio >= 0.15 and confidence >= 0.10:
+                incident = True
+            if not incident and latency_p95 >= 1.0 and confidence >= 0.05:
+                incident = True
+            if (
+                not incident
+                and error_ratio >= 0.08
+                and (error_line_count >= 3.0 or log_line_count >= 5.0)
+                and confidence >= 0.35
+            ):
+                incident = True
+            if (
+                not incident
+                and self._finite(safe_features.get("warning_line_count", 0.0)) >= 5.0
+                and error_ratio >= 0.05
+                and confidence >= 0.30
+            ):
+                incident = True
+            noise = not incident
+            incident_type = self._classify_incident_type(safe_features, incident)
+            severity = self._predict_severity(safe_features, incident, confidence, incident_type)
+            ranked_plans = self._build_ranked_plans(
+                safe_features, incident_type, severity, confidence, incident, remediation_context
+            )
+            if ranked_plans:
+                selected_index = self._select_plan_index(ranked_plans, remediation_context, incident_type)
+                if selected_index > 0:
+                    chosen_plan = ranked_plans[selected_index]
+                    ranked_plans = [chosen_plan] + [p for i, p in enumerate(ranked_plans) if i != selected_index]
+                else:
+                    chosen_plan = ranked_plans[0]
+                action = chosen_plan.recommended_action
+                final_executable_action = (
+                    chosen_plan.executable_action if chosen_plan.execution_mode == "AUTO_EXECUTE_CANDIDATE" else None
+                )
+                execution_mode = chosen_plan.execution_mode
+                recommendation_only_reason = (
+                    None if execution_mode == "AUTO_EXECUTE_CANDIDATE"
+                    else self._build_recommendation_only_reason(chosen_plan, confidence, severity)
+                )
+                chosen_plan_id = chosen_plan.plan_id
+                decision_explanation = self._build_decision_explanation(chosen_plan, ranked_plans, remediation_context)
+            else:
+                action = self._predict_action(safe_features, incident_type, severity, incident)
+                final_executable_action = None
+                execution_mode = "RECOMMEND_ONLY"
+                recommendation_only_reason = self._build_no_incident_explanation(confidence)
+                chosen_plan_id = None
+                decision_explanation = self._build_no_incident_explanation(confidence)
+
+        summary = self._build_summary(incident, incident_type, severity, confidence)
+        decision_context = self._build_decision_context(
+            incident_type,
+            severity,
+            confidence,
+            ranked_plans,
+            execution_mode,
+            remediation_context,
+        )
+
+        return InferenceResult(
+            incident=incident,
+            noise=noise,
+            incident_type=incident_type,
+            severity=severity,
+            recommended_action=action,
+            final_executable_action=final_executable_action,
+            execution_mode=execution_mode,
+            recommendation_only_reason=recommendation_only_reason,
+            confidence=round(self._finite(confidence), 4),
+            summary=summary,
+            decision_explanation=decision_explanation,
+            chosen_plan_id=chosen_plan_id,
+            top_recommended_plans=[
+                {
+                    "rank": index + 1,
+                    "plan_id": plan.plan_id,
+                    "title": plan.title,
+                    "strategy": plan.strategy,
+                    "recommended_action": plan.recommended_action,
+                    "executable_action": plan.executable_action,
+                    "safe_to_execute": plan.safe_to_execute,
+                    "execution_mode": plan.execution_mode,
+                    "rationale": plan.rationale,
+                    "reasons": plan.reasons,
+                    "advantages": plan.advantages,
+                    "tradeoffs": plan.tradeoffs,
+                    "risk_score": round(plan.risk_score, 4),
+                    "cost_score": round(plan.cost_score, 4),
+                    "blast_radius_score": round(plan.blast_radius_score, 4),
+                    "historical_effectiveness": round(plan.historical_effectiveness, 4),
+                    "novelty_score": round(plan.novelty_score, 4),
+                    "priority_score": round(plan.priority_score, 4),
+                    "requires_approval": plan.requires_approval,
+                }
+                for index, plan in enumerate(ranked_plans[:5])
+            ],
+            decision_context=decision_context,
+            rule_score=round(self._finite(rule_score), 4),
+            model_score=round(model_score, 4) if model_score is not None else None,
+        )
+
+    def _predict_incident_score(self, features: dict[str, float]) -> float | None:
+        if not self.model_bundle.loaded:
+            return None
+
+        model = self.model_bundle.incident_model
+        vector = self._to_vector(features)
+        if model is None:
+            return None
+
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba(vector)
+            score = float(probs[0][1]) if probs.shape[1] > 1 else float(probs[0][0])
+            return self._finite_or_none(score)
+
+        if hasattr(model, "predict"):
+            prediction = model.predict(vector)
+            return self._finite_or_none(float(prediction[0]))
+
+        return None
+
+    def _predict_severity(
+        self,
+        features: dict[str, float],
+        incident: bool,
+        confidence: float,
+        incident_type: str,
+    ) -> str:
+        if not incident:
+            return "LOW"
+
+        severity_override = self._classify_severity_from_features(features, confidence, incident_type)
+        if severity_override is not None:
+            return severity_override
+
+        label = self._predict_label(
+            model=self.model_bundle.severity_model,
+            features=features,
+            labels=self.model_bundle.severity_labels,
+        )
+        if label in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+            return label
+        return self._classify_severity(confidence)
+
+    def _predict_action(
+        self,
+        features: dict[str, float],
+        incident_type: str,
+        severity: str,
+        incident: bool,
+    ) -> str:
+        if not incident:
+            return "NO_ACTION"
+
+        override = self._recommend_action(features, incident_type, severity, incident)
+        if incident_type in {
+            "VM_DOWN",
+            "AVAILABILITY_DROP",
+            "CPU_STRESS",
+            "MEMORY_STRESS",
+            "RESTART_LOOP",
+            "APPLICATION_ERROR_STORM",
+            "DATABASE_CONNECTIVITY",
+            "GENERAL_DEGRADATION",
+        }:
+            return override
+
+        label = self._predict_label(
+            model=self.model_bundle.action_model,
+            features=features,
+            labels=self.model_bundle.action_labels,
+        )
+        if label:
+            return label
+
+        return self._recommend_action(features, incident_type, severity, incident)
+
+    def _predict_label(
+        self,
+        model,
+        features: dict[str, float],
+        labels: list[str] | None,
+    ) -> str | None:
+        if model is None:
+            return None
+
+        vector = self._to_vector(features)
+        if not hasattr(model, "predict"):
+            return None
+
+        prediction = model.predict(vector)
+        if len(prediction) == 0:
+            return None
+
+        raw = prediction[0]
+
+        if labels:
+            try:
+                index = int(raw)
+                if 0 <= index < len(labels):
+                    return str(labels[index]).upper()
+            except Exception:
+                pass
+
+        if isinstance(raw, str):
+            return raw.upper()
+
+        classes = getattr(model, "classes_", None)
+        if classes is not None:
+            try:
+                class_value = classes[int(raw)]
+                return str(class_value).upper()
+            except Exception:
+                return str(raw).upper()
+
+        return str(raw).upper()
+
+    def _to_vector(self, features: dict[str, float]) -> np.ndarray:
+        feature_order = self.model_bundle.feature_order or sorted(features.keys())
+        # Build lookup tolerant of feature_ prefix: training CSV uses feature_cpu_usage_cores
+        # but inference produces cpu_usage_cores — support both by trying the stripped key.
+        lookup: dict[str, float] = {}
+        for key, value in features.items():
+            lookup[key] = value
+            lookup[f"feature_{key}"] = value  # also register with prefix
+        return np.array(
+            [[self._finite(lookup.get(key, 0.0)) for key in feature_order]],
+            dtype=float,
+        )
+
+    @staticmethod
+    def _finite(value: float | int | None, default: float = 0.0) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return default
+        return numeric if math.isfinite(numeric) else default
+
+    @classmethod
+    def _finite_or_none(cls, value: float | int | None) -> float | None:
+        numeric = cls._finite(value, default=float("nan"))
+        return numeric if math.isfinite(numeric) else None
+
+    def _full_llm_predict(
+        self,
+        features: dict[str, float],
+        remediation_context: dict[str, object] | None = None,
+    ) -> dict | None:
+        """
+        LLM-based incident analysis with in-context auto-learning.
+        - Uses qwen2.5:3b (local Ollama) as primary model for true reasoning on raw metrics.
+        - Falls back to qwen2:0.5b if the primary model is unavailable.
+        - Injects past incident outcomes from the learning DB into the prompt.
+        - Short-circuits with NO_INCIDENT when all signals are within normal ranges.
+        Returns a dict with all decision fields, or None (triggers rule-based fallback).
+        """
+        try:
+            import httpx as _httpx
+            import json as _json
+            import os
+
+            memory_gb = features.get("memory_working_set_bytes", 0.0) / 1_000_000_000
+            cpu = features.get("cpu_usage_cores", 0.0)
+            http_5xx = features.get("http_5xx_ratio", 0.0)
+            latency = features.get("http_latency_p95_seconds", 0.0)
+            restarts = features.get("pod_restarts_total", 0.0)
+            unavailable = features.get("unavailable_replicas", 0.0)
+            db_hits = features.get("db_keyword_hits", 0.0)
+            restart_hits = features.get("restart_keyword_hits", 0.0)
+            db_pending = features.get("db_pool_pending", 0.0)
+            risk = features.get("overall_risk_score", 0.0)
+
+            def _lv(val: float, hi: float, crit: float) -> str:
+                if val >= crit:
+                    return "CRITICAL"
+                if val >= hi:
+                    return "HIGH"
+                return "NORMAL"
+
+            cpu_lv = _lv(cpu, 0.55, 0.85)
+            mem_lv = _lv(memory_gb, 0.70, 1.20)
+            err_lv = _lv(http_5xx, 0.08, 0.30)
+            lat_lv = _lv(latency, 0.50, 2.00)
+            rst_lv = "HIGH" if restarts >= 2.0 else ("ELEVATED" if restarts >= 1.0 else "NORMAL")
+            unavail_lv = "HIGH" if unavailable >= 1.0 else "NORMAL"
+            db_lv = "HIGH" if db_hits >= 5.0 else ("ELEVATED" if db_hits >= 2.0 else "NORMAL")
+            dbp_lv = "HIGH" if db_pending >= 1.0 else "NORMAL"
+            restart_kw_lv = "HIGH" if restart_hits >= 2.0 else ("ELEVATED" if restart_hits >= 1.0 else "NORMAL")
+
+            signals = {
+                "cpu": cpu_lv, "memory": mem_lv, "http_5xx": err_lv,
+                "latency": lat_lv, "restarts": rst_lv, "unavailable_replicas": unavail_lv,
+                "db_keyword_hits": db_lv, "db_pool_pending": dbp_lv,
+                "restart_keyword_hits": restart_kw_lv,
+            }
+            elevated = {k: v for k, v in signals.items() if v != "NORMAL"}
+
+            # Short-circuit: skip LLM if all signals are normal.
+            if not elevated:
+                return {
+                    "incident": False,
+                    "incident_type": "NO_INCIDENT",
+                    "severity": "LOW",
+                    "confidence": 0.10,
+                    "recommended_action": "NO_ACTION",
+                    "execution_mode": "RECOMMEND_ONLY",
+                    "explanation": "All Kubernetes signals are within normal ranges — no incident detected.",
+                }
+
+            # Build past-experience context from auto-learning DB (in-context learning).
+            past_exp = ""
+            ctx = remediation_context or {}
+            past_incidents = ctx.get("past_incidents") if isinstance(ctx, dict) else None
+            if past_incidents and isinstance(past_incidents, list) and len(past_incidents) > 0:
+                lines = []
+                for p in past_incidents[:8]:
+                    outcome = "RESOLVED" if p.get("success") else "FAILED"
+                    mins = p.get("minutes", "?")
+                    lines.append(
+                        f"  - {p.get('incident_type','?')}: action={p.get('action','-')} "
+                        f"→ {outcome} in {mins}min (app={p.get('app','-')})"
+                    )
+                past_exp = "\n\nLearned from past incidents on this cluster:\n" + "\n".join(lines)
+
+            signal_summary = ", ".join(f"{k}={v}" for k, v in elevated.items())
+
+            system_msg = (
+                "You are an expert Kubernetes SRE AI. "
+                "Analyze metrics and logs to detect ANY infrastructure or application incident. "
+                "You are NOT limited to predefined types — invent a precise incident type if needed. "
+                "Output ONLY a valid JSON object. No text outside the JSON."
+            )
+            user_msg = (
+                f"Elevated signals: {signal_summary}\n"
+                f"Raw metrics: cpu={cpu:.3f} cores, memory={memory_gb:.2f}GB, "
+                f"http_5xx={http_5xx:.3f}, latency_p95={latency:.3f}s, "
+                f"restarts={restarts:.0f}, unavailable={unavailable:.0f}, "
+                f"db_hits={db_hits:.0f}, db_pool_pending={db_pending:.0f}, "
+                f"overall_risk={risk:.3f}"
+                f"{past_exp}\n\n"
+                "Output JSON:\n"
+                '{"incident": true|false, "incident_type": "SNAKE_CASE_TYPE", '
+                '"severity": "LOW|MEDIUM|HIGH|CRITICAL", "confidence": 0.50-0.95, '
+                '"recommended_action": "SNAKE_CASE_ACTION", '
+                '"executable": "RESTART_POD|SCALE_DEPLOYMENT|INVESTIGATE|ESCALATE|NO_ACTION", '
+                '"auto_execute": true|false, "explanation": "one sentence"}\n\n'
+                "incident_type: Use the most precise name. Examples: CPU_STRESS, MEMORY_LEAK, "
+                "NETWORK_PARTITION, DNS_FAILURE, CERTIFICATE_EXPIRY, IMAGE_PULL_FAILURE, "
+                "THREAD_POOL_EXHAUSTION, CACHE_FAILURE, STORAGE_PRESSURE, "
+                "NODE_PRESSURE, SECURITY_ANOMALY, or ANY other accurate name.\n"
+                "recommended_action: Free text describing the best action.\n"
+                "executable: RESTART_POD (restart the failing pod), "
+                "SCALE_DEPLOYMENT (add replicas), "
+                "INVESTIGATE (collect diagnostics, no cluster change), "
+                "ESCALATE (alert human operator), "
+                "NO_ACTION (nothing needed).\n"
+                "auto_execute=true only if: confidence>=0.55 AND severity=HIGH "
+                "AND executable is RESTART_POD or SCALE_DEPLOYMENT."
+            )
+
+            # Try models in order: aiops-sre → qwen2.5:3b → qwen2:0.5b
+            model = os.environ.get("AIOPS_LLM_MODEL", self._DEFAULT_LLM_MODEL)
+            raw = self._call_ollama(model, system_msg, user_msg, num_predict=250)
+            if raw is None:
+                raw = self._call_ollama(self._FALLBACK_LLM_MODEL, system_msg, user_msg, num_predict=200)
+            if raw is None:
+                raw = self._call_ollama(self._SECOND_FALLBACK_LLM_MODEL, system_msg, user_msg, num_predict=120)
+            if raw is None:
+                return None
+
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start == -1 or end == 0:
+                return None
+
+            data = _json.loads(raw[start:end])
+
+            # Accept ANY incident type the LLM returns — no restriction.
+            # Sanitize: uppercase, replace spaces/hyphens with underscores.
+            incident_type = str(data.get("incident_type", "GENERAL_DEGRADATION"))
+            incident_type = incident_type.upper().replace(" ", "_").replace("-", "_").strip("_") or "GENERAL_DEGRADATION"
+            if not incident_type or incident_type == "UNKNOWN":
+                incident_type = "GENERAL_DEGRADATION"
+
+            # Accept free-form recommended_action from the LLM.
+            action = str(data.get("recommended_action", "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"))
+            action = action.upper().replace(" ", "_").replace("-", "_").strip("_") or "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
+
+            # Map to executable: derive from LLM's "executable" field or infer from action text.
+            executable_hint = str(data.get("executable", "")).upper()
+            executable = self._resolve_executable(executable_hint, action)
+
+            confidence = float(data.get("confidence", 0.5))
+            confidence = max(0.0, min(1.0, confidence))
+
+            incident = bool(data.get("incident", False))
+            auto_execute = bool(data.get("auto_execute", False))
+            severity = str(data.get("severity", "MEDIUM")).upper()
+            if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+                severity = "MEDIUM"
+            explanation = str(data.get("explanation", "LLM analysis completed."))
+
+            # Sanity: cap severity if all signals are only ELEVATED
+            max_signal_rank = max(
+                {"NORMAL": 0, "ELEVATED": 1, "HIGH": 2, "CRITICAL": 3}.get(v, 0)
+                for v in elevated.values()
+            )
+            if max_signal_rank <= 1 and severity == "CRITICAL":
+                severity = "MEDIUM"
+
+            if incident_type == "NO_INCIDENT":
+                incident = False
+            if not incident:
+                incident_type = "NO_INCIDENT"
+                action = "NO_ACTION"
+                executable = "NO_ACTION"
+                auto_execute = False
+
+            # Auto-execute only for safe executable actions (RESTART_POD, SCALE_DEPLOYMENT).
+            # For INVESTIGATE / ESCALATE / unknown → always RECOMMEND_ONLY (safe).
+            safe_auto = (
+                auto_execute
+                and confidence >= 0.55
+                and severity not in {"CRITICAL"}
+                and executable in {"RESTART_POD", "SCALE_DEPLOYMENT"}
+            )
+            execution_mode = "AUTO_EXECUTE_CANDIDATE" if safe_auto else "RECOMMEND_ONLY"
+
+            return {
+                "incident": incident,
+                "incident_type": incident_type,
+                "severity": severity,
+                "confidence": confidence,
+                "recommended_action": action,
+                "execution_mode": execution_mode,
+                "explanation": explanation,
+            }
+
+        except Exception:
+            return None
+
+    @staticmethod
+    def _resolve_executable(hint: str, action: str) -> str:
+        """
+        Resolves the safe executable action from the LLM hint or action text.
+        Only RESTART_POD and SCALE_DEPLOYMENT are auto-executable.
+        Anything else becomes INVESTIGATE (collect info, no cluster change).
+        """
+        # Trust explicit hint from LLM if it's a known safe value
+        if hint in {"RESTART_POD", "SCALE_DEPLOYMENT", "INVESTIGATE", "ESCALATE", "NO_ACTION"}:
+            return hint
+
+        # Infer from action text
+        a = action.upper()
+        if any(k in a for k in ("RESTART", "ROLLBACK", "FAILOVER", "RECYCLE", "BOUNCE")):
+            return "RESTART_POD"
+        if any(k in a for k in ("SCALE", "REBALANCE", "SHIFT_TRAFFIC", "ADD_REPLICA")):
+            return "SCALE_DEPLOYMENT"
+        if any(k in a for k in ("ESCALAT", "ALERT", "PAGE", "NOTIFY_HUMAN")):
+            return "ESCALATE"
+        if a in {"NO_ACTION", "NONE"}:
+            return "NO_ACTION"
+        # Default: investigate (safe — no cluster change)
+        return "INVESTIGATE"
+
+    @staticmethod
+    def _call_ollama(model: str, system_msg: str, user_msg: str, num_predict: int = 200) -> str | None:
+        """Call a local Ollama model. Returns the raw text response or None on failure."""
+        try:
+            import httpx as _httpx
+            with _httpx.Client(timeout=90.0) as _http:
+                resp = _http.post(
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "stream": False,
+                        "options": {"temperature": 0.0, "num_predict": num_predict},
+                    },
+                )
+            if resp.status_code != 200:
+                return None
+            resp_json = resp.json()
+            return (
+                resp_json.get("message", {}).get("content", "")
+                or resp_json.get("response", "")
+            ).strip() or None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _classify_incident_type(features: dict[str, float], incident: bool) -> str:
+        if not incident:
+            return "NO_INCIDENT"
+
+        log_line_count = float(features.get("log_line_count", 0.0))
+        error_line_count = float(features.get("error_line_count", 0.0))
+        restart_hits = float(features.get("restart_keyword_hits", 0.0))
+        restarts = float(features.get("pod_restarts_total", 0.0))
+        unavailable = float(features.get("unavailable_replicas", 0.0))
+        cpu = float(features.get("cpu_usage_cores", 0.0))
+        memory = float(features.get("memory_working_set_bytes", 0.0))
+        latency = float(features.get("http_latency_p95_seconds", 0.0))
+        http_5xx = float(features.get("http_5xx_ratio", 0.0))
+        error_ratio = float(features.get("error_ratio", 0.0))
+        db_hits = float(features.get("db_keyword_hits", 0.0))
+        db_pool_pending = float(features.get("db_pool_pending", 0.0))
+        db_pool_usage_ratio = float(features.get("db_pool_usage_ratio", 0.0))
+        if features.get("node_not_ready_count", 0.0) >= 1.0:
+            return "VM_DOWN"
+        if features.get("monitoring_vm_up", 1.0) < 0.5:
+            return "VM_DOWN"
+        if features.get("ai_vm_up", 1.0) < 0.5:
+            return "VM_DOWN"
+        # Pool exhaustion: pending threads or near-full pool with no restarts and all replicas available.
+        # The unavailable <= 0.0 guard prevents false DATABASE_CONNECTIVITY during RESTART_LOOP:
+        # when a pod crashes, the surviving pod's pool temporarily spikes (all traffic redirected),
+        # but kube_deployment_status_replicas_unavailable reaches 1 before pod_restarts_total is scraped.
+        if (
+            db_pool_pending >= 1.0
+            and restarts < 1.0
+            and unavailable <= 0.0
+        ):
+            return "DATABASE_CONNECTIVITY"
+        if (
+            db_pool_usage_ratio >= 0.75
+            and restarts < 1.0
+            and http_5xx < 0.30
+            and unavailable <= 0.0
+        ):
+            return "DATABASE_CONNECTIVITY"
+        if (
+            restarts >= 2.0
+            and http_5xx < 0.35
+            and db_hits < 5.0
+        ):
+            return "RESTART_LOOP"
+        if (
+            restarts >= 1.0
+            and latency >= 3.0
+            and http_5xx < 0.25
+            and error_ratio < 0.10
+            and db_hits < 5.0
+        ):
+            return "RESTART_LOOP"
+        if (
+            restarts >= 1.0
+            and (restart_hits >= 1.0 or unavailable > 0.0)
+            and http_5xx < 0.10
+            and db_hits < 5.0
+        ):
+            return "RESTART_LOOP"
+        if (
+            restarts >= 1.0
+            and (restart_hits >= 2.0 or (restarts >= 2.0 and unavailable > 0.0))
+            and db_hits < 8.0
+            and http_5xx < 0.30
+        ):
+            return "RESTART_LOOP"
+        # Crash-on-demand with DB reconnect artifacts (db_hits 5-10) and crash keywords.
+        # restart_hits >= 1 discriminates from pool exhaustion (which has restart_hits=0).
+        if (
+            restarts >= 1.0
+            and restart_hits >= 1.0
+            and db_hits < 12.0
+            and http_5xx < 0.20
+        ):
+            return "RESTART_LOOP"
+        if (
+            cpu >= 0.55
+            and memory < 900_000_000
+            and unavailable <= 0.0
+            and db_hits == 0.0
+            and http_5xx < 0.05
+            and error_ratio < 0.35
+        ):
+            return "CPU_STRESS"
+        if (
+            memory >= 900_000_000
+            and http_5xx < 0.10
+            and unavailable <= 0.0
+            and db_hits < 6.0
+            and restarts < 1.0
+            and (error_ratio < 0.30 or cpu < 0.35)
+        ):
+            return "MEMORY_STRESS"
+        # Unavailable replicas are definitive availability signal — win over error-storm and
+        # database-connectivity bias even when http_5xx is elevated (pods down → 5xx from queued
+        # requests) or when Loki has residual db_keyword_hits from the previous incident window.
+        if (
+            unavailable > 0.0
+            and http_5xx < 0.40
+            and restarts < 1.0
+        ):
+            return "AVAILABILITY_DROP"
+        # Strong DB keyword signal with moderate http errors beats error-storm classification.
+        if (
+            db_hits >= 5.0
+            and http_5xx < 0.30
+            and restarts < 1.0
+            and unavailable <= 0.0
+            and not (latency >= 5.0 and error_ratio == 0.0 and http_5xx == 0.0)
+        ):
+            return "DATABASE_CONNECTIVITY"
+        if http_5xx >= 0.08:
+            return "APPLICATION_ERROR_STORM"
+        if (
+            db_hits >= 3.0
+            and http_5xx < 0.07
+            and (
+                error_ratio >= 0.05
+                or http_5xx >= 0.03
+                or features.get("metric_risk_score", 0.0) >= 0.20
+                or features.get("overall_risk_score", 0.0) >= 0.08
+            )
+            and not (latency >= 5.0 and error_ratio == 0.0 and http_5xx == 0.0)
+        ):
+            return "DATABASE_CONNECTIVITY"
+        if (
+            unavailable > 0.0
+            and latency >= 1.0
+            and http_5xx < 0.40
+            and db_hits == 0.0
+            and restarts < 2.0
+        ):
+            return "AVAILABILITY_DROP"
+        if (
+            unavailable > 0.0
+            and restarts < 1.0
+            and db_hits == 0.0
+            and memory < 950_000_000
+            and http_5xx < 0.35
+        ):
+            return "AVAILABILITY_DROP"
+        if http_5xx >= 0.18:
+            return "APPLICATION_ERROR_STORM"
+        if (
+            error_ratio >= 0.22
+            and (error_line_count >= 3.0 or log_line_count >= 5.0)
+        ):
+            return "APPLICATION_ERROR_STORM"
+        if unavailable > 0.0:
+            return "AVAILABILITY_DROP"
+        if (
+            latency >= 5.0
+            and 0.08 <= error_ratio < 0.22
+            and http_5xx < 0.08
+            and db_hits <= 8.0
+            and cpu < 0.55
+            and memory < 900_000_000
+            and restarts < 1.0
+        ):
+            return "AVAILABILITY_DROP"
+        if (
+            latency >= 1.2
+            and features.get("overall_risk_score", 0.0) >= 0.15
+            and features.get("metric_risk_score", 0.0) >= 0.18
+            and http_5xx < 0.03
+            and error_ratio < 0.06
+            and features.get("warning_line_count", 0.0) <= 4.0
+            and db_hits == 0.0
+            and restarts < 1.0
+            and cpu < 0.35
+            and memory < 850_000_000
+            and unavailable < 1.0
+        ):
+            return "AVAILABILITY_DROP"
+        if (
+            features.get("overall_risk_score", 0.0) >= 0.30
+            and features.get("metric_risk_score", 0.0) >= 0.20
+            and features.get("log_line_count", 0.0) <= 2.0
+            and features.get("error_line_count", 0.0) <= 2.0
+            and restarts >= 1.0
+            and http_5xx < 0.02
+            and latency < 0.50
+            and db_hits == 0.0
+            and cpu < 0.20
+            and memory < 850_000_000
+        ):
+            return "AVAILABILITY_DROP"
+        if (
+            latency >= 3.0
+            and http_5xx < 0.05
+            and error_ratio < 0.05
+        ):
+            return "GENERAL_DEGRADATION"
+        if (
+            latency >= 1.0
+            or features.get("warning_line_count", 0.0) >= 8.0
+            or error_ratio >= 0.10
+        ):
+            return "GENERAL_DEGRADATION"
+
+        return "GENERAL_DEGRADATION"
+
+    @staticmethod
+    def _classify_severity(confidence: float) -> str:
+        if confidence >= 0.85:
+            return "CRITICAL"
+        if confidence >= 0.70:
+            return "HIGH"
+        if confidence >= 0.50:
+            return "MEDIUM"
+        return "LOW"
+
+    @staticmethod
+    def _recommend_action(
+        features: dict[str, float],
+        incident_type: str,
+        severity: str,
+        incident: bool,
+    ) -> str:
+        if not incident:
+            return "NO_ACTION"
+
+        node_not_ready = float(features.get("node_not_ready_count", 0.0))
+        unavailable = float(features.get("unavailable_replicas", 0.0))
+        cpu = float(features.get("cpu_usage_cores", 0.0))
+        memory = float(features.get("memory_working_set_bytes", 0.0))
+        restarts = float(features.get("pod_restarts_total", 0.0))
+        error_ratio = float(features.get("error_ratio", 0.0))
+        http_5xx_ratio = float(features.get("http_5xx_ratio", 0.0))
+        latency = float(features.get("http_latency_p95_seconds", 0.0))
+        db_hits = float(features.get("db_keyword_hits", 0.0))
+        monitoring_vm_up = float(features.get("monitoring_vm_up", 1.0))
+        ai_vm_up = float(features.get("ai_vm_up", 1.0))
+
+        if incident_type == "VM_DOWN":
+            if monitoring_vm_up < 0.5 and ai_vm_up < 0.5:
+                return "ESCALATE_MULTI_VM_OUTAGE_AND_FREEZE_AUTOMATION"
+            if node_not_ready >= 1.0 and unavailable >= 1.0:
+                return "ESCALATE_NODE_OUTAGE_AND_FAILOVER_WORKLOAD"
+            return (
+                "ESCALATE_VM_OUTAGE_AND_FAILOVER"
+                if severity in {"HIGH", "CRITICAL"}
+                else "ESCALATE_NODE_OUTAGE_AND_REBALANCE"
+            )
+        if incident_type == "AVAILABILITY_DROP":
+            if http_5xx_ratio >= 0.15:
+                return "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT"
+            if unavailable >= 2.0:
+                return "REBALANCE_REPLICAS_AND_SCALE_DEPLOYMENT"
+            return (
+                "SCALE_DEPLOYMENT_AND_REBALANCE"
+                if severity in {"HIGH", "CRITICAL"}
+                else "RESTART_FAILED_WORKLOAD_AND_REBALANCE"
+            )
+        if incident_type == "CPU_STRESS":
+            if cpu >= 0.90 and latency >= 1.0:
+                return "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE"
+            if latency >= 2.0:
+                return "RESTART_POD_AND_CAPTURE_CPU_PROFILE"
+            return (
+                "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE"
+                if severity in {"HIGH", "CRITICAL"}
+                else "RESTART_POD_AND_CAPTURE_CPU_PROFILE"
+            )
+        if incident_type == "MEMORY_STRESS":
+            if memory >= 1_400_000_000 and restarts >= 1.0:
+                return "SCALE_MEMORY_LIMITS_AND_RESTART_POD"
+            if memory >= 1_100_000_000:
+                return "RESTART_POD_AND_SCALE_MEMORY_LIMITS"
+            return (
+                "RESTART_POD_AND_SCALE_MEMORY_LIMITS"
+                if severity in {"HIGH", "CRITICAL"}
+                else "RESTART_POD_AND_TUNE_MEMORY_LIMITS"
+            )
+        if incident_type == "RESTART_LOOP":
+            if restarts >= 3.0 and error_ratio >= 0.10:
+                return "ROLLBACK_RECENT_CHANGE_AND_RESTART"
+            if restarts >= 2.0 and latency >= 2.0:
+                return "RESTART_POD_AND_INVESTIGATE"
+            return (
+                "ROLLBACK_RECENT_CHANGE_AND_RESTART"
+                if severity in {"HIGH", "CRITICAL"}
+                else "RESTART_POD_AND_INVESTIGATE"
+            )
+        if incident_type == "APPLICATION_ERROR_STORM":
+            if http_5xx_ratio >= 0.30 or error_ratio >= 0.30:
+                return "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC"
+            if error_ratio >= 0.25:
+                return "SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE"
+            return (
+                "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC"
+                if severity in {"HIGH", "CRITICAL"}
+                else "RESTART_POD_AND_INVESTIGATE"
+            )
+        if incident_type == "DATABASE_CONNECTIVITY":
+            if db_hits >= 8.0 and latency >= 0.60:
+                return "FAILOVER_DATABASE_AND_RESTART_WORKLOAD"
+            if http_5xx_ratio >= 0.03 or error_ratio >= 0.08:
+                return "CHECK_DATABASE_CONNECTION_POOL_AND_RESTART"
+            return (
+                "FAILOVER_DATABASE_AND_RESTART_WORKLOAD"
+                if severity in {"HIGH", "CRITICAL"}
+                else "CHECK_DB_CONNECTIVITY_AND_RESTART"
+            )
+        if incident_type == "GENERAL_DEGRADATION":
+            if latency >= 4.0:
+                return "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
+            if error_ratio >= 0.08:
+                return "TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE"
+            return (
+                "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
+                if severity in {"HIGH", "CRITICAL"}
+                else "INVESTIGATE_DEPENDENCY_LATENCY"
+            )
+
+        if severity in {"HIGH", "CRITICAL"}:
+            return "ESCALATE_TO_HUMAN"
+        return "INVESTIGATE"
+
+    @staticmethod
+    def _classify_severity_from_features(
+        features: dict[str, float],
+        confidence: float,
+        incident_type: str,
+    ) -> str | None:
+        node_not_ready = float(features.get("node_not_ready_count", 0.0))
+        unavailable = float(features.get("unavailable_replicas", 0.0))
+        cpu = float(features.get("cpu_usage_cores", 0.0))
+        memory = float(features.get("memory_working_set_bytes", 0.0))
+        restarts = float(features.get("pod_restarts_total", 0.0))
+        error_ratio = float(features.get("error_ratio", 0.0))
+        http_5xx_ratio = float(features.get("http_5xx_ratio", 0.0))
+        latency = float(features.get("http_latency_p95_seconds", 0.0))
+        db_hits = float(features.get("db_keyword_hits", 0.0))
+
+        if incident_type == "VM_DOWN":
+            if node_not_ready >= 2.0 or confidence >= 0.80:
+                return "CRITICAL"
+            if node_not_ready >= 1.0:
+                return "HIGH"
+            monitoring_vm_up = float(features.get("monitoring_vm_up", 1.0))
+            ai_vm_up = float(features.get("ai_vm_up", 1.0))
+            if monitoring_vm_up < 0.5 or ai_vm_up < 0.5:
+                return "HIGH"
+        if incident_type == "AVAILABILITY_DROP":
+            if unavailable >= 2.0:
+                return "CRITICAL"
+            if unavailable >= 1.0 and confidence >= 0.60:
+                return "HIGH"
+            return "MEDIUM"
+        if incident_type == "CPU_STRESS":
+            if cpu >= 0.90 and latency >= 1.0:
+                return "HIGH"
+            if cpu >= 0.65:
+                return "MEDIUM"
+        if incident_type == "MEMORY_STRESS":
+            if memory >= 1_250_000_000:
+                return "HIGH"
+            if memory >= 900_000_000:
+                return "MEDIUM"
+        if incident_type == "RESTART_LOOP":
+            if restarts >= 3.0:
+                return "HIGH"
+            return "MEDIUM"
+        if incident_type == "APPLICATION_ERROR_STORM":
+            if http_5xx_ratio >= 0.35 or error_ratio >= 0.35:
+                return "CRITICAL"
+            if http_5xx_ratio >= 0.20 or error_ratio >= 0.20:
+                return "HIGH"
+            return "MEDIUM"
+        if incident_type == "DATABASE_CONNECTIVITY":
+            if db_hits >= 8.0 or http_5xx_ratio >= 0.20:
+                return "HIGH"
+            return "MEDIUM"
+        if incident_type == "GENERAL_DEGRADATION":
+            if latency >= 2.5:
+                return "HIGH"
+            return "MEDIUM"
+
+        return None
+
+    @staticmethod
+    def _build_summary(
+        incident: bool,
+        incident_type: str,
+        severity: str,
+        confidence: float,
+    ) -> str:
+        if not incident:
+            return f"No reliable incident signal detected (confidence={confidence:.2f})."
+        if incident_type == "VM_DOWN":
+            return (
+                f"Probable VM or node outage detected: type={incident_type}, "
+                f"severity={severity}, confidence={confidence:.2f}."
+            )
+        return (
+            f"Potential incident detected: type={incident_type}, severity={severity}, "
+            f"confidence={confidence:.2f}."
+        )
+
+    def _build_ranked_plans(
+        self,
+        features: dict[str, float],
+        incident_type: str,
+        severity: str,
+        confidence: float,
+        incident: bool,
+        remediation_context: dict[str, object],
+    ) -> list[PlanOption]:
+        if not incident:
+            return []
+
+        candidates = self._plan_candidates(features, incident_type, severity, remediation_context)
+        recent_counts = self._nested_int_map(remediation_context, "recent_action_counts")
+        recent_failures = self._nested_int_map(remediation_context, "recent_failed_action_counts")
+        recent_successes = self._nested_int_map(remediation_context, "recent_success_action_counts")
+        baseline_action = self._recommend_action(features, incident_type, severity, incident)
+
+        ranked: list[PlanOption] = []
+        strategy_nonce = self._context_int(remediation_context, "strategy_nonce")
+        for index, candidate in enumerate(candidates):
+            executable = self._map_executable_action(candidate["recommended_action"])
+            risk = float(candidate["risk_score"])
+            cost = float(candidate["cost_score"])
+            blast = float(candidate["blast_radius_score"])
+            base_alignment = float(candidate["alignment_score"])
+            use_count = float(recent_counts.get(executable, 0))
+            fail_count = float(recent_failures.get(executable, 0))
+            success_count = float(recent_successes.get(executable, 0))
+            history_total = max(use_count, 1.0)
+            historical_effectiveness = max(0.0, min(1.0, (success_count + 1.0) / (history_total + fail_count + 1.0)))
+            novelty = max(0.15, 1.0 - min(use_count / 5.0, 0.85))
+            confidence_bonus = confidence * 0.35
+            severity_bonus = 0.15 if severity in {"HIGH", "CRITICAL"} else 0.05
+            safety_penalty = (risk * 0.16) + (blast * 0.16) + (cost * 0.08)
+            history_penalty = fail_count * 0.12
+            stability_bonus = historical_effectiveness * 0.18
+            novelty_bonus = novelty * 0.08
+            family_consistency_bonus = (
+                0.11 if str(candidate["recommended_action"]).upper() == baseline_action.upper() else 0.0
+            )
+            dynamic_bonus = self._variation_bonus(
+                strategy_nonce,
+                incident_type,
+                str(candidate["recommended_action"]),
+                index,
+            )
+            priority_score = (
+                base_alignment
+                + confidence_bonus
+                + severity_bonus
+                + stability_bonus
+                + novelty_bonus
+                + family_consistency_bonus
+                + dynamic_bonus
+                - safety_penalty
+                - history_penalty
+            )
+            safe_to_execute = self._is_safe_to_execute(executable, risk, blast, severity)
+            execution_mode = self._select_execution_mode(
+                safe_to_execute,
+                executable,
+                confidence,
+                severity,
+                risk,
+                blast,
+                fail_count,
+                remediation_context,
+            )
+
+            reasons = list(candidate["reasons"])
+            advantages = list(candidate["advantages"])
+            tradeoffs = list(candidate["tradeoffs"])
+            if fail_count > 0:
+                reasons.append(f"Penalized by {int(fail_count)} recent failed {executable} attempts.")
+            elif success_count > 0:
+                reasons.append(f"Boosted by {int(success_count)} recent successful {executable} remediations.")
+            if novelty >= 0.8:
+                reasons.append("Boosted for novelty to avoid repeating the same remediation pattern.")
+            if blast <= 0.35:
+                reasons.append("Preferred for lower blast radius on the live platform.")
+            if execution_mode == "RECOMMEND_ONLY":
+                reasons.append("Returned as recommendation only because the safety gate did not approve autonomous execution.")
+
+            ranked.append(
+                PlanOption(
+                    plan_id=f"{incident_type.lower()}-plan-{index + 1}",
+                    title=str(candidate["title"]),
+                    strategy=str(candidate["strategy"]),
+                    recommended_action=str(candidate["recommended_action"]),
+                    executable_action=executable,
+                    safe_to_execute=safe_to_execute,
+                    execution_mode=execution_mode,
+                    rationale=str(candidate["rationale"]),
+                    reasons=reasons,
+                    advantages=advantages,
+                    tradeoffs=tradeoffs,
+                    risk_score=risk,
+                    cost_score=cost,
+                    blast_radius_score=blast,
+                    historical_effectiveness=historical_effectiveness,
+                    novelty_score=novelty,
+                    priority_score=priority_score,
+                    requires_approval=False,
+                )
+            )
+
+        ranked.sort(key=lambda plan: plan.priority_score, reverse=True)
+
+        deduped: list[PlanOption] = []
+        seen_actions: set[str] = set()
+        for plan in ranked:
+            action_key = plan.recommended_action.upper()
+            if action_key in seen_actions:
+                continue
+            seen_actions.add(action_key)
+            deduped.append(plan)
+            if len(deduped) >= 5:
+                break
+
+        return deduped
+
+    def _plan_candidates(
+        self,
+        features: dict[str, float],
+        incident_type: str,
+        severity: str,
+        remediation_context: dict[str, object],
+    ) -> list[dict[str, object]]:
+        latency = float(features.get("http_latency_p95_seconds", 0.0))
+        errors = float(features.get("http_5xx_ratio", 0.0))
+        error_ratio = float(features.get("error_ratio", 0.0))
+        restarts = float(features.get("pod_restarts_total", 0.0))
+        unavailable = float(features.get("unavailable_replicas", 0.0))
+        db_hits = float(features.get("db_keyword_hits", 0.0))
+        cpu = float(features.get("cpu_usage_cores", 0.0))
+        memory = float(features.get("memory_working_set_bytes", 0.0))
+        warning_count = float(features.get("warning_line_count", 0.0))
+        node_not_ready = float(features.get("node_not_ready_count", 0.0))
+        monitoring_vm_up = float(features.get("monitoring_vm_up", 1.0))
+        ai_vm_up = float(features.get("ai_vm_up", 1.0))
+        recent_failures = self._nested_int_map(remediation_context, "recent_failed_action_counts")
+        restart_failures = float(recent_failures.get("RESTART_POD", 0))
+        scale_failures = float(recent_failures.get("SCALE_DEPLOYMENT", 0))
+        escalation_failures = float(recent_failures.get("ESCALATION", 0))
+
+        if incident_type == "VM_DOWN":
+            primary_vm_action = (
+                "ESCALATE_MULTI_VM_OUTAGE_AND_FREEZE_AUTOMATION"
+                if node_not_ready >= 2.0 or monitoring_vm_up < 0.5 or ai_vm_up < 0.5
+                else "ESCALATE_VM_OUTAGE_AND_FAILOVER"
+            )
+            secondary_vm_action = (
+                "ESCALATE_NODE_OUTAGE_AND_REBALANCE"
+                if escalation_failures <= 0
+                else "ESCALATE_NODE_OUTAGE_AND_FAILOVER_WORKLOAD"
+            )
+            candidates = [
+                self._candidate(
+                    primary_vm_action,
+                    "Escalate outage and preserve surviving capacity",
+                    "Confirm the node outage, keep the automation surface tight, and shift critical capacity away from the failed worker.",
+                    "A worker-level outage needs operator-visible containment before broader orchestration starts moving workloads aggressively.",
+                    0.24 if primary_vm_action.endswith("FREEZE_AUTOMATION") else 0.30,
+                    0.22 if primary_vm_action.endswith("FREEZE_AUTOMATION") else 0.35,
+                    0.12 if primary_vm_action.endswith("FREEZE_AUTOMATION") else 0.25,
+                    0.95 if primary_vm_action.endswith("FREEZE_AUTOMATION") else 0.93,
+                ),
+                self._candidate(
+                    secondary_vm_action,
+                    "Re-place the most exposed workload slice",
+                    "Treat the event as a node-level failure and move the most exposed workloads onto the healthiest remaining capacity.",
+                    "This path is stronger when user-facing pods were concentrated on the lost worker and simple failover is not enough.",
+                    0.38,
+                    0.45,
+                    0.40,
+                    0.89,
+                ),
+                self._candidate(
+                    "ESCALATE_MULTI_VM_OUTAGE_AND_FREEZE_AUTOMATION",
+                    "Freeze risky automation and widen diagnosis",
+                    "Pause high-impact automation, preserve evidence, and verify whether the failure is broader than one worker.",
+                    "This alternative is safer when control-plane or VM-level instability may be spreading.",
+                    0.20,
+                    0.20,
+                    0.10,
+                    0.76,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "AVAILABILITY_DROP":
+            primary_availability_action = (
+                "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT"
+                if errors >= 0.08 or latency >= 6.0
+                else "SCALE_DEPLOYMENT_AND_REBALANCE"
+            )
+            secondary_availability_action = (
+                "REBALANCE_REPLICAS_AND_SCALE_DEPLOYMENT"
+                if unavailable >= 1.0 or scale_failures <= 0
+                else "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
+            )
+            candidates = [
+                self._candidate(
+                    primary_availability_action,
+                    "Shift traffic and rebuild healthy capacity",
+                    "Move traffic toward healthy replicas and increase safe capacity before user impact grows.",
+                    "Replica loss is best handled by rebalancing load and recovering spare capacity.",
+                    0.42,
+                    0.54,
+                    0.48,
+                    0.91,
+                ),
+                self._candidate(
+                    secondary_availability_action,
+                    "Rebalance replicas around the failing segment",
+                    "Stabilize the weakest readiness segment first, then decide whether traffic relief or replica recovery is the cleaner next move.",
+                    "This alternative is useful when the drop looks partial and we want to avoid an unnecessarily broad rollout.",
+                    0.32,
+                    0.34,
+                    0.26,
+                    0.86,
+                ),
+                self._candidate(
+                    "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "Capture diagnostics before scaling further",
+                    "Freeze the topology briefly, collect rollout and readiness evidence, then scale based on what is confirmed.",
+                    "Useful when availability is dropping but the root cause is still ambiguous.",
+                    0.18,
+                    0.22,
+                    0.14,
+                    0.66,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "CPU_STRESS":
+            primary_cpu_action = (
+                "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE"
+                if cpu >= 0.85 or (latency >= 1.5 and scale_failures <= 0)
+                else "RESTART_POD_AND_CAPTURE_CPU_PROFILE"
+            )
+            candidates = [
+                self._candidate(
+                    primary_cpu_action,
+                    "Stabilize hot paths and capture CPU evidence",
+                    "Reduce immediate pressure, then collect a CPU profile while the signal is still hot.",
+                    "CPU saturation is often recoverable quickly, but we still want forensic evidence for the next cycle.",
+                    0.33,
+                    0.44,
+                    0.28,
+                    0.92,
+                ),
+                self._candidate(
+                    "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT",
+                    "Deflect burst traffic and add headroom",
+                    "Trim pressure on the overloaded replica set before saturation cascades into user-facing latency.",
+                    "This is stronger when the overload is demand-driven rather than crash-driven.",
+                    0.39,
+                    0.52,
+                    0.41,
+                    0.81,
+                ),
+                self._candidate(
+                    "TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE",
+                    "Verify whether CPU pressure is secondary",
+                    "Check whether downstream latency is amplifying CPU usage before treating the pod as the root cause.",
+                    "Helpful when CPU pressure may be a symptom rather than the source of the incident.",
+                    0.17,
+                    0.18,
+                    0.12,
+                    0.63,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "MEMORY_STRESS":
+            primary_memory_action = (
+                "SCALE_MEMORY_LIMITS_AND_RESTART_POD"
+                if memory >= 1_200_000_000 or restarts >= 1.0
+                else "RESTART_POD_AND_SCALE_MEMORY_LIMITS"
+            )
+            candidates = [
+                self._candidate(
+                    primary_memory_action,
+                    "Recycle the leaky pod and expand memory guardrails",
+                    "Restart the stressed workload and widen memory headroom only where the signal is strongest.",
+                    "Memory pressure often needs both immediate cleanup and a safer ceiling for the next workload cycle.",
+                    0.34,
+                    0.47,
+                    0.30,
+                    0.91,
+                ),
+                self._candidate(
+                    "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "Snapshot heap and allocation evidence",
+                    "Capture heap and allocation clues before the next restart erases the signal.",
+                    "This preserves root-cause evidence when the service is still barely alive.",
+                    0.19,
+                    0.21,
+                    0.11,
+                    0.74,
+                ),
+                self._candidate(
+                    "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT",
+                    "Offload pressure before recycling the pod",
+                    "Move traffic off the hottest replica set so the restart has a lower chance of flapping.",
+                    "Lowering pressure first can reduce repeat crashes during recovery.",
+                    0.31,
+                    0.49,
+                    0.36,
+                    0.77,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "RESTART_LOOP":
+            primary_restart_action = (
+                "ROLLBACK_RECENT_CHANGE_AND_RESTART"
+                if restarts >= 3.0 or errors >= 0.10
+                else "RESTART_POD_AND_INVESTIGATE"
+            )
+            candidates = [
+                self._candidate(
+                    primary_restart_action,
+                    "Break the restart loop and isolate the trigger",
+                    "Reset the failing workload, then inspect the trigger pattern before the controller recreates the failure.",
+                    "A repeat restart loop strongly suggests either a bad change or a poisoned dependency path.",
+                    0.40,
+                    0.36,
+                    0.26,
+                    0.93,
+                ),
+                self._candidate(
+                    "SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE",
+                    "Move users to a calmer revision first",
+                    "Protect user traffic with the most stable revision while the failing replica set is analyzed.",
+                    "Useful when the crash loop is isolated to one revision or rollout cohort.",
+                    0.29,
+                    0.42,
+                    0.21,
+                    0.84,
+                ),
+                self._candidate(
+                    "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "Preserve crash context before another restart",
+                    "Collect last-failure context and dependency traces before another restart removes evidence.",
+                    "This lowers blast radius but trades slower recovery for stronger root-cause confidence.",
+                    0.14,
+                    0.16,
+                    0.09,
+                    0.65,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "APPLICATION_ERROR_STORM":
+            primary_error_action = (
+                "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC"
+                if errors >= 0.25 or error_ratio >= 0.30
+                else "SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE"
+            )
+            candidates = [
+                self._candidate(
+                    primary_error_action,
+                    "Protect users first, then narrow the bad revision",
+                    "Redirect users away from the unstable path and isolate the release or dependency behind the 5xx burst.",
+                    "When errors spike hard, preserving user traffic is usually worth more than an early restart.",
+                    0.37,
+                    0.46,
+                    0.29,
+                    0.94,
+                ),
+                self._candidate(
+                    "RESTART_POD_AND_INVESTIGATE",
+                    "Attempt a fast local recovery",
+                    "Restart the failing workload slice while capturing error markers and request symptoms.",
+                    "This is cheaper, but it is less robust if the fault comes from a bad release or configuration.",
+                    0.45,
+                    0.28,
+                    0.24,
+                    0.78,
+                ),
+                self._candidate(
+                    "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "Freeze the signal for forensic debugging",
+                    "Capture traces, failing payload shapes, and dependency status before mutating the platform state.",
+                    "Useful when the blast radius is acceptable and you need stronger evidence before rollback.",
+                    0.16,
+                    0.18,
+                    0.10,
+                    0.68,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "DATABASE_CONNECTIVITY":
+            primary_db_action = (
+                "FAILOVER_DATABASE_AND_RESTART_WORKLOAD"
+                if db_hits >= 10.0 or (db_hits >= 6.0 and latency >= 0.60)
+                else "CHECK_DATABASE_CONNECTION_POOL_AND_RESTART"
+            )
+            candidates = [
+                self._candidate(
+                    primary_db_action,
+                    "Stabilize the data path before it cascades",
+                    "Prioritize database path recovery, then recycle the application side only if the dependency path is stable enough.",
+                    "The incident is DB-shaped, so treating the connection path first usually beats a blind pod restart.",
+                    0.43,
+                    0.58,
+                    0.44,
+                    0.95,
+                ),
+                self._candidate(
+                    "CHECK_DB_CONNECTIVITY_AND_RESTART",
+                    "Repair the application side of the DB path",
+                    "Validate pool pressure and stale sessions, then restart only the application edge if the database itself is reachable.",
+                    "This is cheaper than failover when the database is healthy but the pool is wedged.",
+                    0.30,
+                    0.31,
+                    0.20,
+                    0.86,
+                ),
+                self._candidate(
+                    "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "Hold the line and capture DB evidence",
+                    "Snapshot pool pressure, failed SQL symptoms, and readiness transitions before making the dependency topology move.",
+                    "This slows intervention but increases confidence when DB ownership spans multiple teams.",
+                    0.18,
+                    0.19,
+                    0.08,
+                    0.62,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+        if incident_type == "GENERAL_DEGRADATION":
+            primary = (
+                "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT"
+                if latency >= 5.0 and warning_count <= 3.0 and cpu < 0.40 and memory < 850_000_000
+                else "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE" if latency >= 4.0
+                else "TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE"
+            )
+            candidates = [
+                self._candidate(
+                    primary,
+                    "Trace the slow path before forcing recovery",
+                    "Inspect dependency latency, queue pressure, and saturation clues before choosing a disruptive platform move.",
+                    "General degradation is broad by nature, so diagnosis quality matters as much as recovery speed.",
+                    0.20,
+                    0.22,
+                    0.10,
+                    0.90,
+                ),
+                self._candidate(
+                    "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT",
+                    "Buy time with controlled capacity relief",
+                    "Add safe headroom and push traffic toward calmer replicas while the slow path is isolated.",
+                    "Useful when latency is hurting users and the root cause is still being narrowed.",
+                    0.34,
+                    0.46,
+                    0.30,
+                    0.79,
+                ),
+                self._candidate(
+                    "RESTART_POD_AND_INVESTIGATE",
+                    "Try a low-cost local reset",
+                    "Restart the most suspicious workload slice if the degradation looks sticky rather than systemic.",
+                    "Cheaper than broader intervention, but weaker if the slowdown is downstream.",
+                    0.39,
+                    0.24,
+                    0.18,
+                    0.68,
+                ),
+            ]
+            return self._extend_with_creative_candidates(
+                self._annotate_candidates(candidates, incident_type, features),
+                incident_type,
+                features,
+                severity,
+                remediation_context,
+            )
+
+        candidates = [
+            self._candidate(
+                "INVESTIGATE",
+                "Investigate the anomaly",
+                "Collect evidence first and defer execution to the operator.",
+                "Fallback plan used when the incident family remains ambiguous.",
+                0.12,
+                0.10,
+                0.06,
+                0.50,
+            )
+        ]
+        return self._extend_with_creative_candidates(
+            self._annotate_candidates(candidates, incident_type, features),
+            incident_type,
+            features,
+            severity,
+            remediation_context,
+        )
+
+    def _annotate_candidates(
+        self,
+        candidates: list[dict[str, object]],
+        incident_type: str,
+        features: dict[str, float],
+    ) -> list[dict[str, object]]:
+        signal = self._signal_phrase(features, incident_type)
+        annotated: list[dict[str, object]] = []
+        for candidate in candidates:
+            enriched = dict(candidate)
+            reasons = list(candidate.get("reasons", []))
+            reasons.append(f"Context signal at decision time: {signal}.")
+            enriched["reasons"] = reasons
+            annotated.append(enriched)
+        return annotated
+
+    def _candidate(
+        self,
+        recommended_action: str,
+        title: str,
+        strategy: str,
+        rationale: str,
+        risk_score: float,
+        cost_score: float,
+        blast_radius_score: float,
+        alignment_score: float,
+    ) -> dict[str, object]:
+        return {
+            "recommended_action": recommended_action,
+            "title": title,
+            "strategy": strategy,
+            "rationale": rationale,
+            "advantages": self._advantages_for_candidate(recommended_action, risk_score, blast_radius_score),
+            "tradeoffs": self._tradeoffs_for_candidate(recommended_action, cost_score, blast_radius_score),
+            "risk_score": risk_score,
+            "cost_score": cost_score,
+            "blast_radius_score": blast_radius_score,
+            "alignment_score": alignment_score,
+            "reasons": [
+                f"Targets the {recommended_action.lower()} path for the detected incident family.",
+                "Balances fast mitigation with bounded platform automation and advisory fallback when risk is uncertain.",
+            ],
+        }
+
+    def _extend_with_creative_candidates(
+        self,
+        base_candidates: list[dict[str, object]],
+        incident_type: str,
+        features: dict[str, float],
+        severity: str,
+        remediation_context: dict[str, object],
+    ) -> list[dict[str, object]]:
+        candidates = list(base_candidates)
+        while len(candidates) < 5:
+            candidates.append(
+                self._creative_candidate(
+                    incident_type=incident_type,
+                    features=features,
+                    severity=severity,
+                    remediation_context=remediation_context,
+                    variant_index=len(candidates) - len(base_candidates),
+                )
+            )
+        return candidates[:5]
+
+    def _creative_candidate(
+        self,
+        incident_type: str,
+        features: dict[str, float],
+        severity: str,
+        remediation_context: dict[str, object],
+        variant_index: int,
+    ) -> dict[str, object]:
+        palette = self._creative_palette(incident_type)
+        nonce = self._context_int(remediation_context, "strategy_nonce")
+        flavor = palette[(nonce + variant_index) % len(palette)]
+        recommended_action = str(flavor["recommended_action"])
+        signal = self._signal_phrase(features, incident_type)
+        strategy = (
+            f"{flavor['verb']} while {flavor['anchor']}, then {flavor['follow_up']} "
+            f"once the platform confirms the {signal} signal is stabilizing."
+        )
+        title = f"{flavor['title_prefix']} through {flavor['lens']}"
+        rationale = (
+            f"This creative advisory path explores the incident through a {flavor['lens']} lens "
+            f"so operators can compare a fresh mitigation angle against the safer defaults."
+        )
+        risk = min(0.55, 0.18 + (0.05 * variant_index) + (0.03 if severity in {'HIGH', 'CRITICAL'} else 0.0))
+        cost = min(0.58, 0.20 + (0.06 * variant_index))
+        blast = min(0.42, 0.14 + (0.05 * variant_index))
+        alignment = max(0.64, 0.79 - (0.04 * variant_index))
+        return self._candidate(
+            recommended_action,
+            title,
+            strategy,
+            rationale,
+            risk,
+            cost,
+            blast,
+            alignment,
+        )
+
+    @staticmethod
+    def _creative_palette(incident_type: str) -> list[dict[str, str]]:
+        if incident_type == "VM_DOWN":
+            return [
+                {
+                    "recommended_action": "ESCALATE_VM_OUTAGE_AND_FAILOVER",
+                    "title_prefix": "Protect surviving capacity",
+                    "lens": "node-failover containment",
+                    "verb": "preserve healthy worker capacity",
+                    "anchor": "confirming the outage is truly node-scoped",
+                    "follow_up": "re-seat only the most exposed workloads",
+                },
+                {
+                    "recommended_action": "ESCALATE_NODE_OUTAGE_AND_REBALANCE",
+                    "title_prefix": "Re-balance the topology",
+                    "lens": "placement hygiene",
+                    "verb": "rebuild workload placement on stable nodes",
+                    "anchor": "preventing the scheduler from oscillating around the bad worker",
+                    "follow_up": "restore anti-affinity and traffic balance",
+                },
+            ]
+        if incident_type == "AVAILABILITY_DROP":
+            return [
+                {
+                    "recommended_action": "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT",
+                    "title_prefix": "Relieve user pressure",
+                    "lens": "capacity relief",
+                    "verb": "steer demand onto healthier replicas",
+                    "anchor": "buying time before the failing slice recovers",
+                    "follow_up": "rebuild spare capacity in the clean zone",
+                },
+                {
+                    "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "title_prefix": "Pin down the failing slice",
+                    "lens": "readiness forensics",
+                    "verb": "freeze the readiness story while it is still visible",
+                    "anchor": "verifying whether the drop is rollout-driven or dependency-driven",
+                    "follow_up": "apply the narrowest recovery branch",
+                },
+            ]
+        if incident_type == "CPU_STRESS":
+            return [
+                {
+                    "recommended_action": "RESTART_POD_AND_CAPTURE_CPU_PROFILE",
+                    "title_prefix": "Catch the hot path",
+                    "lens": "runtime profiling",
+                    "verb": "stabilize the hottest replica",
+                    "anchor": "capturing CPU evidence before the load cools off",
+                    "follow_up": "tune or re-place the hot workload",
+                },
+                {
+                    "recommended_action": "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE",
+                    "title_prefix": "Add headroom first",
+                    "lens": "demand absorption",
+                    "verb": "spread the burst across safer capacity",
+                    "anchor": "keeping the system responsive during profiling",
+                    "follow_up": "shrink back after the hot path is understood",
+                },
+            ]
+        if incident_type == "MEMORY_STRESS":
+            return [
+                {
+                    "recommended_action": "RESTART_POD_AND_SCALE_MEMORY_LIMITS",
+                    "title_prefix": "Reset the leaky slice",
+                    "lens": "memory leak recovery",
+                    "verb": "recycle the tightest memory consumer",
+                    "anchor": "widening only the guardrails that are clearly too narrow",
+                    "follow_up": "keep heap evidence for the next tuning pass",
+                },
+                {
+                    "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "title_prefix": "Preserve heap clues",
+                    "lens": "allocation forensics",
+                    "verb": "hold the memory signal in place",
+                    "anchor": "avoiding a restart that destroys the heap story too early",
+                    "follow_up": "choose the least disruptive recycle branch",
+                },
+            ]
+        if incident_type == "RESTART_LOOP":
+            return [
+                {
+                    "recommended_action": "ROLLBACK_RECENT_CHANGE_AND_RESTART",
+                    "title_prefix": "Break the loop decisively",
+                    "lens": "change regression",
+                    "verb": "assume the latest bad change until disproven",
+                    "anchor": "stopping repeated crash churn quickly",
+                    "follow_up": "verify the rollback on the calmest path",
+                },
+                {
+                    "recommended_action": "SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE",
+                    "title_prefix": "Isolate the unstable revision",
+                    "lens": "traffic quarantine",
+                    "verb": "contain user exposure to the crashy cohort",
+                    "anchor": "keeping the stable revision hot and healthy",
+                    "follow_up": "reproduce the fault away from user traffic",
+                },
+            ]
+        if incident_type == "DATABASE_CONNECTIVITY":
+            return [
+                {
+                    "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "title_prefix": "Preserve evidence",
+                    "lens": "dependency forensics",
+                    "verb": "freeze evidence capture",
+                    "anchor": "validating pool pressure and SQL symptom shape",
+                    "follow_up": "select the least disruptive recovery branch",
+                },
+                {
+                    "recommended_action": "CHECK_DATABASE_CONNECTION_POOL_AND_RESTART",
+                    "title_prefix": "Stabilize sessions",
+                    "lens": "connection hygiene",
+                    "verb": "drain stale connection pressure",
+                    "anchor": "measuring whether the database itself is still reachable",
+                    "follow_up": "recycle only the application edge",
+                },
+            ]
+        if incident_type in {"APPLICATION_ERROR_STORM", "RESTART_LOOP"}:
+            return [
+                {
+                    "recommended_action": "SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE",
+                    "title_prefix": "Contain user exposure",
+                    "lens": "revision isolation",
+                    "verb": "shift demand onto the calmest serving path",
+                    "anchor": "tracking the failing rollout cohort",
+                    "follow_up": "triage the unstable slice with richer evidence",
+                },
+                {
+                    "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "title_prefix": "Hold the fault line",
+                    "lens": "forensic stabilization",
+                    "verb": "capture request and dependency fingerprints",
+                    "anchor": "keeping the platform mutation budget low",
+                    "follow_up": "promote or reject rollback with stronger proof",
+                },
+            ]
+        if incident_type == "APPLICATION_ERROR_STORM":
+            return [
+                {
+                    "recommended_action": "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC",
+                    "title_prefix": "Protect the user path",
+                    "lens": "release quarantine",
+                    "verb": "push users away from the noisiest failing edge",
+                    "anchor": "assuming the rollout is guilty until the evidence says otherwise",
+                    "follow_up": "reintroduce change only after the storm calms",
+                },
+                {
+                    "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                    "title_prefix": "Hold the blast radius",
+                    "lens": "error forensics",
+                    "verb": "capture failing payload and dependency fingerprints",
+                    "anchor": "keeping the mutation budget low while the signal is rich",
+                    "follow_up": "decide whether rollback or config repair is cleaner",
+                },
+            ]
+        if incident_type == "GENERAL_DEGRADATION":
+            return [
+                {
+                    "recommended_action": "TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE",
+                    "title_prefix": "Map the slow edge",
+                    "lens": "latency tracing",
+                    "verb": "follow the dependency edge that bends first",
+                    "anchor": "avoiding a blind restart of the wrong workload",
+                    "follow_up": "promote the narrowest intervention that matches the trace",
+                },
+                {
+                    "recommended_action": "SHIFT_TRAFFIC_AND_SCALE_DEPLOYMENT",
+                    "title_prefix": "Buy diagnostic time",
+                    "lens": "controlled relief",
+                    "verb": "create breathing room for the degraded path",
+                    "anchor": "reducing user pain while evidence converges",
+                    "follow_up": "scale back once the root bottleneck is isolated",
+                },
+            ]
+        return [
+            {
+                "recommended_action": "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                "title_prefix": "Interrogate the signal",
+                "lens": "evidence-first recovery",
+                "verb": "collect high-value telemetry around the anomaly",
+                "anchor": "avoiding premature disruptive moves",
+                "follow_up": "promote the cleanest mitigation branch",
+            },
+            {
+                "recommended_action": "TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE",
+                "title_prefix": "Map the pressure path",
+                "lens": "dependency tracing",
+                "verb": "trace the slowest dependency edge",
+                "anchor": "checking whether the platform symptom is upstream or downstream",
+                "follow_up": "target the narrowest recovery action",
+            },
+        ]
+
+    @staticmethod
+    def _signal_phrase(features: dict[str, float], incident_type: str) -> str:
+        if incident_type == "CPU_STRESS":
+            return f"cpu={float(features.get('cpu_usage_cores', 0.0)):.2f}"
+        if incident_type == "MEMORY_STRESS":
+            return f"memory={float(features.get('memory_working_set_bytes', 0.0)) / 1_000_000_000:.2f}GB"
+        if incident_type == "DATABASE_CONNECTIVITY":
+            return f"db_hits={float(features.get('db_keyword_hits', 0.0)):.0f}"
+        if incident_type == "VM_DOWN":
+            return f"nodes_not_ready={float(features.get('node_not_ready_count', 0.0)):.0f}"
+        return f"latency={float(features.get('http_latency_p95_seconds', 0.0)):.2f}s"
+
+    @staticmethod
+    def _advantages_for_candidate(
+        recommended_action: str,
+        risk_score: float,
+        blast_radius_score: float,
+    ) -> list[str]:
+        return [
+            f"Maintains a {recommended_action.lower()} option in the operator playbook.",
+            f"Estimated blast radius stays around {blast_radius_score:.2f}, which supports comparative planning.",
+            "Keeps multiple recovery branches visible instead of collapsing to one generic action.",
+        ]
+
+    @staticmethod
+    def _tradeoffs_for_candidate(
+        recommended_action: str,
+        cost_score: float,
+        blast_radius_score: float,
+    ) -> list[str]:
+        return [
+            f"Execution cost is estimated around {cost_score:.2f}, so it may consume more time or coordination than the cheapest path.",
+            f"Blast radius at {blast_radius_score:.2f} still needs operator judgment before high-impact rollout changes.",
+            f"{recommended_action.lower()} remains advisory if safety confidence is not high enough.",
+        ]
+
+    def _build_decision_explanation(
+        self,
+        chosen_plan: PlanOption,
+        ranked_plans: list[PlanOption],
+        remediation_context: dict[str, object],
+    ) -> str:
+        runner_up = ranked_plans[1] if len(ranked_plans) > 1 else None
+        recent_failures = self._nested_int_map(remediation_context, "recent_failed_action_counts")
+        chosen_failures = recent_failures.get(chosen_plan.executable_action, 0)
+        comparison = ""
+        if runner_up is not None:
+            comparison = (
+                f" It outranked {runner_up.recommended_action} by favoring a better blend of "
+                f"historical effectiveness ({chosen_plan.historical_effectiveness:.2f}) and "
+                f"blast radius ({chosen_plan.blast_radius_score:.2f})."
+            )
+        history_text = ""
+        if chosen_failures > 0:
+            history_text = (
+                f" Even with {chosen_failures} recent failed {chosen_plan.executable_action} attempts, "
+                f"the plan still won because its incident alignment remained strongest."
+            )
+        mode_text = (
+            " It is cleared as an auto-execute candidate."
+            if chosen_plan.execution_mode == "AUTO_EXECUTE_CANDIDATE"
+            else " It is intentionally returned as recommendation only because the safer execution threshold was not met."
+        )
+        return (
+            f"Selected plan '{chosen_plan.title}' because it delivered the best priority score "
+            f"({chosen_plan.priority_score:.2f}) after weighting risk, cost, blast radius, and remediation history."
+            f"{comparison}{history_text}{mode_text} Strategy: {chosen_plan.strategy}"
+        ).strip()
+
+    @staticmethod
+    def _build_no_incident_explanation(confidence: float) -> str:
+        return (
+            f"No autonomous remediation plan was selected because incident confidence stayed below threshold "
+            f"({confidence:.2f})."
+        )
+
+    @staticmethod
+    def _build_recommendation_only_reason(
+        chosen_plan: PlanOption,
+        confidence: float,
+        severity: str,
+    ) -> str:
+        if not chosen_plan.safe_to_execute:
+            return (
+                f"Recommendation only: {chosen_plan.recommended_action} is useful for operators, "
+                f"but its execution profile is not considered safely automatable."
+            )
+        if confidence < 0.60:
+            return (
+                f"Recommendation only: confidence {confidence:.2f} stayed below the autonomous execution threshold."
+            )
+        if severity == "CRITICAL":
+            return "Recommendation only: critical situations stay under human control to reduce blast radius."
+        return "Recommendation only: recent remediation history or safety gates favored advisory guidance over automation."
+
+    def _build_decision_context(
+        self,
+        incident_type: str,
+        severity: str,
+        confidence: float,
+        ranked_plans: list[PlanOption],
+        execution_mode: str,
+        remediation_context: dict[str, object],
+    ) -> dict[str, object]:
+        chosen_plan = ranked_plans[0] if ranked_plans else None
+        return {
+            "incident_family": incident_type,
+            "severity": severity,
+            "confidence": round(confidence, 4),
+            "execution_mode": execution_mode,
+            "autonomy_mode": str(remediation_context.get("autonomy_mode", "bounded-auto")),
+            "innovation_mode": str(remediation_context.get("innovation_mode", "creative-advisory")),
+            "strategy_nonce": self._context_int(remediation_context, "strategy_nonce"),
+            "favorite_strategy": chosen_plan.strategy if chosen_plan is not None else None,
+            "favorite_plan_title": chosen_plan.title if chosen_plan is not None else None,
+            "top_plans_count": len(ranked_plans),
+            "selected_plan_risk": round(chosen_plan.risk_score, 4) if chosen_plan is not None else None,
+            "selected_plan_cost": round(chosen_plan.cost_score, 4) if chosen_plan is not None else None,
+            "selected_plan_blast_radius": round(chosen_plan.blast_radius_score, 4) if chosen_plan is not None else None,
+        }
+
+    @staticmethod
+    def _map_executable_action(recommended_action: str) -> str:
+        normalized = recommended_action.upper()
+        if "ESCALATE" in normalized:
+            return "ESCALATION"
+        if "RESTART" in normalized or "ROLLBACK" in normalized or "FAILOVER" in normalized or "CHECK_" in normalized:
+            return "RESTART_POD"
+        if "SCALE" in normalized or "REBALANCE" in normalized or "SHIFT_TRAFFIC" in normalized:
+            return "SCALE_DEPLOYMENT"
+        if "INVESTIGATE" in normalized or "DIAGNOSTIC" in normalized or "TRACE_" in normalized:
+            return "INVESTIGATION"
+        return "REMEDIATION"
+
+    @staticmethod
+    def _context_int(source: dict[str, object], key: str) -> int:
+        try:
+            return int(source.get(key, 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _variation_bonus(
+        strategy_nonce: int,
+        incident_type: str,
+        recommended_action: str,
+        index: int,
+    ) -> float:
+        if strategy_nonce <= 0:
+            return 0.0
+        signature = sum(ord(ch) for ch in f"{incident_type}:{recommended_action}:{index}")
+        bucket = (strategy_nonce + signature) % 7
+        divisor = 100.0
+        if incident_type == "APPLICATION_ERROR_STORM":
+            divisor = 55.0
+        elif incident_type == "CPU_STRESS":
+            divisor = 65.0
+        elif incident_type in {"MEMORY_STRESS", "DATABASE_CONNECTIVITY"}:
+            divisor = 75.0
+        return ((bucket - 3) / divisor)
+
+    def _select_plan_index(
+        self,
+        ranked_plans: list[PlanOption],
+        remediation_context: dict[str, object],
+        incident_type: str,
+    ) -> int:
+        if len(ranked_plans) <= 1:
+            return 0
+
+        strategy_nonce = self._context_int(remediation_context, "strategy_nonce")
+        top_score = ranked_plans[0].priority_score
+        auto_candidate_indexes = [
+            index
+            for index, plan in enumerate(ranked_plans)
+            if ranked_plans[index].execution_mode == "AUTO_EXECUTE_CANDIDATE"
+            and (top_score - plan.priority_score) <= 0.15
+        ]
+        if auto_candidate_indexes:
+            return min(
+                auto_candidate_indexes,
+                key=lambda index: (
+                    ranked_plans[index].risk_score,
+                    ranked_plans[index].blast_radius_score,
+                    -ranked_plans[index].priority_score,
+                    index,
+                ),
+            )
+
+        if strategy_nonce <= 0:
+            return 0
+
+        diversity_window = self._diversity_window(incident_type)
+        candidate_indexes = [
+            index
+            for index, plan in enumerate(ranked_plans)
+            if (top_score - plan.priority_score) <= diversity_window
+        ]
+        if len(candidate_indexes) <= 1:
+            candidate_indexes = [0]
+
+        if incident_type == "APPLICATION_ERROR_STORM":
+            if strategy_nonce % 2 == 0:
+                for index in candidate_indexes:
+                    if "ROLLBACK" in ranked_plans[index].recommended_action.upper():
+                        return index
+            else:
+                for index in candidate_indexes:
+                    if "SHIFT_TRAFFIC" in ranked_plans[index].recommended_action.upper():
+                        return index
+
+        return candidate_indexes[strategy_nonce % len(candidate_indexes)]
+
+    @staticmethod
+    def _diversity_window(incident_type: str) -> float:
+        if incident_type == "CPU_STRESS":
+            return 0.25
+        if incident_type == "APPLICATION_ERROR_STORM":
+            return 0.14
+        if incident_type in {"RESTART_LOOP", "DATABASE_CONNECTIVITY"}:
+            return 0.12
+        if incident_type in {"CPU_STRESS", "MEMORY_STRESS", "AVAILABILITY_DROP", "GENERAL_DEGRADATION"}:
+            return 0.10
+        if incident_type == "VM_DOWN":
+            return 0.09
+        return 0.08
+
+    @staticmethod
+    def _is_safe_to_execute(
+        executable_action: str,
+        risk_score: float,
+        blast_radius_score: float,
+        severity: str,
+    ) -> bool:
+        if executable_action == "SCALE_DEPLOYMENT":
+            return (
+                risk_score <= 0.40
+                and blast_radius_score <= 0.35
+                and severity in {"MEDIUM", "HIGH"}
+            )
+        return (
+            executable_action in {"RESTART_POD"}
+            and risk_score <= 0.55
+            and blast_radius_score <= 0.55
+            and severity != "CRITICAL"
+        )
+
+    @staticmethod
+    def _select_execution_mode(
+        safe_to_execute: bool,
+        executable_action: str,
+        confidence: float,
+        severity: str,
+        risk_score: float,
+        blast_radius_score: float,
+        fail_count: float,
+        remediation_context: dict[str, object],
+    ) -> str:
+        autonomy_mode = str(remediation_context.get("autonomy_mode", "bounded-auto")).lower()
+        full_auto = autonomy_mode == "full-auto"
+
+        if not safe_to_execute:
+            return "RECOMMEND_ONLY"
+        if executable_action not in {"RESTART_POD", "SCALE_DEPLOYMENT"}:
+            return "RECOMMEND_ONLY"
+        if autonomy_mode in {"manual", "advisory-only"}:
+            return "RECOMMEND_ONLY"
+        # CRITICAL severity: always recommend-only regardless of mode (human awareness required)
+        if severity == "CRITICAL":
+            return "RECOMMEND_ONLY"
+        if confidence < 0.44:
+            return "RECOMMEND_ONLY"
+        if risk_score > 0.50 or blast_radius_score > 0.50:
+            return "RECOMMEND_ONLY"
+        # In full-auto mode: ignore past failures — retry automatically
+        if not full_auto and fail_count > 0:
+            return "RECOMMEND_ONLY"
+        return "AUTO_EXECUTE_CANDIDATE"
+
+    @staticmethod
+    def _nested_int_map(source: dict[str, object], key: str) -> dict[str, int]:
+        raw = source.get(key)
+        if not isinstance(raw, dict):
+            return {}
+        normalized: dict[str, int] = {}
+        for item_key, item_value in raw.items():
+            try:
+                normalized[str(item_key).upper()] = int(item_value)
+            except (TypeError, ValueError):
+                continue
+        return normalized

@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+datasets/aiops_training_dataset.csv
+model_artifacts/model.joblib
+model_artifacts/model_metrics.json

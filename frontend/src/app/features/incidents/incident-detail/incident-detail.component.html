@@ -1,0 +1,242 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span style="cursor:pointer;color:var(--orange-primary);" (click)="goBack()">Incidents</span>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">#{{ incidentId }}</span>
+    </div>
+    <h1>Incident <span>#{{ incidentId }}</span></h1>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="goBack()">
+      <i class="fas fa-arrow-left"></i> Retour
+    </button>
+  </div>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="padding:60px;text-align:center;">
+  <div class="spinner-orange"></div>
+</div>
+
+<ng-container *ngIf="!loading && incident">
+
+  <!-- ── Main Info Card ── -->
+  <div class="card mb-20">
+    <div class="card-header">
+      <div class="card-title" style="flex:1;min-width:0;">
+        <div class="card-title-icon"><i class="fas fa-circle-info"></i></div>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ incident.title }}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+        <span class="badge-status" [ngClass]="(incident.severity || '').toLowerCase()">{{ incident.severity }}</span>
+        <span class="badge-status" [ngClass]="(incident.status || '').toLowerCase()">{{ incident.status }}</span>
+        <span class="badge-status" [ngClass]="incident.source === 'AI' ? 'ai' : 'prometheus'">
+          <i class="fas" [ngClass]="incident.source === 'AI' ? 'fa-brain' : 'fa-bell'"></i>
+          {{ incident.source }}
+        </span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="grid-2" style="gap:24px;">
+
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:8px;">Description</div>
+          <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ incident.description || 'Aucune description disponible.' }}</div>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">ID</div>
+            <div class="info-value mono">#{{ incident.id }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Namespace</div>
+            <div class="info-value mono">{{ incident.namespace || '—' }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Application</div>
+            <div class="info-value mono">{{ incident.app || '—' }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Créé le</div>
+            <div class="info-value">{{ formatDate(incident.createdAt) }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Mis à jour</div>
+            <div class="info-value">{{ formatDate(incident.updatedAt) }}</div>
+          </div>
+          <div class="info-item" *ngIf="incident.incidentType">
+            <div class="info-label">Type IA</div>
+            <div class="info-value"><span class="badge-status ai">{{ incident.incidentType }}</span></div>
+          </div>
+          <div class="info-item" *ngIf="incident.confidence != null">
+            <div class="info-label">Confiance IA</div>
+            <div class="info-value">
+              <div class="confidence-bar" style="max-width:200px;">
+                <div class="bar-track">
+                  <div class="bar-fill"
+                       [class.low]="incident.confidence < 0.5"
+                       [class.medium]="incident.confidence >= 0.5 && incident.confidence < 0.75"
+                       [class.high]="incident.confidence >= 0.75"
+                       [style.width.%]="incident.confidence * 100"></div>
+                </div>
+                <span class="bar-value">{{ (incident.confidence * 100).toFixed(0) }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Status Actions -->
+      <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--gray-200);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:600;color:var(--gray-600);">
+          <i class="fas fa-arrows-rotate" style="color:var(--orange-primary);"></i>
+          Changer le statut :
+        </span>
+        <ng-container *ngFor="let s of statusOptions">
+          <button *ngIf="incident.status !== s"
+                  class="btn btn-sm"
+                  [class.btn-success]="s === 'RESOLVED'"
+                  [class.btn-info]="s === 'IN_PROGRESS' && !willTriggerRemediation()"
+                  [class.btn-primary]="s === 'IN_PROGRESS' && willTriggerRemediation()"
+                  [class.btn-ghost]="s === 'OPEN'"
+                  [disabled]="updatingStatus"
+                  [title]="s === 'IN_PROGRESS' && willTriggerRemediation()
+                           ? 'Démarre un workflow Camunda et crée une tâche pour approuver la remédiation Kubernetes'
+                           : (s === 'IN_PROGRESS' ? 'Changer simplement le statut (sans remédiation Camunda)' : '')"
+                  (click)="updateStatus(s)">
+            <i class="fas"
+               [ngClass]="s === 'RESOLVED' ? 'fa-check'
+                          : (s === 'IN_PROGRESS' && willTriggerRemediation()) ? 'fa-rocket'
+                          : s === 'IN_PROGRESS' ? 'fa-play'
+                          : 'fa-rotate-left'"></i>
+            {{ s === 'IN_PROGRESS'
+               ? (willTriggerRemediation() ? 'Démarrer remédiation (Camunda)' : 'Démarrer')
+               : s === 'RESOLVED' ? 'Résoudre' : 'Rouvrir' }}
+          </button>
+        </ng-container>
+      </div>
+      <!-- Info — explique ce qui se passera -->
+      <div *ngIf="willTriggerRemediation()"
+           style="margin-top:10px;padding:10px 14px;background:rgba(255,121,0,.08);border-left:3px solid var(--orange-primary);border-radius:6px;font-size:12px;color:var(--gray-700);">
+        <i class="fas fa-info-circle" style="color:var(--orange-primary);margin-right:6px;"></i>
+        Cliquer sur <strong>Démarrer remédiation</strong> lance un workflow Camunda et crée une tâche d'approbation
+        humaine. Après approbation, l'action de remédiation (restart pod, scale, etc.) sera exécutée automatiquement sur Kubernetes.
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── AI Explanation ── -->
+  <div class="card mb-20" *ngIf="incident.explanation">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-brain"></i></div>
+        Explication IA
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="background:var(--gray-100);border-radius:8px;padding:16px;font-size:14px;line-height:1.7;color:var(--gray-700);border-left:3px solid var(--orange-primary);">
+        {{ incident.explanation }}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="gap:20px;align-items:start;">
+
+    <!-- ── Remediation Actions ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-wrench"></i></div>
+          Actions de Remédiation
+        </div>
+        <span class="badge-status" [ngClass]="actions.length > 0 ? 'running' : 'idle'">
+          {{ actions.length }} action(s)
+        </span>
+      </div>
+
+      <div *ngIf="actions.length === 0" class="empty-state" style="padding:32px;">
+        <div class="empty-icon"><i class="fas fa-circle-info"></i></div>
+        <div class="empty-title">Aucune action</div>
+        <div class="empty-text">Aucune action de remédiation enregistrée.</div>
+      </div>
+
+      <div *ngIf="actions.length > 0" class="data-table-wrapper">
+        <table class="orange-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Statut</th>
+              <th>Mode</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let a of actions">
+              <td>
+                <span class="mono" style="font-size:12px;background:var(--gray-100);padding:3px 8px;border-radius:4px;">
+                  {{ a.actionType }}
+                </span>
+              </td>
+              <td>
+                <span class="badge-status" [ngClass]="(a.status || '').toLowerCase()">{{ a.status }}</span>
+              </td>
+              <td>
+                <span class="badge-status" [ngClass]="a.automated ? 'ai' : 'manual'">
+                  <i class="fas" [ngClass]="a.automated ? 'fa-robot' : 'fa-user'"></i>
+                  {{ a.automated ? 'Auto' : 'Manuel' }}
+                </span>
+              </td>
+              <td class="col-meta">{{ formatDate(a.executedAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div *ngIf="actions.length > 0 && actions[0].result" class="card-body" style="padding-top:0;">
+        <div style="background:var(--gray-100);border-radius:6px;padding:12px;font-size:13px;color:var(--gray-600);">
+          <span style="font-weight:600;">Résultat :</span> {{ actions[0].result }}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── History Timeline ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-timeline"></i></div>
+          Historique & Timeline
+        </div>
+        <span class="text-muted" style="font-size:13px;">{{ history.length }} événement(s)</span>
+      </div>
+
+      <div class="card-body">
+        <div *ngIf="history.length === 0" class="empty-state" style="padding:20px;">
+          <div class="empty-icon"><i class="fas fa-history"></i></div>
+          <div class="empty-title">Aucun historique</div>
+        </div>
+
+        <div *ngIf="history.length > 0" class="timeline">
+          <div *ngFor="let h of history" class="timeline-item">
+            <div class="timeline-time">{{ formatDate(h.createdAt) }}</div>
+            <div class="timeline-content">
+              <div class="timeline-actor">
+                <span class="badge-status" [ngClass]="(h.status || '').toLowerCase()" style="margin-right:6px;">{{ h.status }}</span>
+              </div>
+              <div *ngIf="h.comment" style="margin-top:4px;font-size:13px;">{{ h.comment }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</ng-container>

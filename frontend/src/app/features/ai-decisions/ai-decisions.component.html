@@ -1,0 +1,173 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Décisions IA</span>
+    </div>
+    <h1>Décisions <span>Intelligence Artificielle</span></h1>
+    <div class="page-subtitle">Incidents classifiés et analysés par le moteur XGBoost + Ollama</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="load()" [disabled]="loading">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i> Actualiser
+    </button>
+  </div>
+</div>
+
+<!-- ── Confidence Filters ── -->
+<div class="filter-bar mb-20">
+  <span class="filter-label"><i class="fas fa-sliders"></i> Confiance</span>
+  <button *ngFor="let f of confidenceFilters"
+          class="filter-pill"
+          [class.active]="confidenceFilter === f.value"
+          (click)="setFilter(f.value)">
+    {{ f.label }}
+  </button>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="padding:60px;text-align:center;">
+  <div class="spinner-orange"></div>
+  <div class="text-muted" style="margin-top:14px;">Chargement des décisions IA…</div>
+</div>
+
+<!-- ── Table Card ── -->
+<div *ngIf="!loading" class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <div class="card-title-icon"><i class="fas fa-brain"></i></div>
+      Incidents analysés par l'IA
+      <span class="badge-status ai" style="margin-left:8px;">{{ filtered.length }}</span>
+    </div>
+  </div>
+
+  <div *ngIf="filtered.length === 0" class="empty-state">
+    <div class="empty-icon"><i class="fas fa-brain"></i></div>
+    <div class="empty-title">Aucune décision IA</div>
+    <div class="empty-text">Aucune décision IA ne correspond au filtre sélectionné.</div>
+  </div>
+
+  <div *ngIf="filtered.length > 0" class="data-table-wrapper">
+    <table class="orange-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Titre</th>
+          <th>Type</th>
+          <th>Confiance</th>
+          <th>Sévérité</th>
+          <th>Statut</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <ng-container *ngFor="let inc of filtered">
+
+          <!-- Main row -->
+          <tr>
+            <td class="col-id">#{{ inc.id }}</td>
+            <td class="col-title">{{ inc.title }}</td>
+            <td>
+              <span class="badge-status ai">
+                <i class="fas fa-microchip"></i>
+                {{ inc.incidentType || 'AI' }}
+              </span>
+            </td>
+            <td style="min-width:160px;">
+              <div class="confidence-bar">
+                <div class="bar-track">
+                  <div class="bar-fill"
+                       [ngClass]="getConfidenceClass(inc.confidence)"
+                       [style.width.%]="getConfidencePct(inc.confidence)"></div>
+                </div>
+                <span class="bar-value">{{ getConfidencePct(inc.confidence) }}%</span>
+              </div>
+            </td>
+            <td>
+              <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">{{ inc.severity }}</span>
+            </td>
+            <td>
+              <span class="badge-status" [ngClass]="(inc.status || '').toLowerCase()">{{ inc.status }}</span>
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;justify-content:flex-end;">
+                <button class="btn btn-ghost btn-xs" (click)="toggleExpand(inc.id)">
+                  <i class="fas" [ngClass]="expandedId === inc.id ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                  {{ expandedId === inc.id ? 'Masquer' : 'Détail' }}
+                </button>
+                <button class="btn btn-xs"
+                        style="background:var(--orange-pale);color:var(--orange-primary);border:1px solid var(--orange-light);"
+                        (click)="openFeedback(inc.id)">
+                  <i class="fas fa-comment"></i>
+                  {{ feedbackIncidentId === inc.id ? 'Fermer' : 'Feedback' }}
+                </button>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Expanded detail row -->
+          <tr *ngIf="expandedId === inc.id">
+            <td colspan="7" style="padding:0;">
+              <div style="background:var(--orange-pale);padding:20px 24px;border-top:1px solid rgba(255,121,0,0.15);">
+                <div class="grid-2" style="gap:20px;">
+                  <div>
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Description</div>
+                    <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ inc.description || 'Aucune description.' }}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Explication IA</div>
+                    <div *ngIf="inc.explanation" style="font-size:13px;line-height:1.7;color:var(--gray-600);font-style:italic;background:white;padding:12px;border-radius:6px;border-left:2px solid var(--orange-primary);">
+                      {{ inc.explanation }}
+                    </div>
+                    <div *ngIf="!inc.explanation" class="text-muted" style="font-size:13px;">Aucune explication disponible.</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,121,0,0.15);">
+                  <span class="text-muted" style="font-size:13px;">Source : <strong style="color:var(--gray-800);">{{ inc.source }}</strong></span>
+                  <span class="text-muted" style="font-size:13px;">Créé : <strong style="color:var(--gray-800);">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</strong></span>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Feedback row -->
+          <tr *ngIf="feedbackIncidentId === inc.id">
+            <td colspan="7" style="padding:0;">
+              <div style="background:#FFF8F0;padding:18px 24px;border-top:1px solid var(--orange-light);">
+                <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--gray-900);">
+                  <i class="fas fa-comment-dots" style="color:var(--orange-primary);margin-right:6px;"></i>
+                  Feedback sur la décision IA
+                </div>
+                <div style="display:flex;gap:10px;margin-bottom:12px;">
+                  <button class="btn btn-sm btn-success" [style.opacity]="feedbackCorrect === true ? '1' : '0.5'"
+                          (click)="feedbackCorrect=true">
+                    <i class="fas fa-thumbs-up"></i> Bonne décision
+                  </button>
+                  <button class="btn btn-sm btn-danger" [style.opacity]="feedbackCorrect === false ? '1' : '0.5'"
+                          (click)="feedbackCorrect=false">
+                    <i class="fas fa-thumbs-down"></i> Mauvaise décision
+                  </button>
+                </div>
+                <input [(ngModel)]="feedbackComment"
+                       class="form-control"
+                       style="max-width:500px;margin-bottom:12px;"
+                       placeholder="Commentaire optionnel…">
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <button class="btn btn-orange btn-sm" (click)="submitFeedback()">
+                    <i class="fas fa-paper-plane"></i> Envoyer
+                  </button>
+                  <span *ngIf="feedbackSuccess" style="color:var(--color-success);font-size:13px;font-weight:600;">
+                    <i class="fas fa-circle-check"></i> {{ feedbackSuccess }}
+                  </span>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+        </ng-container>
+      </tbody>
+    </table>
+  </div>
+</div>

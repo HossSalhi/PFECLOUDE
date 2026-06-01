@@ -1,0 +1,86 @@
+# Demo app — nginx-unprivileged (déjà cached sur les workers, cluster offline)
+# Utilisé pour tester le pipeline AIOps complet sur une nouvelle application.
+# Pour injecter du stress : kubectl exec into pod + commande bash (yes > /dev/null, dd, etc.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: pfe
+  labels:
+    app: demo-app
+    aiops.io/monitor: "true"
+    aiops.io/app: "demo-app"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        aiops.io/monitor: "true"
+        aiops.io/app: "demo-app"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/stub_status"
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: [worker]
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+      containers:
+        - name: demo
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "1000m"   # autoriser stress jusqu'à 1 CPU pour démontrer detection
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: pfe
+  labels:
+    app: demo-app
+spec:
+  selector:
+    app: demo-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

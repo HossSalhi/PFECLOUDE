@@ -1,0 +1,252 @@
+# ============================================================================
+#  In-cluster slim Prometheus
+# ----------------------------------------------------------------------------
+#  Lightweight Prometheus deployment that scrapes K8s pods via the
+#  prometheus.io/scrape=true annotation pattern. Provides the "pod-level"
+#  metrics that the central Prometheus on VM 160 federates from via the
+#  cluster-prometheus-federate job (NodePort 30090).
+#
+#  Why a custom slim Prometheus instead of kube-prometheus-stack?
+#    - Stack is heavy (~1.5 GB), needs prometheus-operator + CRDs
+#    - We don't need Grafana/Alertmanager in-cluster (they live on VM 160)
+#    - We just need /federate on a NodePort, with K8s SD
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+# ServiceAccount with cluster-wide read access (needed for K8s SD)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-incluster
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-incluster
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  - nonResourceURLs: ["/metrics"]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-incluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-incluster
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-incluster
+    namespace: monitoring
+---
+# Prometheus scrape config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-incluster-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+      external_labels:
+        cluster: pfe-k8s
+    scrape_configs:
+      # Self-scrape
+      - job_name: prometheus
+        scrape_interval: 60s
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Scrape every pod that has prometheus.io/scrape=true annotation
+      - job_name: kubernetes-pods
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+
+      # cAdvisor — fournit les container_cpu_* / container_memory_* / container_network_*
+      # que l'AI utilise pour ses features. Scrape tighter pour économiser RAM.
+      - job_name: kubernetes-cadvisor
+        scrape_interval: 60s
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __metrics_path__
+            replacement: /metrics/cadvisor
+        # Filtre côté metric_relabel pour ne garder que les métriques utiles à l'AI
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            action: keep
+            regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes|memory_rss|memory_usage_bytes|fs_usage_bytes|network_receive_bytes_total|network_transmit_bytes_total|spec_cpu_quota|spec_memory_limit_bytes)'
+          # Drop pause/POD containers (bruit)
+          - source_labels: [container]
+            action: drop
+            regex: 'POD|'
+          # Garde seulement namespace pfe
+          - source_labels: [namespace]
+            action: keep
+            regex: 'pfe'
+
+      # kubelet — fournit kube_pod_* / kube_deployment_* indirect, + node metrics
+      - job_name: kubernetes-kubelet
+        scrape_interval: 60s
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+        # Filtre — seulement ce dont l'AI a besoin
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            action: keep
+            regex: 'kubelet_(running_pods|running_containers|pod_start_duration_seconds|node_name)|up'
+---
+# Persistent storage for TSDB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-incluster-data
+  namespace: monitoring
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-incluster
+  namespace: monitoring
+  labels:
+    app: prometheus-incluster
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: prometheus-incluster
+  template:
+    metadata:
+      labels:
+        app: prometheus-incluster
+    spec:
+      serviceAccountName: prometheus-incluster
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=2d
+            - --web.enable-lifecycle
+            - --web.listen-address=0.0.0.0:9090
+          ports:
+            - name: http
+              containerPort: 9090
+          resources:
+            requests:
+              cpu: 250m
+              memory: 500Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 90
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-incluster-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-incluster-data
+---
+# ClusterIP + NodePort 30090 for federation from VM-160 Prometheus
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-incluster
+  namespace: monitoring
+  labels:
+    app: prometheus-incluster
+spec:
+  type: NodePort
+  selector:
+    app: prometheus-incluster
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090

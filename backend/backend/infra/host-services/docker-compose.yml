@@ -1,0 +1,36 @@
+# Legacy workstation Docker stack. Not part of the target 5-VM offline runtime.
+name: pfe-host-services
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${HOST_BIND_IP:-0.0.0.0}:9000:9000"
+      - "${HOST_BIND_IP:-0.0.0.0}:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command: 'until mc alias set local http://minio:9000 "$$MIqNIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done; mc mb --ignore-existing local/$$MINIO_BACKUP_BUCKET; if ! mc admin user info local "$$MINIO_BACKUP_ACCESS_KEY" >/dev/null 2>&1; then mc admin user add local "$$MINIO_BACKUP_ACCESS_KEY" "$$MINIO_BACKUP_SECRET_KEY"; fi; mc admin policy attach local readwrite --user "$$MINIO_BACKUP_ACCESS_KEY"'
+
+volumes:
+  minio-data:

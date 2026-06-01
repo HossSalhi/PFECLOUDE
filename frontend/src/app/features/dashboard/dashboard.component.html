@@ -1,0 +1,241 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Dashboard</span>
+    </div>
+    <h1>Vue d'ensemble <span>HELIOS</span></h1>
+    <div class="page-subtitle">Supervision intelligente en temps réel · Orange Tunisie</div>
+  </div>
+  <div class="page-actions">
+    <span class="text-muted" *ngIf="lastRefresh" style="font-size:12px;">
+      <i class="fas fa-clock" style="color:var(--orange-primary);"></i>
+      Actualisé à {{ lastRefresh }}
+    </span>
+    <button class="btn btn-ghost btn-sm" (click)="loadData()" [disabled]="loading">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i>
+      Actualiser
+    </button>
+    <span class="live-dot" *ngIf="!loading">Temps réel</span>
+  </div>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="display:flex;align-items:center;justify-content:center;padding:80px;">
+  <div style="text-align:center;">
+    <div class="spinner-orange" style="width:44px;height:44px;border-width:4px;"></div>
+    <div class="text-muted" style="margin-top:16px;font-size:14px;">Chargement du tableau de bord…</div>
+  </div>
+</div>
+
+<ng-container *ngIf="!loading && summary">
+
+  <!-- ── Row 1 — KPI Cards ── -->
+  <div class="grid-4 mb-24">
+
+    <div class="stat-card">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-chart-bar"></i></div>
+        <div class="stat-trend flat"><i class="fas fa-minus"></i> Total</div>
+      </div>
+      <div class="stat-value">{{ summary.totalIncidents }}</div>
+      <div class="stat-label">Total Incidents</div>
+      <div class="stat-bar"><div class="stat-bar-fill" [style.width.%]="100"></div></div>
+    </div>
+
+    <div class="stat-card warning">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-circle-dot"></i></div>
+        <div class="stat-trend up" *ngIf="summary.openIncidents > 0">
+          <i class="fas fa-arrow-up"></i> Actif
+        </div>
+      </div>
+      <div class="stat-value">{{ summary.openIncidents }}</div>
+      <div class="stat-label">Incidents Ouverts</div>
+      <div class="stat-bar"><div class="stat-bar-fill" [style.width.%]="summary.totalIncidents ? (summary.openIncidents / summary.totalIncidents * 100) : 0"></div></div>
+    </div>
+
+    <div class="stat-card critical">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-triangle-exclamation"></i></div>
+        <div class="stat-trend down" *ngIf="summary.criticalIncidents > 0">
+          <i class="fas fa-arrow-up"></i> Critique
+        </div>
+      </div>
+      <div class="stat-value">{{ summary.criticalIncidents }}</div>
+      <div class="stat-label">Incidents Critiques</div>
+      <div class="stat-bar"><div class="stat-bar-fill" [style.width.%]="summary.totalIncidents ? (summary.criticalIncidents / summary.totalIncidents * 100) : 0"></div></div>
+    </div>
+
+    <div class="stat-card success">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-circle-check"></i></div>
+        <div class="stat-trend up"><i class="fas fa-arrow-up"></i> Bon</div>
+      </div>
+      <div class="stat-value">{{ summary.resolutionRate | number:'1.0-0' }}%</div>
+      <div class="stat-label">Taux de Résolution</div>
+      <div class="stat-bar"><div class="stat-bar-fill" [style.width.%]="summary.resolutionRate"></div></div>
+    </div>
+
+  </div>
+
+  <!-- ── Row 2 — Secondary KPIs ── -->
+  <div class="grid-4 mb-24">
+
+    <div class="stat-card info">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-spinner"></i></div>
+      </div>
+      <div class="stat-value">{{ summary.inProgressIncidents }}</div>
+      <div class="stat-label">En Cours</div>
+    </div>
+
+    <div class="stat-card success">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-check-double"></i></div>
+      </div>
+      <div class="stat-value">{{ summary.resolvedIncidents }}</div>
+      <div class="stat-label">Résolus</div>
+    </div>
+
+    <div class="stat-card warning">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-user-clock"></i></div>
+      </div>
+      <div class="stat-value">{{ summary.pendingApprovals }}</div>
+      <div class="stat-label">En Attente d'Approbation</div>
+    </div>
+
+    <div class="stat-card purple">
+      <div class="stat-header">
+        <div class="stat-icon-wrap"><i class="fas fa-bolt"></i></div>
+      </div>
+      <div class="stat-value">{{ summary.totalActions }}</div>
+      <div class="stat-label">Actions Exécutées</div>
+    </div>
+
+  </div>
+
+  <!-- ── Charts Row ── -->
+  <div class="grid-2 mb-24">
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-chart-column"></i></div>
+          Incidents par Statut
+        </div>
+      </div>
+      <div class="card-body" style="height:240px;">
+        <canvas baseChart [data]="barChartData" [options]="barChartOptions" type="bar"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-title-icon"><i class="fas fa-chart-pie"></i></div>
+          Distribution par Sévérité
+        </div>
+      </div>
+      <div class="card-body" style="height:240px;display:flex;align-items:center;justify-content:center;">
+        <canvas baseChart [data]="doughnutData" [options]="doughnutOptions" type="doughnut" style="max-height:210px;"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Resolution Progress ── -->
+  <div class="card mb-24">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-gauge-high"></i></div>
+        Progression de Résolution
+      </div>
+      <span class="badge-status" [ngClass]="summary.resolutionRate >= 80 ? 'success' : summary.resolutionRate >= 50 ? 'medium' : 'critical'">
+        {{ summary.resolutionRate | number:'1.1-1' }}%
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="progress-bar-wrap">
+        <div class="progress-header">
+          <span class="progress-label">{{ summary.resolvedIncidents }} incidents résolus sur {{ summary.totalIncidents }}</span>
+          <span class="progress-value">{{ summary.resolutionRate | number:'1.1-1' }}%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" [class.success]="summary.resolutionRate >= 80"
+               [style.width.%]="summary.resolutionRate"></div>
+        </div>
+      </div>
+      <div class="text-muted mt-16" style="font-size:12px;">
+        <i class="fas fa-calendar-check" style="color:var(--orange-primary);"></i>
+        Généré le {{ summary.generatedAt | date:'dd/MM/yyyy à HH:mm' }}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Recent Incidents ── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-clock-rotate-left"></i></div>
+        Incidents Récents
+      </div>
+      <a [routerLink]="['/incidents']" class="btn btn-ghost btn-sm">
+        Voir tout <i class="fas fa-arrow-right"></i>
+      </a>
+    </div>
+
+    <div *ngIf="incidentsLoading" style="padding:40px;text-align:center;">
+      <div class="spinner-orange"></div>
+    </div>
+
+    <div *ngIf="!incidentsLoading && recentIncidents.length === 0" class="empty-state">
+      <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
+      <div class="empty-title">Aucun incident</div>
+      <div class="empty-text">Votre infrastructure fonctionne correctement.</div>
+    </div>
+
+    <div *ngIf="!incidentsLoading && recentIncidents.length > 0" class="data-table-wrapper">
+      <table class="orange-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Titre</th>
+            <th>Sévérité</th>
+            <th>Statut</th>
+            <th>Source</th>
+            <th>Créé le</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let inc of recentIncidents">
+            <td class="col-id">#{{ inc.id }}</td>
+            <td class="col-title">{{ inc.title }}</td>
+            <td>
+              <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">
+                {{ inc.severity }}
+              </span>
+            </td>
+            <td>
+              <span class="badge-status" [ngClass]="(inc.status || '').toLowerCase()">
+                {{ inc.status }}
+              </span>
+            </td>
+            <td>
+              <span class="badge-status" [ngClass]="inc.source === 'AI' ? 'ai' : 'prometheus'">
+                <i class="fas" [ngClass]="inc.source === 'AI' ? 'fa-brain' : 'fa-bell'"></i>
+                {{ inc.source }}
+              </span>
+            </td>
+            <td class="col-meta">{{ inc.createdAt | date:'dd/MM HH:mm' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+</ng-container>

@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+  namespace: pfe
+  labels:
+    app: chromadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-type
+                    operator: In
+                    values: [worker]       # run on any worker; falls back to worker2 if worker1 fails
+      tolerations:
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: chromadb
+          image: chromadb/chroma:0.5.20
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: PERSIST_DIRECTORY
+              value: /data/chroma
+            - name: ANONYMIZED_TELEMETRY
+              value: "FALSE"
+            - name: CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER
+              value: ""
+            - name: CHROMA_LOG_PATH
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /data/chroma
+            - name: log-config
+              mountPath: /chroma/chromadb/log_config.yml
+              subPath: log_config.yml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 5
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: chromadb-data
+        - name: log-config
+          configMap:
+            name: chromadb-log-config

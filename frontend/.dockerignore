@@ -1,0 +1,8 @@
+node_modules
+.angular
+dist
+e2e
+*.md
+.git
+.gitignore
+build_output.txt

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-service-config
+  namespace: pfe
+  labels:
+    app: ai-service
+data:
+  AIOPS_LOG_LEVEL: "INFO"
+  AIOPS_ENABLE_UPSTREAM_QUERIES: "true"
+  AIOPS_LOKI_BASE_URL: "http://loki-gateway.monitoring.svc.cluster.local"
+  AIOPS_PROMETHEUS_BASE_URL: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
+  AIOPS_LOKI_TIMEOUT_SECONDS: "15"
+  AIOPS_PROMETHEUS_TIMEOUT_SECONDS: "15"
+  AIOPS_DEFAULT_WINDOW_MINUTES: "5"
+  AIOPS_MODEL_PATH: "model_artifacts/model.joblib"
+  AIOPS_LOG_EMBEDDING_MODEL_NAME: "all-MiniLM-L6-v2"
+  AIOPS_LOG_EMBEDDING_FALLBACK_DIM: "384"
+  AIOPS_LOG_EMBEDDING_MAX_LINES: "200"
+  # ChromaDB in HTTP mode — points to the in-cluster chromadb Service
+  AIOPS_CHROMA_MODE: "http"
+  AIOPS_CHROMA_HTTP_HOST: "chromadb"
+  AIOPS_CHROMA_HTTP_PORT: "8000"
+  AIOPS_CHROMA_HTTP_SSL: "false"
+  AIOPS_MEMORY_ENABLED: "true"

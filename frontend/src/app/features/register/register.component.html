@@ -1,0 +1,135 @@
+<div class="auth-page">
+  <div class="auth-left">
+    <div class="auth-left-content">
+      <div class="auth-logo">
+        <div class="logo-square">O</div>
+        <div class="logo-text">
+          <div class="logo-brand">orange</div>
+          <div class="logo-sub">Tunisie</div>
+        </div>
+      </div>
+      <div class="auth-hero">
+        <h1 class="hero-title">AIOps <span>Platform</span></h1>
+        <p class="hero-desc">Créez votre compte pour accéder à la supervision intelligente de votre infrastructure.</p>
+      </div>
+      <div class="auth-footer-brand">© 2026 Orange Tunisie — All rights reserved</div>
+    </div>
+  </div>
+
+  <div class="auth-right">
+    <div class="auth-form-wrap">
+      <div class="auth-form-header">
+        <div class="logo-square-sm">O</div>
+        <h2 class="form-title">Créer un compte</h2>
+        <p class="form-subtitle">Rejoignez la plateforme AIOps</p>
+      </div>
+
+      <div *ngIf="success" class="auth-success">
+        <i class="fas fa-check-circle"></i> {{ success }}
+        <div class="auth-links" style="margin-top:16px">
+          <a (click)="goLogin()" class="link">Retour à la connexion</a>
+        </div>
+      </div>
+
+      <form *ngIf="!success" (ngSubmit)="submit()" novalidate class="auth-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label><i class="fas fa-user"></i> Prénom</label>
+            <input type="text" class="form-control" [(ngModel)]="firstName" name="firstName"
+                   placeholder="Prénom" required maxlength="100">
+          </div>
+          <div class="form-group">
+            <label><i class="fas fa-user"></i> Nom</label>
+            <input type="text" class="form-control" [(ngModel)]="lastName" name="lastName"
+                   placeholder="Nom de famille" required maxlength="100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label><i class="fas fa-at"></i> Identifiant</label>
+          <input type="text" class="form-control" [(ngModel)]="username" name="username"
+                 placeholder="Votre identifiant unique" required minlength="3" maxlength="50">
+        </div>
+        <div class="form-group">
+          <label><i class="fas fa-envelope"></i> Email</label>
+          <input type="email" class="form-control" [(ngModel)]="email" name="email"
+                 placeholder="votre@email.com" required>
+        </div>
+        <div class="form-group">
+          <label><i class="fas fa-lock"></i> Mot de passe</label>
+          <div class="input-wrap">
+            <input [type]="showPassword ? 'text' : 'password'" class="form-control"
+                   [(ngModel)]="password" name="password"
+                   placeholder="Minimum 8 caractères" required minlength="8">
+            <button type="button" class="input-eye" (click)="showPassword = !showPassword">
+              <i [class]="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label><i class="fas fa-lock"></i> Confirmer le mot de passe</label>
+          <input type="password" class="form-control" [(ngModel)]="confirmPassword" name="confirmPassword"
+                 placeholder="Répétez le mot de passe" required>
+        </div>
+
+        <div *ngIf="error" class="auth-error">
+          <i class="fas fa-circle-exclamation"></i> {{ error }}
+        </div>
+
+        <button type="submit" class="btn-auth"
+                [disabled]="loading || !firstName || !lastName || !username || !email || !password || !confirmPassword">
+          <span *ngIf="loading" class="auth-spinner"></span>
+          <span *ngIf="!loading"><i class="fas fa-user-plus"></i></span>
+          {{ loading ? 'Création en cours…' : 'Créer mon compte' }}
+        </button>
+
+        <div class="auth-links">
+          Déjà un compte ? <a (click)="goLogin()" class="link">Se connecter</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+.auth-page { display:flex; min-height:100vh; font-family:'Inter',sans-serif; }
+.auth-left { width:520px; flex-shrink:0; background:linear-gradient(145deg,#000 0%,#1A1A1A 50%,#0D0D0D 100%); display:flex; align-items:stretch; position:relative; overflow:hidden; }
+.auth-left::before { content:''; position:absolute; top:-60px; left:-60px; width:320px; height:320px; background:radial-gradient(circle,rgba(255,121,0,.15) 0%,transparent 70%); border-radius:50%; }
+.auth-left-content { position:relative; z-index:1; padding:48px 52px; display:flex; flex-direction:column; width:100%; }
+.auth-logo { display:flex; align-items:center; gap:14px; margin-bottom:60px; }
+.logo-square { width:44px; height:44px; background:#FF7900; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:900; color:white; }
+.logo-text { line-height:1.2; }
+.logo-brand { font-size:20px; font-weight:700; color:white; }
+.logo-sub { font-size:12px; color:rgba(255,255,255,.5); text-transform:uppercase; letter-spacing:1px; }
+.auth-hero { margin-bottom:auto; }
+.hero-title { font-size:42px; font-weight:900; color:white; line-height:1.1; letter-spacing:-1.5px; margin-bottom:16px; }
+.hero-title span { color:#FF7900; }
+.hero-desc { font-size:15px; color:rgba(255,255,255,.55); line-height:1.7; max-width:340px; }
+.auth-footer-brand { margin-top:48px; font-size:11px; color:rgba(255,255,255,.2); }
+.auth-right { flex:1; background:#FAFAFA; display:flex; align-items:center; justify-content:center; padding:40px; }
+.auth-form-wrap { width:100%; max-width:440px; }
+.auth-form-header { text-align:center; margin-bottom:32px; }
+.logo-square-sm { width:52px; height:52px; background:#FF7900; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:900; color:white; margin:0 auto 16px; box-shadow:0 8px 24px rgba(255,121,0,.3); }
+.form-title { font-size:26px; font-weight:800; color:#1A1A1A; margin-bottom:6px; letter-spacing:-.5px; }
+.form-subtitle { font-size:14px; color:#888; }
+.auth-form { display:flex; flex-direction:column; gap:14px; }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.form-group label { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:#444; margin-bottom:6px; }
+.form-group label i { color:#FF7900; font-size:12px; }
+.input-wrap { position:relative; }
+.form-control { width:100%; padding:12px 16px; border:1.5px solid #E5E5E5; border-radius:8px; font-size:14px; color:#1A1A1A; background:white; outline:none; transition:all .2s; font-family:'Inter',sans-serif; box-sizing:border-box; }
+.form-control:focus { border-color:#FF7900; box-shadow:0 0 0 4px rgba(255,121,0,.10); }
+.input-wrap .form-control { padding-right:44px; }
+.input-eye { position:absolute; right:14px; top:50%; transform:translateY(-50%); background:none; border:none; color:#AAA; cursor:pointer; font-size:15px; padding:0; }
+.input-eye:hover { color:#FF7900; }
+.auth-error { display:flex; align-items:center; gap:8px; background:#FFEBEE; border-left:3px solid #C62828; color:#C62828; padding:11px 16px; border-radius:6px; font-size:13px; font-weight:500; }
+.auth-success { display:flex; flex-direction:column; gap:8px; background:#E8F5E9; border-left:3px solid #2E7D32; color:#2E7D32; padding:16px; border-radius:6px; font-size:14px; font-weight:500; margin-bottom:20px; }
+.btn-auth { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:14px 24px; background:#FF7900; color:white; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; transition:all .2s; font-family:'Inter',sans-serif; box-shadow:0 4px 16px rgba(255,121,0,.3); }
+.btn-auth:hover:not(:disabled) { background:#E86400; transform:translateY(-1px); }
+.btn-auth:disabled { opacity:.5; cursor:not-allowed; }
+.auth-spinner { width:18px; height:18px; border:2px solid rgba(255,255,255,.4); border-top-color:white; border-radius:50%; animation:spin .65s linear infinite; flex-shrink:0; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.auth-links { text-align:center; font-size:13px; color:#888; margin-top:8px; }
+.link { color:#FF7900; font-weight:600; cursor:pointer; text-decoration:none; }
+.link:hover { text-decoration:underline; }
+@media (max-width:768px) { .auth-left { display:none; } .auth-right { padding:24px; } .form-row { grid-template-columns:1fr; } }
+</style>

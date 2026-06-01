@@ -1,0 +1,159 @@
+<!-- ── Page Header ── -->
+<div class="page-header">
+  <div class="page-title-group">
+    <div class="breadcrumb">
+      <i class="fas fa-house"></i>
+      <span class="bc-sep">/</span>
+      <span class="bc-current">Tâches Humaines</span>
+    </div>
+    <h1>Tâches <span>Humaines</span></h1>
+    <div class="page-subtitle">Approbations et décisions requérant une intervention humaine</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" (click)="loadTasks()" [disabled]="loading">
+      <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i> Actualiser
+    </button>
+  </div>
+</div>
+
+<!-- ── Alerts ── -->
+<div *ngIf="successMsg" class="alert-banner success mb-20">
+  <i class="fas fa-circle-check alert-icon"></i>
+  <div class="alert-text">{{ successMsg }}</div>
+</div>
+<div *ngIf="errorMsg" class="alert-banner danger mb-20">
+  <i class="fas fa-circle-xmark alert-icon"></i>
+  <div class="alert-text">{{ errorMsg }}</div>
+</div>
+
+<!-- ── Tabs ── -->
+<div class="tab-bar">
+  <div class="tab-item" [class.active]="activeTab === 'pending'" (click)="activeTab = 'pending'">
+    <i class="fas fa-hourglass-half"></i>
+    En Attente
+    <span class="tab-count" *ngIf="pendingTasks.length > 0">{{ pendingTasks.length }}</span>
+  </div>
+  <div class="tab-item" [class.active]="activeTab === 'all'" (click)="activeTab = 'all'">
+    <i class="fas fa-list"></i>
+    Toutes les Tâches
+    <span class="tab-count">{{ allTasks.length }}</span>
+  </div>
+</div>
+
+<!-- ── Loading ── -->
+<div *ngIf="loading" style="padding:60px;text-align:center;">
+  <div class="spinner-orange"></div>
+  <div class="text-muted" style="margin-top:14px;">Chargement des tâches…</div>
+</div>
+
+<!-- ── Pending Tasks ── -->
+<div *ngIf="!loading && activeTab === 'pending'">
+
+  <div *ngIf="pendingTasks.length === 0" class="card">
+    <div class="empty-state">
+      <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
+      <div class="empty-title">Aucune tâche en attente</div>
+      <div class="empty-text">Toutes les approbations ont été traitées. Les nouvelles tâches apparaîtront ici.</div>
+    </div>
+  </div>
+
+  <div *ngIf="pendingTasks.length > 0" class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-user-check"></i></div>
+        Approbations en Attente
+      </div>
+      <span class="badge-status warning">{{ pendingTasks.length }} tâche(s)</span>
+    </div>
+
+    <div class="data-table-wrapper">
+      <table class="orange-table">
+        <thead>
+          <tr>
+            <th>Nom de la Tâche</th>
+            <th>Workflow ID</th>
+            <th>Statut</th>
+            <th>Créée le</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let task of pendingTasks">
+            <td>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="width:32px;height:32px;background:var(--color-warning-bg);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--color-warning);font-size:14px;flex-shrink:0;">
+                  <i class="fas fa-user-clock"></i>
+                </div>
+                <span style="font-weight:600;color:var(--gray-900);">{{ task.name }}</span>
+              </div>
+            </td>
+            <td><span class="mono" style="font-size:12px;color:var(--gray-500);">{{ task.workflowId || '—' }}</span></td>
+            <td><span class="badge-status pending">{{ task.status }}</span></td>
+            <td class="col-meta">{{ task.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
+            <td>
+              <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-success btn-sm"
+                        [disabled]="processingId === task.id"
+                        (click)="approve(task)">
+                  <i class="fas fa-check"></i>
+                  {{ processingId === task.id ? '…' : 'Approuver' }}
+                </button>
+                <button class="btn btn-danger btn-sm"
+                        [disabled]="processingId === task.id"
+                        (click)="reject(task)">
+                  <i class="fas fa-xmark"></i>
+                  {{ processingId === task.id ? '…' : 'Rejeter' }}
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── All Tasks ── -->
+<div *ngIf="!loading && activeTab === 'all'">
+
+  <div *ngIf="allTasks.length === 0" class="card">
+    <div class="empty-state">
+      <div class="empty-icon"><i class="fas fa-clipboard-list"></i></div>
+      <div class="empty-title">Aucune tâche</div>
+      <div class="empty-text">Aucune tâche humaine n'a encore été créée.</div>
+    </div>
+  </div>
+
+  <div *ngIf="allTasks.length > 0" class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-list"></i></div>
+        Toutes les Tâches
+      </div>
+      <span class="text-muted" style="font-size:13px;">{{ allTasks.length }} tâche(s)</span>
+    </div>
+
+    <div class="data-table-wrapper">
+      <table class="orange-table">
+        <thead>
+          <tr>
+            <th>Nom de la Tâche</th>
+            <th>Workflow ID</th>
+            <th>Statut</th>
+            <th>Créée le</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let task of allTasks">
+            <td style="font-weight:600;color:var(--gray-900);">{{ task.name }}</td>
+            <td><span class="mono" style="font-size:12px;color:var(--gray-500);">{{ task.workflowId || '—' }}</span></td>
+            <td>
+              <span class="badge-status" [ngClass]="getStatusClass(task.status)">{{ task.status }}</span>
+            </td>
+            <td class="col-meta">{{ task.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

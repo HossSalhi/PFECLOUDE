@@ -1,0 +1,14 @@
+﻿{
+    "strategy":  "AvailabilityDrop",
+    "runs":  1,
+    "allSucceeded":  false,
+    "successCount":  0,
+    "distinctPredictionTypes":  "",
+    "distinctActions":  "",
+    "distinctFavoritePlans":  "",
+    "distinctFavoriteStrategies":  "",
+    "actionVariabilityCount":  0,
+    "planVariabilityCount":  0,
+    "strategyVariabilityCount":  0,
+    "averageConfidence":  null
+}

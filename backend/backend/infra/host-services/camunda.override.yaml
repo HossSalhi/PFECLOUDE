@@ -1,0 +1,12 @@
+services:
+  elasticsearch:
+    environment:
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s" > /dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
