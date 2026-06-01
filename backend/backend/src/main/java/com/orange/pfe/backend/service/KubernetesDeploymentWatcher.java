@@ -210,6 +210,7 @@ public class KubernetesDeploymentWatcher {
         String app       = appName(deployment);
 
         if (EXCLUDED_NAMESPACES.contains(namespace)) return;
+        if (isMonitoringDisabled(deployment)) return;
 
         int delay = pollingProperties.getWatchInitialDelaySeconds();
         logger.info("[WATCH] Nouveau Deployment détecté: {}/{} — analyse IA dans {}s", namespace, app, delay);
@@ -227,6 +228,7 @@ public class KubernetesDeploymentWatcher {
         String app       = appName(deployment);
 
         if (EXCLUDED_NAMESPACES.contains(namespace)) return;
+        if (isMonitoringDisabled(deployment))        return;
         if (!isMeaningfulModification(deployment))   return;
         if (isDebounced(namespace, app))             return;
 
@@ -365,19 +367,21 @@ public class KubernetesDeploymentWatcher {
 
     /**
      * Résout le nom d'application depuis les labels Kubernetes.
-     * Priorité : label "aiops.io/app" > label "app" > metadata.name
+     * Priorité : aiops.io/app > app.kubernetes.io/name > app > metadata.name
      */
     private String appName(V1Deployment deployment) {
         if (deployment.getMetadata() == null) return "unknown";
         Map<String, String> labels = deployment.getMetadata().getLabels();
-        if (labels != null && labels.containsKey("aiops.io/app")) {
-            return labels.get("aiops.io/app");
-        }
-        if (labels != null && labels.containsKey("app")) {
-            return labels.get("app");
-        }
-        return deployment.getMetadata().getName() != null
-                ? deployment.getMetadata().getName() : "unknown";
+        if (labels != null && labels.containsKey("aiops.io/app"))             return labels.get("aiops.io/app");
+        if (labels != null && labels.containsKey("app.kubernetes.io/name"))   return labels.get("app.kubernetes.io/name");
+        if (labels != null && labels.containsKey("app"))                      return labels.get("app");
+        return deployment.getMetadata().getName() != null ? deployment.getMetadata().getName() : "unknown";
+    }
+
+    private boolean isMonitoringDisabled(V1Deployment deployment) {
+        if (deployment.getMetadata() == null) return false;
+        Map<String, String> labels = deployment.getMetadata().getLabels();
+        return labels != null && "false".equalsIgnoreCase(labels.get("helios.io/monitor"));
     }
 
     private String namespace(V1Deployment deployment) {
