@@ -3,14 +3,12 @@ backend/backend/target/
 frontend/node_modules/
 frontend/.angular/
 frontend/dist/
+frontend/pfe-frontend-*.tar
+frontend/build_output.txt
 
-# ML model binaries (too large for git)
+# ML model binaries & checkpoints (too large for git)
 model_base/
-model_artifacts/*.bin
-model_artifacts/*.gguf
-model_artifacts/*.safetensors
-model_artifacts/*.pt
-model_artifacts/*.pth
+model_artifacts/
 
 # Python
 __pycache__/
@@ -35,6 +33,10 @@ Thumbs.db
 .env*
 *.local
 
-# Logs
+# Logs & crash dumps
 *.log
+*.stackdump
 logs/
+
+# Downloaded/cached infrastructure artifacts
+backend/backend/infra/host-services/.cache/
