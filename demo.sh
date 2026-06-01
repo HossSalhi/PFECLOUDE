@@ -1,154 +1,220 @@
 #!/usr/bin/env bash
 # =============================================================================
-# HELIOS AIOps — Script de démonstration PFE Orange
-# Usage: ./demo.sh [status|cpu|memory|crash|clean]
+# HELIOS AIOps — Démo naturelle (sans injection artificielle)
+# Scénarios réels K8s : mauvais déploiement, panne service, nouvelle app
+# Usage: ./demo.sh [status|bad-deploy|outage|new-app|restore|clean]
 # =============================================================================
 set -euo pipefail
 
 MASTER="192.168.148.153"
-AI="192.168.148.161"
-MAILHOG_UI="http://192.168.148.161:8025"
-HELIOS_UI="http://192.168.148.153:30880"
 NS="pfe"
+HELIOS_UI="http://192.168.148.153:30880"
+GOOD_IMAGE="nginxinc/nginx-unprivileged:1.29-alpine"
+BAD_IMAGE="nginxinc/nginx-unprivileged:version-inexistante-xyz"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
 success() { echo -e "${GREEN}[OK]${NC}   $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*"; }
-
-get_demo_pod() {
-    ssh -o StrictHostKeyChecking=no kube@$MASTER \
-        "kubectl -n $NS get pod -l app=demo-app -o jsonpath='{.items[0].metadata.name}' 2>/dev/null"
-}
+warn()    { echo -e "${YELLOW}[ATTENTE]${NC} $*"; }
+header()  { echo -e "\n${BOLD}═══ $* ═══${NC}\n"; }
 
 # ── STATUS ────────────────────────────────────────────────────────────────────
 demo_status() {
+    header "HELIOS AIOps — État du système"
+
+    info "Pods applicatifs (pfe namespace):"
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS get pods -l 'app in (backend,frontend,demo-app)' -o wide --no-headers" 2>/dev/null | \
+        awk '{printf "  %-45s %-10s %s\n", $1, $4, $7}'
+
     echo ""
-    echo "══════════════════════════════════════════════════════"
-    echo "  HELIOS AIOps — État du système"
-    echo "══════════════════════════════════════════════════════"
-    echo ""
-    info "Pods pfe namespace:"
-    ssh -o StrictHostKeyChecking=no kube@$MASTER "kubectl -n $NS get pods --no-headers" 2>/dev/null | \
-        awk '{printf "  %-42s %-12s\n", $1, $4}'
-    echo ""
-    info "Incidents actifs en DB:"
+    info "Incidents actifs:"
     ssh -o StrictHostKeyChecking=no kube@$MASTER \
         "kubectl -n $NS exec postgres-4 -- psql -U postgres pfe_db -t -c \
-        \"SELECT '  #'||id||' ['||status||'] '||app||' — '||substring(title,1,50) FROM incident \
-         WHERE status IN ('NEW','OPEN','IN_PROGRESS','WAITING_FOR_APPROVAL') ORDER BY id DESC LIMIT 5;\"" 2>/dev/null | \
-        grep -v "^$" || echo "  (aucun incident actif)"
+        \"SELECT '  #'||id||' ['||status||'] '||namespace||'/'||app||' — '||incident_type \
+         FROM incident WHERE status IN ('NEW','OPEN','IN_PROGRESS','WAITING_FOR_APPROVAL') \
+         ORDER BY id DESC LIMIT 5;\"" 2>/dev/null | grep -v "^$" || echo "  (aucun incident actif — système sain)"
+
     echo ""
-    info "AI service:   http://$AI:8000/health"
-    info "MailHog:      $MAILHOG_UI"
-    info "Interface UI: $HELIOS_UI"
+    info "Interfaces:"
+    echo "  • HELIOS UI   : $HELIOS_UI"
+    echo "  • Incidents   : $HELIOS_UI/incidents"
+    echo "  • Tâches IA   : $HELIOS_UI/ai-decisions"
+    echo "  • Remédiation : $HELIOS_UI/remediation"
     echo ""
 }
 
-# ── CPU STRESS ────────────────────────────────────────────────────────────────
-demo_cpu() {
-    info "Injection CPU stress sur demo-app (4 workers)..."
-    POD=$(get_demo_pod)
-    [[ -z "$POD" ]] && { error "demo-app pod non trouvé"; exit 1; }
+# ── SCÉNARIO 1 : MAUVAIS DÉPLOIEMENT ─────────────────────────────────────────
+# Ce qui se passe en production quand un dev pousse une image inexistante
+demo_bad_deploy() {
+    header "Scénario 1 — Mauvais déploiement (ImagePullBackOff)"
 
-    for i in 1 2 3 4; do
-        ssh -o StrictHostKeyChecking=no kube@$MASTER \
-            "kubectl -n $NS exec $POD -- sh -c 'nohup sh -c \"while :; do :; done\" &>/dev/null &'" 2>/dev/null
-    done
-    success "CPU stress injecté sur $POD (4 boucles infinies)"
+    info "Situation : un développeur a pushé une version avec une mauvaise image"
+    info "Déploiement en cours : demo-app → image inexistante..."
     echo ""
-    warn "Détection AI dans ~3-5 minutes. Vérifiez ensuite:"
-    echo "  • UI: $HELIOS_UI"
-    echo "  • Emails: $MAILHOG_UI"
-    echo "  • Nettoyage: ./demo.sh clean"
-}
 
-# ── MEMORY PRESSURE (simulation directe AI) ───────────────────────────────────
-demo_memory() {
-    info "Test détection MEMORY_PRESSURE (inject via feature_overrides)..."
-    RESULT=$(curl -s -X POST "http://$AI:8000/predict" \
-        -H 'Content-Type: application/json' \
-        -d '{"namespace":"pfe","app":"demo-app","window_minutes":5,
-             "feature_overrides":{"memory_working_set_bytes":1900000000,
-             "metric_risk_score":0.88,"overall_risk_score":0.88}}' 2>/dev/null)
-    [[ -z "$RESULT" ]] && { error "AI service non disponible"; exit 1; }
-    INCIDENT=$(echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['incident'])")
-    TYPE=$(echo "$RESULT"     | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('incident_type','?'))")
-    SEV=$(echo "$RESULT"      | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('severity','?'))")
-    CONF=$(echo "$RESULT"     | python3 -c "import json,sys; d=json.load(sys.stdin); print(f\"{d.get('confidence',0):.2f}\")")
-    if [[ "$INCIDENT" == "True" ]]; then
-        success "DÉTECTÉ — type=$TYPE severity=$SEV confidence=$CONF"
-    else
-        warn "Non détecté — type=$TYPE confidence=$CONF (modèle OK, seuil non atteint)"
-    fi
-}
-
-# ── DISK PRESSURE (simulation directe AI) ─────────────────────────────────────
-demo_disk() {
-    info "Test détection DISK_PRESSURE (inject via feature_overrides)..."
-    RESULT=$(curl -s -X POST "http://$AI:8000/predict" \
-        -H 'Content-Type: application/json' \
-        -d '{"namespace":"pfe","app":"demo-app","window_minutes":5,
-             "feature_overrides":{"metric_risk_score":0.82,"overall_risk_score":0.82,
-             "error_ratio":0.15,"error_line_count":50.0}}' 2>/dev/null)
-    [[ -z "$RESULT" ]] && { error "AI service non disponible"; exit 1; }
-    INCIDENT=$(echo "$RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['incident'])")
-    TYPE=$(echo "$RESULT"     | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('incident_type','?'))")
-    CONF=$(echo "$RESULT"     | python3 -c "import json,sys; d=json.load(sys.stdin); print(f\"{d.get('confidence',0):.2f}\")")
-    if [[ "$INCIDENT" == "True" ]]; then
-        success "DÉTECTÉ — type=$TYPE confidence=$CONF"
-    else
-        warn "Non détecté — type=$TYPE confidence=$CONF"
-    fi
-}
-
-# ── CRASH LOOP ────────────────────────────────────────────────────────────────
-demo_crash() {
-    info "Simulation crash loop (suppression pod demo-app)..."
-    POD=$(get_demo_pod)
-    [[ -z "$POD" ]] && { error "demo-app pod non trouvé"; exit 1; }
     ssh -o StrictHostKeyChecking=no kube@$MASTER \
-        "kubectl -n $NS delete pod $POD --grace-period=0" 2>/dev/null
-    success "Pod $POD supprimé — K8s recrée (restart_count +1)"
-    warn "Détection AI dans ~2 minutes"
+        "kubectl -n $NS set image deployment/demo-app demo=$BAD_IMAGE" 2>/dev/null
+    success "Image erronée déployée : $BAD_IMAGE"
+
+    echo ""
+    warn "Dans ~30 secondes : K8s tente de télécharger l'image → ErrImagePull"
+    warn "Dans ~2 minutes   : HELIOS détecte des replicas unavailable → incident créé"
+    warn "Dans ~3 minutes   : HELIOS recommande un ROLLBACK_DEPLOYMENT"
+    echo ""
+    info "Surveille dans l'UI : $HELIOS_UI/incidents"
+    info "Pour voir les pods : ssh kube@$MASTER kubectl -n $NS get pods -l app=demo-app -w"
+    echo ""
+    echo -e "${YELLOW}Quand l'incident apparaît dans l'UI → utilise './demo.sh restore' pour revenir à la normale${NC}"
 }
 
-# ── CLEANUP ───────────────────────────────────────────────────────────────────
+# ── SCÉNARIO 2 : PANNE DE SERVICE ────────────────────────────────────────────
+# Ce qui se passe quand un opérateur scale accidentellement à 0
+demo_outage() {
+    header "Scénario 2 — Panne de service (scale à 0)"
+
+    info "Situation : un opérateur a accidentellement mis demo-app à 0 replicas"
+    info "Exécution du scale-down..."
+    echo ""
+
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS scale deployment/demo-app --replicas=0" 2>/dev/null
+    success "demo-app : 0 replicas → service en panne"
+
+    echo ""
+    warn "Dans ~30 secondes : kube-state-metrics voit unavailable_replicas=2"
+    warn "Dans ~2 minutes   : HELIOS détecte la panne → incident CRITICAL créé"
+    warn "Dans ~3 minutes   : HELIOS auto-remédie (SCALE_DEPLOYMENT en mode auto)"
+    echo ""
+    info "Surveille dans l'UI : $HELIOS_UI/incidents"
+    echo ""
+    echo -e "${YELLOW}HELIOS va automatiquement rescaler à 2 replicas sans intervention${NC}"
+}
+
+# ── SCÉNARIO 3 : NOUVELLE APPLICATION ────────────────────────────────────────
+# HELIOS surveille automatiquement toute nouvelle app déployée
+demo_new_app() {
+    header "Scénario 3 — Nouvelle application (auto-découverte)"
+
+    info "Situation : l'équipe déploie une nouvelle application dans le cluster"
+    info "Déploiement de 'mon-api' dans le namespace pfe..."
+    echo ""
+
+    ssh -o StrictHostKeyChecking=no kube@$MASTER "kubectl apply -f -" 2>/dev/null << 'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mon-api
+  namespace: pfe
+  labels:
+    app: mon-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mon-api
+  template:
+    metadata:
+      labels:
+        app: mon-api
+    spec:
+      containers:
+      - name: mon-api
+        image: nginxinc/nginx-unprivileged:1.29-alpine
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 200m
+            memory: 64Mi
+YAML
+
+    success "Application 'mon-api' déployée dans le namespace pfe"
+    echo ""
+    warn "Dans ~45 secondes : le watcher K8s de HELIOS détecte 'mon-api'"
+    warn "Dans ~2 minutes   : première analyse IA automatique"
+    warn "Aucune configuration nécessaire — HELIOS surveille tout automatiquement"
+    echo ""
+    info "Vérifier la surveillance dans les logs:"
+    echo "  ssh kube@$MASTER kubectl -n $NS logs deploy/backend --since=3m | grep mon-api"
+    echo ""
+    echo -e "${YELLOW}Pour nettoyer : ./demo.sh clean${NC}"
+}
+
+# ── RESTORE ────────────────────────────────────────────────────────────────────
+demo_restore() {
+    header "Restauration — Retour à l'état normal"
+
+    info "Restauration de l'image correcte sur demo-app..."
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS set image deployment/demo-app demo=$GOOD_IMAGE" 2>/dev/null && \
+        success "Image restaurée : $GOOD_IMAGE"
+
+    info "Rescale demo-app à 2 replicas..."
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS scale deployment/demo-app --replicas=2" 2>/dev/null && \
+        success "demo-app → 2 replicas"
+
+    echo ""
+    info "Attente démarrage des pods..."
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS rollout status deployment/demo-app --timeout=60s" 2>/dev/null
+    echo ""
+    success "Système restauré — demo-app opérationnel"
+}
+
+# ── CLEAN ─────────────────────────────────────────────────────────────────────
 demo_clean() {
-    info "Nettoyage du chaos..."
-    POD=$(get_demo_pod)
-    if [[ -n "$POD" ]]; then
-        ssh -o StrictHostKeyChecking=no kube@$MASTER \
-            "kubectl -n $NS exec $POD -- pkill -9 sh 2>/dev/null || true"
-        success "CPU stress stoppé sur $POD"
-    fi
+    header "Nettoyage complet"
+
+    demo_restore
+
+    info "Suppression de mon-api (si déployée)..."
+    ssh -o StrictHostKeyChecking=no kube@$MASTER \
+        "kubectl -n $NS delete deployment mon-api --ignore-not-found" 2>/dev/null && \
+        success "mon-api supprimée"
+
     echo ""
     info "Incidents actifs restants:"
     ssh -o StrictHostKeyChecking=no kube@$MASTER \
         "kubectl -n $NS exec postgres-4 -- psql -U postgres pfe_db -t -c \
         \"SELECT '  #'||id||' ['||status||'] '||app FROM incident \
-         WHERE status IN ('NEW','OPEN','IN_PROGRESS','WAITING_FOR_APPROVAL') ORDER BY id DESC;\"" 2>/dev/null | \
+         WHERE status IN ('NEW','OPEN','IN_PROGRESS','WAITING_FOR_APPROVAL') \
+         ORDER BY id DESC LIMIT 5;\"" 2>/dev/null | \
         grep -v "^$" || echo "  (aucun — propre!)"
 }
 
 # ── DISPATCH ──────────────────────────────────────────────────────────────────
 CMD="${1:-status}"
 case "$CMD" in
-    cpu)    demo_cpu    ;;
-    memory) demo_memory ;;
-    disk)   demo_disk   ;;
-    crash)  demo_crash  ;;
-    clean)  demo_clean  ;;
-    status) demo_status ;;
+    status)     demo_status     ;;
+    bad-deploy) demo_bad_deploy ;;
+    outage)     demo_outage     ;;
+    new-app)    demo_new_app    ;;
+    restore)    demo_restore    ;;
+    clean)      demo_clean      ;;
     *)
-        echo "Usage: $0 [status|cpu|memory|disk|crash|clean]"
         echo ""
-        echo "  status  — état: pods, incidents actifs, URLs"
-        echo "  cpu     — injecte CPU stress (détection ~3-5min)"
-        echo "  memory  — teste détection mémoire via simulation AI"
-        echo "  disk    — teste détection erreurs disque via simulation AI"
-        echo "  crash   — simule crash loop (supprime pod demo-app)"
-        echo "  clean   — stoppe le chaos, liste incidents restants"
-        exit 1 ;;
+        echo -e "${BOLD}HELIOS AIOps — Démo naturelle${NC}"
+        echo ""
+        echo "Usage: $0 [commande]"
+        echo ""
+        echo "  status       — état du système (pods, incidents, URLs)"
+        echo "  bad-deploy   — Scénario 1 : mauvais déploiement (ImagePullBackOff)"
+        echo "  outage       — Scénario 2 : panne de service (scale à 0)"
+        echo "  new-app      — Scénario 3 : nouvelle app → auto-découverte HELIOS"
+        echo "  restore      — restaurer demo-app à l'état normal"
+        echo "  clean        — nettoyer tous les scénarios"
+        echo ""
+        echo "Flow suggéré pour la soutenance:"
+        echo "  1. ./demo.sh status     (montrer l'état sain)"
+        echo "  2. ./demo.sh bad-deploy (déclencher le scénario)"
+        echo "  3. Ouvrir $HELIOS_UI/incidents"
+        echo "  4. Attendre l'incident (2-3 min)"
+        echo "  5. ./demo.sh restore    (ou laisser HELIOS gérer)"
+        exit 1
+        ;;
 esac

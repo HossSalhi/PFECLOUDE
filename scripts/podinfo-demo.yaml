@@ -1,0 +1,85 @@
+# =============================================================================
+# podinfo — real GitHub app (github.com/stefanprodan/podinfo) for HELIOS demo
+# Purpose-built K8s microservice with native Prometheus metrics + chaos endpoints:
+#   GET  /healthz /readyz       — health probes
+#   GET  /metrics               — Prometheus metrics (HTTP latency, requests)
+#   POST /panic                 — crashes the process (→ CrashLoopBackOff)
+#   GET  /status/{code}         — returns given HTTP code (→ real 5xx rate)
+#   GET  /delay/{seconds}       — slow response (→ latency spike)
+# Image pre-loaded into containerd on both workers (cluster has no internet).
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo
+  namespace: pfe
+  labels:
+    app: podinfo
+    aiops.io/app: podinfo
+    aiops.io/monitor: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+        aiops.io/app: podinfo
+        aiops.io/monitor: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9898"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        node-type: worker
+      containers:
+        - name: podinfo
+          image: docker.io/stefanprodan/podinfo:6.7.0
+          imagePullPolicy: IfNotPresent          # cluster has no internet — never pull
+          ports:
+            - name: http
+              containerPort: 9898
+          command:
+            - ./podinfo
+            - --port=9898
+            - --level=info
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9898
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9898
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podinfo
+  namespace: pfe
+  labels:
+    app: podinfo
+spec:
+  type: ClusterIP
+  selector:
+    app: podinfo
+  ports:
+    - name: http
+      port: 9898
+      targetPort: 9898
