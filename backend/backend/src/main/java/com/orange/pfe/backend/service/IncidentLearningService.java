@@ -38,16 +38,20 @@ public class IncidentLearningService {
     private final IncidentActionRepository actionRepository;
     private final AIOpsClientService aiopsClientService;
 
+    private final LeaderElectionService leaderElectionService;
+
     public IncidentLearningService(
             IncidentRepository incidentRepository,
             IncidentLearningRepository learningRepository,
             IncidentActionRepository actionRepository,
-            AIOpsClientService aiopsClientService
+            AIOpsClientService aiopsClientService,
+            LeaderElectionService leaderElectionService
     ) {
         this.incidentRepository = incidentRepository;
         this.learningRepository = learningRepository;
         this.actionRepository = actionRepository;
         this.aiopsClientService = aiopsClientService;
+        this.leaderElectionService = leaderElectionService;
     }
 
     /**
@@ -57,6 +61,8 @@ public class IncidentLearningService {
     @Scheduled(fixedDelay = 300_000)
     @Transactional
     public void autoRecordOutcomes() {
+        // HA: only the leader replica records outcomes (avoids double-learning).
+        if (!leaderElectionService.isLeader()) return;
         LocalDateTime since = LocalDateTime.now().minusHours(6);
 
         List<Incident> candidates = incidentRepository.findBySource(IncidentSource.AI).stream()

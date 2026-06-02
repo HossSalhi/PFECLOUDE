@@ -1,0 +1,16 @@
+[Unit]
+# After a reboot, calico-node's CNI kubeconfig token can be stale, so new pods fail
+# with: plugin type="calico" failed (add): error getting ClusterInformation:
+# connection is unauthorized: Unauthorized.
+# Restarting calico-node regenerates the CNI kubeconfig (install-cni init container),
+# which fixes new-pod scheduling. This runs once per boot, after the API is up.
+Description=HELIOS: refresh Calico CNI tokens after boot
+After=kubelet.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'KC=/etc/kubernetes/admin.conf; for i in $(seq 1 60); do /usr/bin/kubectl --kubeconfig=$KC get nodes >/dev/null 2>&1 && break; sleep 5; done; /usr/bin/kubectl --kubeconfig=$KC -n kube-system delete pod -l k8s-app=calico-node --grace-period=20; /usr/bin/kubectl --kubeconfig=$KC -n kube-system rollout status ds/calico-node --timeout=120s'
+
+[Install]
+WantedBy=multi-user.target

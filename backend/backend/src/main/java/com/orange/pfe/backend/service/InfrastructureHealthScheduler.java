@@ -46,6 +46,7 @@ public class InfrastructureHealthScheduler {
     private final IncidentHistoryService historyService;
     private final AIOpsClientService aiOpsClientService;
     private final ActionService actionService;
+    private final LeaderElectionService leaderElectionService;
 
     public InfrastructureHealthScheduler(
             InfraHealthProperties props,
@@ -53,7 +54,8 @@ public class InfrastructureHealthScheduler {
             IncidentRepository incidentRepository,
             IncidentHistoryService historyService,
             AIOpsClientService aiOpsClientService,
-            ActionService actionService
+            ActionService actionService,
+            LeaderElectionService leaderElectionService
     ) {
         this.props = props;
         this.healthService = healthService;
@@ -61,12 +63,15 @@ public class InfrastructureHealthScheduler {
         this.historyService = historyService;
         this.aiOpsClientService = aiOpsClientService;
         this.actionService = actionService;
+        this.leaderElectionService = leaderElectionService;
     }
 
     @Scheduled(fixedDelayString = "${infra.health.interval-seconds:300}000")
     @Transactional
     public void checkInfrastructure() {
         if (!props.isEnabled()) return;
+        // HA: only the leader replica runs infra health checks (avoids duplicate incidents).
+        if (!leaderElectionService.isLeader()) return;
 
         log.info("Infrastructure health check started");
         List<ComponentStatus> statuses = healthService.checkAll();

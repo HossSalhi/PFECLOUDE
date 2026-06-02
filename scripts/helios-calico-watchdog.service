@@ -1,0 +1,7 @@
+[Unit]
+Description=HELIOS Calico CNI watchdog (reactive — covers worker reboots / token expiry)
+After=kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/helios-calico-watchdog.sh

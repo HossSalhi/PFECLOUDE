@@ -43,6 +43,7 @@ public class CamundaWorkflowRecoveryService {
     private final IncidentHistoryService incidentHistoryService;
     private final RemediationMetricsService remediationMetricsService;
     private final RemediationProperties remediationProperties;
+    private final LeaderElectionService leaderElectionService;
 
     public CamundaWorkflowRecoveryService(
             WorkflowRepository workflowRepository,
@@ -54,7 +55,8 @@ public class CamundaWorkflowRecoveryService {
             HumanTaskService humanTaskService,
             IncidentHistoryService incidentHistoryService,
             RemediationMetricsService remediationMetricsService,
-            RemediationProperties remediationProperties
+            RemediationProperties remediationProperties,
+            LeaderElectionService leaderElectionService
     ) {
         this.workflowRepository = workflowRepository;
         this.incidentActionRepository = incidentActionRepository;
@@ -66,6 +68,7 @@ public class CamundaWorkflowRecoveryService {
         this.incidentHistoryService = incidentHistoryService;
         this.remediationMetricsService = remediationMetricsService;
         this.remediationProperties = remediationProperties;
+        this.leaderElectionService = leaderElectionService;
     }
 
     @Scheduled(
@@ -74,6 +77,10 @@ public class CamundaWorkflowRecoveryService {
     )
     @Transactional
     public void recoverExecutionPendingWorkflows() {
+        // HA: only the leader replica runs recovery, so workflows are not processed twice.
+        if (!leaderElectionService.isLeader()) {
+            return;
+        }
         List<WorkflowInstance> executionPendingWorkflows = workflowRepository.findByStatusAndOrchestrationState(
                 WorkflowStatus.RUNNING,
                 WorkflowOrchestrationState.EXECUTION_PENDING

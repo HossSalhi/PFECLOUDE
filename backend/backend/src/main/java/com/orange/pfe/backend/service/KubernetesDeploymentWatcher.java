@@ -63,6 +63,7 @@ public class KubernetesDeploymentWatcher {
     private final AiopsPollingProperties pollingProperties;
     private final AIOpsOrchestrationService orchestrationService;
     private final IncidentRepository incidentRepository;
+    private final LeaderElectionService leaderElectionService;
 
     /** Exécuteur pour les analyses planifiées post-délai. */
     private final ScheduledExecutorService analysisExecutor =
@@ -88,11 +89,13 @@ public class KubernetesDeploymentWatcher {
     public KubernetesDeploymentWatcher(
             AiopsPollingProperties pollingProperties,
             AIOpsOrchestrationService orchestrationService,
-            IncidentRepository incidentRepository
+            IncidentRepository incidentRepository,
+            LeaderElectionService leaderElectionService
     ) {
         this.pollingProperties = pollingProperties;
         this.orchestrationService = orchestrationService;
         this.incidentRepository = incidentRepository;
+        this.leaderElectionService = leaderElectionService;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -259,6 +262,11 @@ public class KubernetesDeploymentWatcher {
 
     private void triggerAnalysis(String namespace, String app, String reason) {
         try {
+            // HA: only the leader replica analyses, so incidents are not created in duplicate.
+            if (!leaderElectionService.isLeader()) {
+                logger.debug("[WATCH] Not the leader replica — skipping analysis for {}/{}", namespace, app);
+                return;
+            }
             // Ne lance pas d'analyse si un incident AI est déjà actif pour ce target
             if (hasActiveAiIncident(namespace, app)) {
                 logger.debug("[WATCH] Incident AI actif pour {}/{} — analyse ignorée", namespace, app);

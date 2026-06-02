@@ -44,6 +44,10 @@ class PredictRequest(BaseModel):
         default=None,
         description="Optional trusted runtime features supplied by the caller",
     )
+    skip_llm: bool = Field(
+        default=False,
+        description="Skip LLM — use XGBoost-only prediction (fast check mode)",
+    )
     remediation_context: dict[str, Any] | None = Field(
         default=None,
         description="Optional bounded-autonomy context with recent remediation history",

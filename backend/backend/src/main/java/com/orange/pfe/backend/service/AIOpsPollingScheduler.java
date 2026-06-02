@@ -33,23 +33,31 @@ public class AIOpsPollingScheduler {
     private final IncidentRepository incidentRepository;
     private final AiopsPollingProperties pollingProperties;
     private final KubernetesDiscoveryService discoveryService;
+    private final LeaderElectionService leaderElectionService;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public AIOpsPollingScheduler(
             AIOpsOrchestrationService orchestrationService,
             IncidentRepository incidentRepository,
             AiopsPollingProperties pollingProperties,
-            KubernetesDiscoveryService discoveryService
+            KubernetesDiscoveryService discoveryService,
+            LeaderElectionService leaderElectionService
     ) {
         this.orchestrationService = orchestrationService;
         this.incidentRepository = incidentRepository;
         this.pollingProperties = pollingProperties;
         this.discoveryService = discoveryService;
+        this.leaderElectionService = leaderElectionService;
     }
 
     @Scheduled(fixedDelayString = "${aiops.polling.interval-millis:120000}")
     public void poll() {
         if (!pollingProperties.isEnabled()) {
+            return;
+        }
+        // HA: only the leader replica polls, so incidents are not created in duplicate.
+        if (!leaderElectionService.isLeader()) {
+            logger.debug("AIOps polling: not the leader replica, skipping this cycle");
             return;
         }
         if (!running.compareAndSet(false, true)) {

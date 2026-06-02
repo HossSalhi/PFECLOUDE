@@ -49,17 +49,8 @@ class PlanOption:
 
 
 class InferenceEngine:
-    def __init__(
-        self,
-        model_bundle: ModelBundle,
-        llm_model: str = "aiops-sre",
-        llm_fallback_model: str = "qwen2.5:3b",
-        llm_second_fallback_model: str = "qwen2:0.5b",
-    ) -> None:
+    def __init__(self, model_bundle: ModelBundle) -> None:
         self.model_bundle = model_bundle
-        self._DEFAULT_LLM_MODEL = llm_model
-        self._FALLBACK_LLM_MODEL = llm_fallback_model
-        self._SECOND_FALLBACK_LLM_MODEL = llm_second_fallback_model
 
     @property
     def model_loaded(self) -> bool:
@@ -69,6 +60,7 @@ class InferenceEngine:
         self,
         features: dict[str, float],
         remediation_context: dict[str, object] | None = None,
+        skip_llm: bool = False,
     ) -> InferenceResult:
         safe_features = {
             key: self._finite(value)
@@ -101,9 +93,12 @@ class InferenceEngine:
         db_pool_pending = self._finite(safe_features.get("db_pool_pending", 0.0))
         db_pool_usage_ratio = self._finite(safe_features.get("db_pool_usage_ratio", 0.0))
 
-        # --- LLM full analysis via Ollama (local model) ---
-        # Includes past incident outcomes for in-context learning. Falls back to rule-based on failure.
-        llm_result = self._full_llm_predict(safe_features, remediation_context)
+        # --- LLM full analysis (qwen2:0.5b via Ollama) ---
+        # Skip LLM when signals are too weak (saves 3 min per silent app)
+        _risk = self._finite(safe_features.get('metric_risk_score', 0.0))
+        _auto_skip = _risk < 0.01 and pod_restarts < 1.0 and unavailable_replicas < 1.0 and latency_p95 < 0.01 and http_5xx_ratio < 0.01
+        _skip_llm = skip_llm or _auto_skip
+        llm_result = None if _skip_llm else self._full_llm_predict(safe_features)
 
         if llm_result is not None:
             incident = llm_result["incident"]
@@ -119,7 +114,7 @@ class InferenceEngine:
             )
             recommendation_only_reason = (
                 None if execution_mode == "AUTO_EXECUTE_CANDIDATE"
-                else f"LLM confidence {confidence:.2f} below auto-execute threshold (0.55) — human review required."
+                else f"LLM confidence {confidence:.2f} below auto-execute threshold (0.70) — human review required."
             )
             chosen_plan_id = None
             ranked_plans = self._build_ranked_plans(
@@ -214,6 +209,64 @@ class InferenceEngine:
                 chosen_plan_id = None
                 decision_explanation = self._build_no_incident_explanation(confidence)
 
+        # ── ML Scenario Classifier Override (52 classes) ────────────────
+        # The dedicated scenario classifier is the authoritative source for
+        # incident_type. It can also promote incident=True if very confident,
+        # bypassing the conservative rule-based incident detection.
+        _ml_type, _ml_conf = self._predict_scenario_ml(safe_features)
+        if _ml_type and _ml_type != "NO_INCIDENT":
+            incident_type = _ml_type
+            if not incident and _ml_conf >= 0.50:
+                incident = True
+                noise = False
+                if _ml_conf > confidence:
+                    confidence = _ml_conf
+                # Re-derive severity + action consistent with ML type
+                severity = self._predict_severity(safe_features, incident, confidence, incident_type)
+                ranked_plans = self._build_ranked_plans(
+                    safe_features, incident_type, severity, confidence, incident, remediation_context
+                )
+                if ranked_plans:
+                    selected_index = self._select_plan_index(ranked_plans, remediation_context, incident_type)
+                    if selected_index > 0:
+                        chosen_plan = ranked_plans[selected_index]
+                        ranked_plans = [chosen_plan] + [p for i, p in enumerate(ranked_plans) if i != selected_index]
+                    else:
+                        chosen_plan = ranked_plans[0]
+                    action = chosen_plan.recommended_action
+                    final_executable_action = (
+                        chosen_plan.executable_action if chosen_plan.execution_mode == "AUTO_EXECUTE_CANDIDATE" else None
+                    )
+                    execution_mode = chosen_plan.execution_mode
+                    recommendation_only_reason = (
+                        None if execution_mode == "AUTO_EXECUTE_CANDIDATE"
+                        else self._build_recommendation_only_reason(chosen_plan, confidence, severity)
+                    )
+                    chosen_plan_id = chosen_plan.plan_id
+                    decision_explanation = self._build_decision_explanation(chosen_plan, ranked_plans, remediation_context)
+
+        # --- Feature-driven label corrections (reduce mislabels & false positives) ---
+        if incident:
+            mem_trend = self._finite(safe_features.get("memory_trend_bytes_per_sec", 0.0))
+            # (a) CPU saturation mislabeled as a scheduling/resource-pending family.
+            #     A genuinely pending pod uses ~0 CPU and has unavailable replicas;
+            #     elevated CPU on a running pod with no restarts is CPU stress.
+            if (cpu_cores >= 0.20 and pod_restarts < 1.0 and unavailable_replicas < 1.0
+                    and incident_type == "POD_PENDING_INSUFFICIENT_RESOURCES"):
+                incident_type = "CPU_STRESS"
+            # (b) Many restarts -> the dominant problem is a crash loop.
+            elif pod_restarts >= 3.0 and incident_type != "POD_CRASH_LOOP":
+                incident_type = "POD_CRASH_LOOP"
+            # (c) MEMORY_LEAK false positive: a real leak GROWS. High-but-flat memory
+            #     (e.g. a JVM holding its heap) is not a leak -- demote when memory is
+            #     not trending up, confidence is moderate, and no other symptom exists.
+            if (incident_type in ("MEMORY_LEAK", "MEMORY_STRESS")
+                    and mem_trend <= 0.0 and confidence < 0.70
+                    and pod_restarts < 1.0 and unavailable_replicas < 1.0):
+                incident = False
+                noise = True
+                incident_type = "NO_INCIDENT"
+
         summary = self._build_summary(incident, incident_type, severity, confidence)
         decision_context = self._build_decision_context(
             incident_type,
@@ -265,6 +318,32 @@ class InferenceEngine:
             rule_score=round(self._finite(rule_score), 4),
             model_score=round(model_score, 4) if model_score is not None else None,
         )
+
+    def _predict_scenario_ml(self, features: dict[str, float]) -> tuple[str | None, float]:
+        """Use ML scenario classifier (52 classes) to determine incident_type."""
+        bundle = self.model_bundle
+        if bundle.scenario_model is None or not bundle.scenario_labels:
+            return None, 0.0
+
+        vector = self._to_vector(features)
+        try:
+            if hasattr(bundle.scenario_model, "predict_proba"):
+                probs = bundle.scenario_model.predict_proba(vector)
+                idx = int(probs.argmax(axis=1)[0])
+                conf = float(probs[0][idx])
+            else:
+                pred = bundle.scenario_model.predict(vector)
+                idx = int(pred[0])
+                conf = 1.0
+        except Exception:
+            return None, 0.0
+
+        if idx < 0 or idx >= len(bundle.scenario_labels):
+            return None, 0.0
+        if conf < 0.30:
+            return None, conf
+
+        return str(bundle.scenario_labels[idx]).upper(), conf
 
     def _predict_incident_score(self, features: dict[str, float]) -> float | None:
         if not self.model_bundle.loaded:
@@ -408,23 +487,16 @@ class InferenceEngine:
         numeric = cls._finite(value, default=float("nan"))
         return numeric if math.isfinite(numeric) else None
 
-    def _full_llm_predict(
-        self,
-        features: dict[str, float],
-        remediation_context: dict[str, object] | None = None,
-    ) -> dict | None:
+    def _full_llm_predict(self, features: dict[str, float]) -> dict | None:
         """
-        LLM-based incident analysis with in-context auto-learning.
-        - Uses qwen2.5:3b (local Ollama) as primary model for true reasoning on raw metrics.
-        - Falls back to qwen2:0.5b if the primary model is unavailable.
-        - Injects past incident outcomes from the learning DB into the prompt.
-        - Short-circuits with NO_INCIDENT when all signals are within normal ranges.
-        Returns a dict with all decision fields, or None (triggers rule-based fallback).
+        Full LLM-based analysis via qwen2:0.5b (Ollama).
+        Pre-classifies metrics as labels so the small model can reason correctly.
+        Short-circuits with NO_INCIDENT when all signals are normal (no LLM call needed).
+        Returns a dict with all fields, or None on failure (triggers rule-based fallback).
         """
         try:
             import httpx as _httpx
             import json as _json
-            import os
 
             memory_gb = features.get("memory_working_set_bytes", 0.0) / 1_000_000_000
             cpu = features.get("cpu_usage_cores", 0.0)
@@ -437,6 +509,7 @@ class InferenceEngine:
             db_pending = features.get("db_pool_pending", 0.0)
             risk = features.get("overall_risk_score", 0.0)
 
+            # Pre-classify each signal so the small LLM can reason about labels, not numbers.
             def _lv(val: float, hi: float, crit: float) -> str:
                 if val >= crit:
                     return "CRITICAL"
@@ -462,7 +535,7 @@ class InferenceEngine:
             }
             elevated = {k: v for k, v in signals.items() if v != "NORMAL"}
 
-            # Short-circuit: skip LLM if all signals are normal.
+            # Short-circuit: if nothing is elevated, skip the LLM entirely.
             if not elevated:
                 return {
                     "incident": False,
@@ -474,67 +547,81 @@ class InferenceEngine:
                     "explanation": "All Kubernetes signals are within normal ranges — no incident detected.",
                 }
 
-            # Build past-experience context from auto-learning DB (in-context learning).
-            past_exp = ""
-            ctx = remediation_context or {}
-            past_incidents = ctx.get("past_incidents") if isinstance(ctx, dict) else None
-            if past_incidents and isinstance(past_incidents, list) and len(past_incidents) > 0:
-                lines = []
-                for p in past_incidents[:8]:
-                    outcome = "RESOLVED" if p.get("success") else "FAILED"
-                    mins = p.get("minutes", "?")
-                    lines.append(
-                        f"  - {p.get('incident_type','?')}: action={p.get('action','-')} "
-                        f"→ {outcome} in {mins}min (app={p.get('app','-')})"
-                    )
-                past_exp = "\n\nLearned from past incidents on this cluster:\n" + "\n".join(lines)
-
             signal_summary = ", ".join(f"{k}={v}" for k, v in elevated.items())
 
             system_msg = (
-                "You are an expert Kubernetes SRE AI. "
-                "Analyze metrics and logs to detect ANY infrastructure or application incident. "
-                "You are NOT limited to predefined types — invent a precise incident type if needed. "
-                "Output ONLY a valid JSON object. No text outside the JSON."
+                "You are a Kubernetes SRE JSON API. "
+                "You receive pre-classified signals (NORMAL/ELEVATED/HIGH/CRITICAL) and output ONLY a JSON object. "
+                "No explanation outside the JSON."
             )
-            user_msg = (
-                f"Elevated signals: {signal_summary}\n"
-                f"Raw metrics: cpu={cpu:.3f} cores, memory={memory_gb:.2f}GB, "
-                f"http_5xx={http_5xx:.3f}, latency_p95={latency:.3f}s, "
-                f"restarts={restarts:.0f}, unavailable={unavailable:.0f}, "
-                f"db_hits={db_hits:.0f}, db_pool_pending={db_pending:.0f}, "
-                f"overall_risk={risk:.3f}"
-                f"{past_exp}\n\n"
-                "Output JSON:\n"
-                '{"incident": true|false, "incident_type": "SNAKE_CASE_TYPE", '
-                '"severity": "LOW|MEDIUM|HIGH|CRITICAL", "confidence": 0.50-0.95, '
-                '"recommended_action": "SNAKE_CASE_ACTION", '
-                '"executable": "RESTART_POD|SCALE_DEPLOYMENT|INVESTIGATE|ESCALATE|NO_ACTION", '
-                '"auto_execute": true|false, "explanation": "one sentence"}\n\n'
-                "incident_type: Use the most precise name. Examples: CPU_STRESS, MEMORY_LEAK, "
-                "NETWORK_PARTITION, DNS_FAILURE, CERTIFICATE_EXPIRY, IMAGE_PULL_FAILURE, "
-                "THREAD_POOL_EXHAUSTION, CACHE_FAILURE, STORAGE_PRESSURE, "
-                "NODE_PRESSURE, SECURITY_ANOMALY, or ANY other accurate name.\n"
-                "recommended_action: Free text describing the best action.\n"
-                "executable: RESTART_POD (restart the failing pod), "
-                "SCALE_DEPLOYMENT (add replicas), "
-                "INVESTIGATE (collect diagnostics, no cluster change), "
-                "ESCALATE (alert human operator), "
-                "NO_ACTION (nothing needed).\n"
-                "auto_execute=true only if: confidence>=0.55 AND severity=HIGH "
-                "AND executable is RESTART_POD or SCALE_DEPLOYMENT."
+            taxonomy = (
+                "TAXONOMY_51_CLASSES (pick the BEST match):\n"
+                "POD: POD_CRASH_LOOP(restarts>5), POD_OOM_KILLED(OOMKilled+mem high), "
+                "POD_IMAGE_PULL_BACKOFF(image registry), POD_PENDING_INSUFFICIENT_RESOURCES(cluster ressources), "
+                "POD_STUCK_TERMINATING(deletion stuck), POD_LIVENESS_FAILURE(probe KO), "
+                "POD_READINESS_FAILURE(not ready no crash), POD_INIT_CONTAINER_FAILURE(init failed); "
+                "APP: HIGH_LATENCY_P95(p95>1s), HIGH_LATENCY_P99(tail>3s), "
+                "ERROR_RATE_5XX_SPIKE(5xx ratio), ERROR_RATE_4XX_SPIKE(4xx ratio), "
+                "REQUEST_RATE_DROP(traffic drop), MEMORY_LEAK(mem growing linear), "
+                "CPU_SATURATION(cpu>90%), THREAD_POOL_EXHAUSTION(java threads blocked), "
+                "DB_CONNECTION_POOL_EXHAUSTION(hikari pending>5), CIRCUIT_BREAKER_OPEN(CB tripped); "
+                "DB: DB_SLOW_QUERIES, DB_DEADLOCK, DB_REPLICATION_LAG, DB_DISK_FULL, "
+                "DB_CONNECTION_REFUSED(up=0), DB_HIGH_WRITE_LOAD; "
+                "NET: NETWORK_DNS_FAILURE(SERVFAIL spike), NETWORK_PACKET_LOSS, "
+                "NETWORK_LATENCY_BETWEEN_NODES, INGRESS_BACKEND_DOWN(502 spike), "
+                "SERVICE_DISCOVERY_FAILURE, TLS_CERTIFICATE_EXPIRY, NETWORK_PARTITION, "
+                "EXTERNAL_API_DEPENDENCY_DOWN; "
+                "NODE: NODE_NOT_READY, NODE_HIGH_CPU(VM cpu>90%), NODE_HIGH_MEMORY, "
+                "NODE_DISK_FULL, NODE_DISK_IO_SATURATION, NODE_KUBELET_DOWN, "
+                "NODE_CLOCK_SKEW, NODE_HARDWARE_FAILURE; "
+                "SEC: AUTH_TOKEN_EXPIRED(401 spike on auth/me), AUTH_BRUTE_FORCE_ATTEMPT, "
+                "UNAUTHORIZED_API_ACCESS_SPIKE(403 spike), SECRET_ROTATION_FAILURE; "
+                "STORAGE: PVC_PENDING, PV_FILESYSTEM_CORRUPTION, PVC_USAGE_HIGH; "
+                "OBS: PROMETHEUS_OUT_OF_MEMORY, LOKI_INGESTION_LAG, METRICS_SCRAPE_FAILURE; "
+                "OTHER: GENERAL_DEGRADATION, UNKNOWN_ANOMALY, NO_INCIDENT.\n"
+                "ACTIONS (pick one): RESTART_POD, SCALE_DEPLOYMENT, ROLLBACK_DEPLOYMENT, "
+                "DELETE_CRASHLOOPING_PODS, FORCE_RECREATE_DEPLOYMENT, SCALE_DOWN, "
+                "ESCALATION, NO_ACTION."
             )
 
-            # Try models in order: aiops-sre → qwen2.5:3b → qwen2:0.5b
-            model = os.environ.get("AIOPS_LLM_MODEL", self._DEFAULT_LLM_MODEL)
-            raw = self._call_ollama(model, system_msg, user_msg, num_predict=250)
-            if raw is None:
-                raw = self._call_ollama(self._FALLBACK_LLM_MODEL, system_msg, user_msg, num_predict=200)
-            if raw is None:
-                raw = self._call_ollama(self._SECOND_FALLBACK_LLM_MODEL, system_msg, user_msg, num_predict=120)
-            if raw is None:
+            user_msg = (
+                f"Elevated signals detected: {signal_summary}\n"
+                f"(all other signals: NORMAL)\n\n"
+                f"{taxonomy}\n"
+                "Output JSON only:\n"
+                '{"incident": true_or_false, "incident_type": "TYPE", "severity": "SEV", '
+                '"confidence": 0.50_to_0.95, "recommended_action": "ACTION", "auto_execute": true_or_false, '
+                '"explanation": "one sentence in english"}\n\n'
+                "severity: LOW MEDIUM HIGH CRITICAL.\n"
+                "auto_execute=true only if confidence>=0.70 AND severity in (MEDIUM, HIGH)."
+            )
+
+            with _httpx.Client(timeout=90.0) as _http:
+                resp = _http.post(
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": "aiops-sre-q4",
+                        "messages": [
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "stream": False,
+                        "format": "json",
+                        "options": {"temperature": 0.0, "num_predict": 200},
+                    },
+                )
+
+            if resp.status_code != 200:
                 return None
 
+            resp_json = resp.json()
+            # Chat API returns message.content; generate API returns response
+            raw = (
+                resp_json.get("message", {}).get("content", "")
+                or resp_json.get("response", "")
+            ).strip()
+
+            # Extract JSON block from response
             start = raw.find("{")
             end = raw.rfind("}") + 1
             if start == -1 or end == 0:
@@ -542,20 +629,30 @@ class InferenceEngine:
 
             data = _json.loads(raw[start:end])
 
-            # Accept ANY incident type the LLM returns — no restriction.
-            # Sanitize: uppercase, replace spaces/hyphens with underscores.
-            incident_type = str(data.get("incident_type", "GENERAL_DEGRADATION"))
-            incident_type = incident_type.upper().replace(" ", "_").replace("-", "_").strip("_") or "GENERAL_DEGRADATION"
-            if not incident_type or incident_type == "UNKNOWN":
-                incident_type = "GENERAL_DEGRADATION"
+            valid_types = {
+                "CPU_STRESS", "MEMORY_STRESS", "APPLICATION_ERROR_STORM",
+                "DATABASE_CONNECTIVITY", "AVAILABILITY_DROP", "RESTART_LOOP",
+                "GENERAL_DEGRADATION", "VM_DOWN", "NO_INCIDENT",
+            }
+            valid_actions = {
+                "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE",
+                "RESTART_POD_AND_SCALE_MEMORY_LIMITS",
+                "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC",
+                "FAILOVER_DATABASE_AND_RESTART_WORKLOAD",
+                "SCALE_DEPLOYMENT_AND_REBALANCE",
+                "ROLLBACK_RECENT_CHANGE_AND_RESTART",
+                "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+                "RESTART_POD_AND_INVESTIGATE",
+                "NO_ACTION",
+            }
 
-            # Accept free-form recommended_action from the LLM.
-            action = str(data.get("recommended_action", "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"))
-            action = action.upper().replace(" ", "_").replace("-", "_").strip("_") or "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
+            incident_type = str(data.get("incident_type", "")).upper()
+            if incident_type not in valid_types:
+                return None
 
-            # Map to executable: derive from LLM's "executable" field or infer from action text.
-            executable_hint = str(data.get("executable", "")).upper()
-            executable = self._resolve_executable(executable_hint, action)
+            action = str(data.get("recommended_action", "")).upper()
+            if action not in valid_actions:
+                action = "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
 
             confidence = float(data.get("confidence", 0.5))
             confidence = max(0.0, min(1.0, confidence))
@@ -567,12 +664,10 @@ class InferenceEngine:
                 severity = "MEDIUM"
             explanation = str(data.get("explanation", "LLM analysis completed."))
 
-            # Sanity: cap severity if all signals are only ELEVATED
-            max_signal_rank = max(
-                {"NORMAL": 0, "ELEVATED": 1, "HIGH": 2, "CRITICAL": 3}.get(v, 0)
-                for v in elevated.values()
-            )
-            if max_signal_rank <= 1 and severity == "CRITICAL":
+            # Sanity guard: if the strongest real signal is only ELEVATED (not HIGH/CRITICAL),
+            # cap severity at MEDIUM to prevent the small model from over-dramatising.
+            max_signal = max(elevated.values(), key=lambda v: {"NORMAL": 0, "ELEVATED": 1, "HIGH": 2, "CRITICAL": 3}.get(v, 0))
+            if max_signal == "ELEVATED" and severity == "CRITICAL":
                 severity = "MEDIUM"
 
             if incident_type == "NO_INCIDENT":
@@ -580,18 +675,13 @@ class InferenceEngine:
             if not incident:
                 incident_type = "NO_INCIDENT"
                 action = "NO_ACTION"
-                executable = "NO_ACTION"
                 auto_execute = False
 
-            # Auto-execute only for safe executable actions (RESTART_POD, SCALE_DEPLOYMENT).
-            # For INVESTIGATE / ESCALATE / unknown → always RECOMMEND_ONLY (safe).
-            safe_auto = (
-                auto_execute
-                and confidence >= 0.55
-                and severity not in {"CRITICAL"}
-                and executable in {"RESTART_POD", "SCALE_DEPLOYMENT"}
+            execution_mode = (
+                "AUTO_EXECUTE_CANDIDATE"
+                if auto_execute and confidence >= 0.70 and severity != "CRITICAL"
+                else "RECOMMEND_ONLY"
             )
-            execution_mode = "AUTO_EXECUTE_CANDIDATE" if safe_auto else "RECOMMEND_ONLY"
 
             return {
                 "incident": incident,
@@ -603,58 +693,6 @@ class InferenceEngine:
                 "explanation": explanation,
             }
 
-        except Exception:
-            return None
-
-    @staticmethod
-    def _resolve_executable(hint: str, action: str) -> str:
-        """
-        Resolves the safe executable action from the LLM hint or action text.
-        Only RESTART_POD and SCALE_DEPLOYMENT are auto-executable.
-        Anything else becomes INVESTIGATE (collect info, no cluster change).
-        """
-        # Trust explicit hint from LLM if it's a known safe value
-        if hint in {"RESTART_POD", "SCALE_DEPLOYMENT", "INVESTIGATE", "ESCALATE", "NO_ACTION"}:
-            return hint
-
-        # Infer from action text
-        a = action.upper()
-        if any(k in a for k in ("RESTART", "ROLLBACK", "FAILOVER", "RECYCLE", "BOUNCE")):
-            return "RESTART_POD"
-        if any(k in a for k in ("SCALE", "REBALANCE", "SHIFT_TRAFFIC", "ADD_REPLICA")):
-            return "SCALE_DEPLOYMENT"
-        if any(k in a for k in ("ESCALAT", "ALERT", "PAGE", "NOTIFY_HUMAN")):
-            return "ESCALATE"
-        if a in {"NO_ACTION", "NONE"}:
-            return "NO_ACTION"
-        # Default: investigate (safe — no cluster change)
-        return "INVESTIGATE"
-
-    @staticmethod
-    def _call_ollama(model: str, system_msg: str, user_msg: str, num_predict: int = 200) -> str | None:
-        """Call a local Ollama model. Returns the raw text response or None on failure."""
-        try:
-            import httpx as _httpx
-            with _httpx.Client(timeout=90.0) as _http:
-                resp = _http.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_msg},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "stream": False,
-                        "options": {"temperature": 0.0, "num_predict": num_predict},
-                    },
-                )
-            if resp.status_code != 200:
-                return None
-            resp_json = resp.json()
-            return (
-                resp_json.get("message", {}).get("content", "")
-                or resp_json.get("response", "")
-            ).strip() or None
         except Exception:
             return None
 
@@ -2152,23 +2190,17 @@ class InferenceEngine:
         remediation_context: dict[str, object],
     ) -> str:
         autonomy_mode = str(remediation_context.get("autonomy_mode", "bounded-auto")).lower()
-        full_auto = autonomy_mode == "full-auto"
-
         if not safe_to_execute:
             return "RECOMMEND_ONLY"
         if executable_action not in {"RESTART_POD", "SCALE_DEPLOYMENT"}:
             return "RECOMMEND_ONLY"
         if autonomy_mode in {"manual", "advisory-only"}:
             return "RECOMMEND_ONLY"
-        # CRITICAL severity: always recommend-only regardless of mode (human awareness required)
-        if severity == "CRITICAL":
-            return "RECOMMEND_ONLY"
-        if confidence < 0.44:
+        if confidence < 0.44 or severity == "CRITICAL":
             return "RECOMMEND_ONLY"
         if risk_score > 0.50 or blast_radius_score > 0.50:
             return "RECOMMEND_ONLY"
-        # In full-auto mode: ignore past failures — retry automatically
-        if not full_auto and fail_count > 0:
+        if fail_count > 0:
             return "RECOMMEND_ONLY"
         return "AUTO_EXECUTE_CANDIDATE"
 

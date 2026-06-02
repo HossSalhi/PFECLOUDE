@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HELIOS Calico watchdog every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Unit=helios-calico-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ai_service_port: int = 8000
 
     # Local LLM model served by Ollama. Set to "aiops-sre" after running deploy-aiops-model.sh.
-    llm_model: str = "aiops-sre"
+    llm_model: str = "aiops-sre-q4"
     llm_fallback_model: str = "qwen2.5:3b"
     llm_second_fallback_model: str = "qwen2:0.5b"
 

@@ -37,12 +37,7 @@ class PredictorService:
             timeout_seconds=settings.prometheus_timeout_seconds,
         )
         model_bundle = load_model_bundle(settings.model_path)
-        self.inference_engine = InferenceEngine(
-            model_bundle=model_bundle,
-            llm_model=settings.llm_model,
-            llm_fallback_model=settings.llm_fallback_model,
-            llm_second_fallback_model=settings.llm_second_fallback_model,
-        )
+        self.inference_engine = InferenceEngine(model_bundle=model_bundle)
         self.log_embedding_encoder = LogEmbeddingEncoder(
             model_name=settings.log_embedding_model_name,
             fallback_dim=settings.log_embedding_fallback_dim,
@@ -197,6 +192,7 @@ class PredictorService:
         result = self.inference_engine.predict(
             combined,
             remediation_context=remediation_ctx,
+            skip_llm=getattr(request, "skip_llm", False),
         )
         evidence = PredictEvidence(
             log_score=round(self._finite(log_score), 4),

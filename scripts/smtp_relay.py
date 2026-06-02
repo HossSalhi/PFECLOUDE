@@ -5,14 +5,14 @@ Lance: python scripts/smtp_relay.py
 Le tunnel SSH doit être actif: ssh -R 2525:localhost:2525 kube@192.168.148.161
 """
 
-import smtplib, ssl, socket, threading, logging
+import os, smtplib, ssl, socket, threading, logging
 from email import message_from_bytes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [RELAY] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
-GMAIL_USER = "houssamsalhi273@gmail.com"
-GMAIL_PASS = "wppfmdxpyudnrsrp"
+GMAIL_USER = os.environ.get("GMAIL_USER", "houssamsalhi273@gmail.com")
+GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")  # set via env — never hardcode
 LISTEN_PORT = 2525
 
 
