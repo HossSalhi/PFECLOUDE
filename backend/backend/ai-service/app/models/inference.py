@@ -562,7 +562,7 @@ class InferenceEngine:
                 f"Recommended action: {action}.\n"
                 "Why is this action the right response?"
             )
-            with _httpx.Client(timeout=90.0) as _http:
+            with _httpx.Client(timeout=180.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
