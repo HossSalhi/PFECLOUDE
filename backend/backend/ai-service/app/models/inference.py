@@ -547,38 +547,43 @@ class InferenceEngine:
         return m.get(incident_type, f"{action} directly addresses the detected condition with the lowest blast radius.")
 
     def _explain_why(self, incident_type, severity, confidence, evidence, action):
-        """LLM reasoning CONSTRAINED to the given facts (no invention). None on failure."""
+        """LLM reasoning CONSTRAINED to the given facts. Returns 1-2 concise sentences or None."""
         try:
-            import httpx as _httpx
+            import httpx as _httpx, re as _re
             system_msg = (
-                "You are a senior SRE. In ONE short technical sentence, explain WHY the "
-                "recommended action is the correct response to the incident, based ONLY on "
-                "the facts provided. Do not invent numbers, metrics, or causes. No preamble, no list."
+                "You are a senior SRE. Explain WHY the recommended action resolves this incident, "
+                "in at most TWO short sentences (max 40 words). Use ONLY the facts given. "
+                "Do NOT speculate about causes that are not in the evidence. No preamble, no lists."
             )
             user_msg = (
-                f"Incident type: {incident_type}\n"
-                f"Severity: {severity}, confidence: {confidence:.2f}\n"
-                f"Measured evidence: {evidence}\n"
-                f"Recommended action: {action}\n"
+                f"Incident: {incident_type} (severity {severity}).\n"
+                f"Measured evidence: {evidence}.\n"
+                f"Recommended action: {action}.\n"
                 "Why is this action the right response?"
             )
-            with _httpx.Client(timeout=60.0) as _http:
+            with _httpx.Client(timeout=90.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": "aiops-sre-q4",
+                        "model": "aiops-sre-q4-backup",
                         "messages": [
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": user_msg},
                         ],
                         "stream": False,
-                        "options": {"temperature": 0.1, "num_predict": 90},
+                        "options": {"temperature": 0.1, "num_predict": 160},
                     },
                 )
             if resp.status_code != 200:
                 return None
             raw = (resp.json().get("message", {}).get("content", "") or "").strip()
-            return raw if raw else None
+            if not raw:
+                return None
+            parts = _re.split(r"(?<=[.!?])\s+", raw)
+            concise = " ".join(parts[:2]).strip()
+            if len(concise) > 320:
+                concise = concise[:317].rstrip() + "..."
+            return concise
         except Exception:
             return None
 
