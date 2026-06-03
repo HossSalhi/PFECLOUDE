@@ -56,6 +56,7 @@ public class AIOpsOrchestrationService {
     private final RemediationMetricsService remediationMetricsService;
     private final KubernetesSignalEnrichmentService kubernetesSignalEnrichmentService;
     private final RemediationHistoryContextService remediationHistoryContextService;
+    private final NotificationService notificationService;
     private final TransactionTemplate transactionTemplate;
 
     public AIOpsOrchestrationService(
@@ -71,6 +72,7 @@ public class AIOpsOrchestrationService {
             RemediationMetricsService remediationMetricsService,
             KubernetesSignalEnrichmentService kubernetesSignalEnrichmentService,
             RemediationHistoryContextService remediationHistoryContextService,
+            NotificationService notificationService,
             PlatformTransactionManager transactionManager
     ) {
         this.aiOpsClientService = aiOpsClientService;
@@ -85,6 +87,7 @@ public class AIOpsOrchestrationService {
         this.remediationMetricsService = remediationMetricsService;
         this.kubernetesSignalEnrichmentService = kubernetesSignalEnrichmentService;
         this.remediationHistoryContextService = remediationHistoryContextService;
+        this.notificationService = notificationService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -127,7 +130,18 @@ public class AIOpsOrchestrationService {
                 return response;
             }
 
-            return transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response));
+            AIOpsAnalyzeResponse result =
+                    transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response));
+            // Email "incident détecté" AFTER commit (avoids holding the DB tx during SMTP).
+            if (result != null && result.isIncidentCreated() && result.getIncidentId() != null) {
+                try {
+                    incidentRepository.findById(result.getIncidentId())
+                            .ifPresent(notificationService::notifyNewIncident);
+                } catch (Exception ex) {
+                    log.warn("Incident-detected notification failed: {}", ex.getMessage());
+                }
+            }
+            return result;
         } finally {
             MDC.remove("namespace");
             MDC.remove("app");
@@ -336,6 +350,11 @@ public class AIOpsOrchestrationService {
                 "Auto-resolved: AI monitoring detects condition has cleared");
         incidentRepository.save(incident);
         log.info("Auto-resolved incident id={} for {}/{} — condition cleared", incident.getId(), namespace, app);
+        try {
+            notificationService.notifyIncidentResolved(incident);
+        } catch (Exception ex) {
+            log.warn("Incident-resolved notification failed: {}", ex.getMessage());
+        }
         return true;
     }
 
