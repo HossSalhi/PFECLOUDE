@@ -551,9 +551,10 @@ class InferenceEngine:
         try:
             import httpx as _httpx, re as _re
             system_msg = (
-                "You are a senior SRE. Explain WHY the recommended action resolves this incident, "
-                "in at most TWO short sentences (max 40 words). Use ONLY the facts given. "
-                "Do NOT speculate about causes that are not in the evidence. No preamble, no lists."
+                "You are a senior SRE. In at most TWO short sentences (max 45 words), justify WHY the "
+                "recommended action fixes the incident. Do NOT restate the incident type, severity or "
+                "numbers (they are already shown). Do NOT speculate about causes not in the evidence. "
+                "No preamble, no lists. Write complete sentences."
             )
             user_msg = (
                 f"Incident: {incident_type} (severity {severity}).\n"
@@ -571,7 +572,7 @@ class InferenceEngine:
                             {"role": "user", "content": user_msg},
                         ],
                         "stream": False,
-                        "options": {"temperature": 0.1, "num_predict": 160},
+                        "options": {"temperature": 0.1, "num_predict": 220},
                     },
                 )
             if resp.status_code != 200:
@@ -579,11 +580,9 @@ class InferenceEngine:
             raw = (resp.json().get("message", {}).get("content", "") or "").strip()
             if not raw:
                 return None
-            parts = _re.split(r"(?<=[.!?])\s+", raw)
-            concise = " ".join(parts[:2]).strip()
-            if len(concise) > 320:
-                concise = concise[:317].rstrip() + "..."
-            return concise
+            sents = _re.findall(r"[^.!?]*[.!?]", raw)
+            concise = " ".join(x.strip() for x in sents[:2]).strip()
+            return concise if concise else None
         except Exception:
             return None
 
