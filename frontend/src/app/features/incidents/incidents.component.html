@@ -60,7 +60,6 @@
     <table class="orange-table">
       <thead>
         <tr>
-          <th>ID</th>
           <th>Titre</th>
           <th>Namespace / App</th>
           <th>Sévérité</th>
@@ -72,7 +71,6 @@
       </thead>
       <tbody>
         <tr *ngFor="let inc of incidents">
-          <td class="col-id">#{{ inc.id }}</td>
           <td class="col-title">{{ inc.title }}</td>
           <td>
             <div style="line-height:1.3;">

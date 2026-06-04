@@ -126,10 +126,39 @@
 
         <div class="nav-divider"></div>
 
+        <!-- Dark mode toggle -->
+        <div class="nav-icon-btn" [title]="isDark ? 'Mode clair' : 'Mode sombre'" (click)="toggleTheme()">
+          <i class="fas" [ngClass]="isDark ? 'fa-sun' : 'fa-moon'"></i>
+        </div>
+
         <!-- Notifications -->
-        <div class="nav-icon-btn" title="Notifications">
+        <div class="nav-icon-btn nav-notif-btn" title="Notifications" (click)="toggleNotifs($event)">
           <i class="fas fa-bell"></i>
-          <span class="notif-badge" *ngIf="incidentBadge > 0"></span>
+          <span class="notif-count" *ngIf="unreadNotifCount > 0">{{ unreadNotifCount > 9 ? '9+' : unreadNotifCount }}</span>
+
+          <!-- Notification dropdown -->
+          <div class="notif-dropdown" *ngIf="showNotifs" (click)="$event.stopPropagation()">
+            <div class="notif-dd-header">
+              <span><i class="fas fa-bell"></i> Notifications</span>
+              <span class="notif-dd-sub">{{ notifications.length }} alerte(s) email</span>
+            </div>
+            <div class="notif-dd-list">
+              <div *ngIf="notifications.length === 0" class="notif-dd-empty">
+                <i class="fas fa-inbox"></i><span>Aucune notification</span>
+              </div>
+              <button *ngFor="let n of notifications" class="notif-dd-item" (click)="openNotif(n)">
+                <span class="notif-dot" [ngClass]="n.severity.toLowerCase()"></span>
+                <span class="notif-body">
+                  <span class="notif-title">{{ n.title }}</span>
+                  <span class="notif-meta">
+                    <span class="badge-status" [ngClass]="n.severity.toLowerCase()">{{ n.severity }}</span>
+                    <span class="notif-email"><i class="fas fa-envelope"></i> email</span>
+                    <span class="notif-time">{{ notifTime(n.createdAt) }}</span>
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Settings -->

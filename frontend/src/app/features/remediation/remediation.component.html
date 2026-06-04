@@ -144,10 +144,8 @@
     <table class="orange-table">
       <thead>
         <tr>
-          <th>ID</th>
           <th>Type d'Action</th>
           <th>Statut</th>
-          <th>Incident</th>
           <th>Mode</th>
           <th>Exécuté le</th>
           <th>Résultat</th>
@@ -155,7 +153,6 @@
       </thead>
       <tbody>
         <tr *ngFor="let action of actions">
-          <td class="col-id">#{{ action.id }}</td>
           <td>
             <span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;">
               {{ action.actionType || action.type }}
@@ -164,7 +161,6 @@
           <td>
             <span class="badge-status" [ngClass]="(action.status || '').toLowerCase()">{{ action.status }}</span>
           </td>
-          <td class="col-id">#{{ action.incidentId }}</td>
           <td>
             <span class="badge-status" [ngClass]="(action.automationMode || action.automated) ? 'ai' : 'manual'">
               <i class="fas" [ngClass]="(action.automationMode || action.automated) ? 'fa-robot' : 'fa-user'"></i>

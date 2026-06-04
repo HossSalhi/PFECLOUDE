@@ -202,7 +202,6 @@
       <table class="orange-table">
         <thead>
           <tr>
-            <th>ID</th>
             <th>Titre</th>
             <th>Sévérité</th>
             <th>Statut</th>
@@ -212,7 +211,6 @@
         </thead>
         <tbody>
           <tr *ngFor="let inc of recentIncidents">
-            <td class="col-id">#{{ inc.id }}</td>
             <td class="col-title">{{ inc.title }}</td>
             <td>
               <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">

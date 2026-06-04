@@ -20,6 +20,14 @@ export interface Toast {
   message: string;
 }
 
+export interface AppNotif {
+  id: number;
+  title: string;
+  severity: string;
+  createdAt: string;
+  read: boolean;
+}
+
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
@@ -31,6 +39,11 @@ export class AppComponent implements OnInit, OnDestroy {
   toasts: Toast[] = [];
   incidentBadge = 0;
   taskBadge = 0;
+  // Dark theme
+  isDark = false;
+  // Notification center (email-triggering = CRITICAL/HIGH incidents)
+  showNotifs = false;
+  notifications: AppNotif[] = [];
   userName = 'Opérateur';
   userRole = 'Admin';
   userInitials = 'OP';
@@ -77,7 +90,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadUserInfo();
+    this.isDark = localStorage.getItem('helios_theme') === 'dark';
+    this.applyTheme();
     this.refreshUserFromServer();
+    this.seedNotifications();
 
     // Re-fetch user info on every navigation so switching accounts updates the navbar
     const navSub = this.router.events.pipe(
@@ -104,6 +120,14 @@ export class AppComponent implements OnInit, OnDestroy {
       const severity = (incident?.severity || '').toUpperCase();
       if (severity === 'CRITICAL' || severity === 'HIGH') {
         this.incidentBadge++;
+        this.notifications.unshift({
+          id: incident?.id ?? Date.now(),
+          title: incident?.title || 'Nouvel incident détecté',
+          severity,
+          createdAt: incident?.createdAt || new Date().toISOString(),
+          read: false
+        });
+        this.notifications = this.notifications.slice(0, 30);
         this.showToast(
           severity === 'CRITICAL' ? 'critical' : 'high',
           severity === 'CRITICAL' ? 'Incident Critique' : 'Incident Haute Sévérité',
@@ -245,6 +269,7 @@ export class AppComponent implements OnInit, OnDestroy {
   @HostListener('document:keydown.escape')
   onEscape(): void {
     this.showUserMenu = false;
+    this.showNotifs = false;
     if (this.showSettingsModal) this.closeSettings();
   }
 
@@ -268,6 +293,63 @@ export class AppComponent implements OnInit, OnDestroy {
 
   isActive(route: string): boolean {
     return this.router.url === route || this.router.url.startsWith(route + '/');
+  }
+
+  // ── Dark theme ──────────────────────────────────────────────────────────
+  private applyTheme(): void {
+    const root = document.documentElement;
+    if (this.isDark) { root.classList.add('dark'); } else { root.classList.remove('dark'); }
+  }
+
+  toggleTheme(): void {
+    this.isDark = !this.isDark;
+    localStorage.setItem('helios_theme', this.isDark ? 'dark' : 'light');
+    this.applyTheme();
+  }
+
+  // ── Notification center ─────────────────────────────────────────────────
+  private seedNotifications(): void {
+    if (!this.authService.isLoggedIn()) return;
+    this.apiService.getIncidents(0, 20).subscribe({
+      next: (page: any) => {
+        const lastSeen = Number(localStorage.getItem('helios_notif_seen') || 0);
+        this.notifications = (page?.content || [])
+          .filter((i: any) => ['CRITICAL', 'HIGH'].includes((i.severity || '').toUpperCase()))
+          .slice(0, 15)
+          .map((i: any) => ({
+            id: i.id,
+            title: i.title,
+            severity: (i.severity || '').toUpperCase(),
+            createdAt: i.createdAt,
+            read: new Date(i.createdAt).getTime() <= lastSeen
+          }));
+      },
+      error: () => {}
+    });
+  }
+
+  get unreadNotifCount(): number {
+    return this.notifications.filter(n => !n.read).length;
+  }
+
+  toggleNotifs(event?: Event): void {
+    if (event) { event.stopPropagation(); }
+    this.showNotifs = !this.showNotifs;
+    this.showUserMenu = false;
+    if (this.showNotifs) {
+      localStorage.setItem('helios_notif_seen', String(Date.now()));
+      this.notifications = this.notifications.map(n => ({ ...n, read: true }));
+    }
+  }
+
+  openNotif(n: AppNotif): void {
+    this.showNotifs = false;
+    this.router.navigate(['/incidents', n.id]);
+  }
+
+  notifTime(iso: string): string {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
   ngOnDestroy(): void {

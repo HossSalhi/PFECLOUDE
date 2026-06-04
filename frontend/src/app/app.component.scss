@@ -1,0 +1,75 @@
+// ── Notification center (bell dropdown) ──────────────────────────────────────
+.nav-notif-btn { position: relative; }
+
+.notif-count {
+  position: absolute;
+  top: 0; right: 0;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px var(--bg-surface);
+}
+
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 360px;
+  max-width: 90vw;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  overflow: hidden;
+  cursor: default;
+}
+
+.notif-dd-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--text-primary);
+  i { color: var(--brand); margin-right: 6px; }
+}
+.notif-dd-sub { font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+
+.notif-dd-list { max-height: 380px; overflow-y: auto; }
+
+.notif-dd-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 28px; color: var(--text-tertiary); font-size: 13px;
+  i { font-size: 22px; }
+}
+
+.notif-dd-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  transition: background var(--t-fast);
+  &:hover { background: var(--bg-subtle); }
+  &:last-child { border-bottom: none; }
+}
+.notif-dot {
+  flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px;
+  background: var(--text-tertiary);
+  &.critical { background: var(--danger); }
+  &.high     { background: var(--warning); }
+}
+.notif-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.notif-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 290px;
+}
+.notif-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.notif-email {
+  font-size: 11px; color: var(--success); font-weight: 600;
+  i { margin-right: 3px; }
+}
+.notif-time { font-size: 11px; color: var(--text-tertiary); }

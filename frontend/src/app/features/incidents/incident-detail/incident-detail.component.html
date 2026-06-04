@@ -6,9 +6,9 @@
       <span class="bc-sep">/</span>
       <span style="cursor:pointer;color:var(--orange-primary);" (click)="goBack()">Incidents</span>
       <span class="bc-sep">/</span>
-      <span class="bc-current">#{{ incidentId }}</span>
+      <span class="bc-current">Détail</span>
     </div>
-    <h1>Incident <span>#{{ incidentId }}</span></h1>
+    <h1>Incident <span>{{ incident?.incidentType || '' }}</span></h1>
   </div>
   <div class="page-actions">
     <button class="btn btn-ghost btn-sm" (click)="goBack()">
@@ -60,31 +60,27 @@
 
         <div class="info-grid">
           <div class="info-item">
-            <div class="info-label">ID</div>
-            <div class="info-value mono">#{{ incident.id }}</div>
-          </div>
-          <div class="info-item">
-            <div class="info-label">Namespace</div>
+            <div class="info-label"><i class="fas fa-layer-group" style="color:var(--text-tertiary);margin-right:5px;"></i>Namespace</div>
             <div class="info-value mono">{{ incident.namespace || '—' }}</div>
           </div>
           <div class="info-item">
-            <div class="info-label">Application</div>
+            <div class="info-label"><i class="fas fa-cube" style="color:var(--text-tertiary);margin-right:5px;"></i>Application</div>
             <div class="info-value mono">{{ incident.app || '—' }}</div>
           </div>
           <div class="info-item">
-            <div class="info-label">Créé le</div>
+            <div class="info-label"><i class="fas fa-calendar-plus" style="color:var(--text-tertiary);margin-right:5px;"></i>Créé le</div>
             <div class="info-value">{{ formatDate(incident.createdAt) }}</div>
           </div>
           <div class="info-item">
-            <div class="info-label">Mis à jour</div>
+            <div class="info-label"><i class="fas fa-clock-rotate-left" style="color:var(--text-tertiary);margin-right:5px;"></i>Mis à jour</div>
             <div class="info-value">{{ formatDate(incident.updatedAt) }}</div>
           </div>
           <div class="info-item" *ngIf="incident.incidentType">
-            <div class="info-label">Type IA</div>
+            <div class="info-label"><i class="fas fa-brain" style="color:var(--text-tertiary);margin-right:5px;"></i>Type IA</div>
             <div class="info-value"><span class="badge-status ai">{{ incident.incidentType }}</span></div>
           </div>
           <div class="info-item" *ngIf="incident.confidence != null">
-            <div class="info-label">Confiance IA</div>
+            <div class="info-label"><i class="fas fa-gauge-high" style="color:var(--text-tertiary);margin-right:5px;"></i>Confiance IA</div>
             <div class="info-value">
               <div class="confidence-bar" style="max-width:200px;">
                 <div class="bar-track">
