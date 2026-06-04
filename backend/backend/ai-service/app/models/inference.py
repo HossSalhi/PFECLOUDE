@@ -252,24 +252,46 @@ class InferenceEngine:
         if incident:
             mem_trend = self._finite(safe_features.get("memory_trend_bytes_per_sec", 0.0))
             overall_risk = self._finite(safe_features.get("overall_risk_score", 0.0))
+            # The real Kubernetes root cause (collected by the predictor from kube-state-metrics)
+            # DRIVES the type, action and Why so every incident is attributed to its ACTUAL cause.
+            # When no specific fault is observable we stay HONEST (investigate) instead of assuming
+            # a bad deploy -- no fabricated cause.
+            _rc = remediation_context.get("root_cause") if isinstance(remediation_context, dict) else None
+            rc_low = (_rc or "").lower()
             evidence = []
             dominant = None
             rec_action = None
-            if node_not_ready >= 1.0:
+
+            # 1) Infrastructure / node outage is the cascade root: a down node explains any
+            #    pod/deployment unavailability on it, so attribute to the node, not a deploy.
+            if node_not_ready >= 1.0 or "unreachable" in rc_low or "node(s):" in rc_low:
                 dominant, rec_action = "NODE_NOT_READY", "ESCALATE_NODE_OUTAGE_AND_REBALANCE"
-                evidence.append(f"{node_not_ready:.0f} node(s) NotReady")
+                evidence.append(f"{node_not_ready:.0f} node(s) NotReady" if node_not_ready >= 1.0
+                                else "node unreachable")
             elif monitoring_vm_up < 0.5:
                 dominant, rec_action = "MONITORING_DOWN", "ESCALATE_VM_OUTAGE_AND_FAILOVER"
                 evidence.append("monitoring VM unreachable (up=0)")
             elif ai_vm_up < 0.5:
                 dominant, rec_action = "AI_SERVICE_DOWN", "ESCALATE_VM_OUTAGE_AND_FAILOVER"
                 evidence.append("AI VM unreachable (up=0)")
-            elif unavailable_replicas >= 1.0 and pod_restarts < 3.0:
+            # 2) Container-level faults, chosen by the ACTUAL Kubernetes reason.
+            elif "oomkilled" in rc_low:
+                dominant, rec_action = "MEMORY_LEAK", "RESTART_POD_AND_TUNE_MEMORY_LIMITS"
+                evidence.append("container OOMKilled (exceeded memory limit)")
+            elif "imagepullbackoff" in rc_low or "errimagepull" in rc_low or "invalidimagename" in rc_low:
                 dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "ROLLBACK_RECENT_CHANGE_AND_RESTART"
                 evidence.append(f"{unavailable_replicas:.0f} replica(s) unavailable")
-            elif pod_restarts >= 3.0:
+            elif "createcontainerconfigerror" in rc_low or "configerror" in rc_low:
+                dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "ROLLBACK_RECENT_CONFIG_CHANGE_AND_RESTART"
+                evidence.append(f"{unavailable_replicas:.0f} replica(s) unavailable")
+            elif "crashloopbackoff" in rc_low or pod_restarts >= 3.0:
                 dominant, rec_action = "POD_CRASH_LOOP", "DELETE_CRASHLOOPING_PODS"
-                evidence.append(f"{pod_restarts:.0f} restarts in window")
+                evidence.append(f"{pod_restarts:.0f} restarts in window" if pod_restarts >= 3.0
+                                else "container crash-looping")
+            elif "evicted" in rc_low:
+                dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "RESTART_FAILED_WORKLOAD_AND_REBALANCE"
+                evidence.append("pod evicted (node resource pressure)")
+            # 3) Application-metric incidents (already specific via their numbers).
             elif db_pool_pending >= 1.0 or db_pool_usage_ratio >= 0.9:
                 dominant, rec_action = "DATABASE_POOL_SATURATION", "CHECK_DATABASE_CONNECTION_POOL_AND_RESTART"
                 evidence.append(f"DB pool pending={db_pool_pending:.0f}, usage={db_pool_usage_ratio:.2f}")
@@ -285,6 +307,15 @@ class InferenceEngine:
             elif memory_bytes >= 1.0e8 and mem_trend > 0.0:
                 dominant, rec_action = "MEMORY_LEAK", "RESTART_POD_AND_TUNE_MEMORY_LIMITS"
                 evidence.append(f"memory={memory_bytes/1e6:.0f}MB rising (+{mem_trend/1e3:.0f}KB/s)")
+            # 4) Replicas unavailable with NO identifiable container fault: stay HONEST --
+            #    do NOT assume a bad release; recommend investigation.
+            elif unavailable_replicas >= 1.0:
+                dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "INVESTIGATE"
+                evidence.append(f"{unavailable_replicas:.0f} replica(s) unavailable")
+                if not _rc:
+                    _rc = ("no container-level fault detected (no ImagePullBackOff, CrashLoop or OOM); "
+                           "likely a pending reschedule, unschedulable pod, or failing readiness probe")
+                    rc_low = _rc.lower()
 
             if dominant is not None:
                 incident_type = dominant
@@ -292,13 +323,14 @@ class InferenceEngine:
                 if execution_mode == "AUTO_EXECUTE_CANDIDATE":
                     final_executable_action = self._map_executable_action(action)
 
-            # Demote a flat-memory false positive (a JVM holding its heap is not a leak).
+            # Demote a flat-memory false positive (a JVM holding its heap is not a leak),
+            # but never when the kernel actually OOMKilled the container.
             if (incident_type in ("MEMORY_LEAK", "MEMORY_STRESS")
-                    and mem_trend <= 0.0 and pod_restarts < 1.0 and unavailable_replicas < 1.0):
+                    and mem_trend <= 0.0 and pod_restarts < 1.0 and unavailable_replicas < 1.0
+                    and "oomkilled" not in rc_low):
                 incident, noise, incident_type = False, True, "NO_INCIDENT"
 
             if incident:
-                _rc = remediation_context.get("root_cause") if isinstance(remediation_context, dict) else None
                 if _rc:
                     evidence.append(f"K8s root cause: {_rc}")
                 ev = "; ".join(evidence) if evidence else f"composite risk score={overall_risk:.2f}"
@@ -547,6 +579,9 @@ class InferenceEngine:
             "CPU_STRESS": "CPU saturation slows every request, so restarting the hot pod clears the runaway work while a CPU profile is captured.",
             "MEMORY_LEAK": "memory grows toward OOM, so restarting reclaims it while memory limits are tuned.",
         }
+        if action and "INVESTIGATE" in action.upper():
+            return ("no specific container fault (image pull, crash loop or OOM) was detected, so the safest "
+                    "step is to investigate the recent rollout, scheduling and readiness before any rollback.")
         return m.get(incident_type, f"{action} directly addresses the detected condition with the lowest blast radius.")
 
     def _explain_why(self, incident_type, severity, confidence, evidence, action):
@@ -558,10 +593,12 @@ class InferenceEngine:
                 "ONE short sentence explaining WHY that action fixes it. Use only the facts given. "
                 "If a Kubernetes root cause is provided (e.g. ImagePullBackOff, OOMKilled, "
                 "CrashLoopBackOff, CreateContainerConfigError, Evicted), NAME it and tie the fix to it. "
+                "If it says no fault was detected, say the cause is not yet identified and recommend "
+                "investigation -- never invent a cause. "
                 "Never restate the type, severity or numbers. Never write a list or a preamble."
             )
             # Few-shot: small models copy the STYLE of these examples far better than rules.
-            # Both examples NAME the K8s root cause so the model learns to do the same.
+            # The examples NAME the K8s root cause (or stay honest when there is none).
             ex1_u = ("Incident: DEPLOYMENT_UNAVAILABLE (severity HIGH). Measured evidence: 1 replica unavailable; "
                      "K8s root cause: container waiting: ImagePullBackOff. "
                      "Recommended action: ROLLBACK_RECENT_CHANGE_AND_RESTART. Why is this action the right response?")
@@ -572,6 +609,11 @@ class InferenceEngine:
                      "Recommended action: RESTART_POD_AND_TUNE_MEMORY_LIMITS. Why is this action the right response?")
             ex2_a = ("The container is OOMKilled because it exceeds its memory limit, so restarting clears the "
                      "exhausted memory while raising the limit stops the kernel from killing it again.")
+            ex3_u = ("Incident: DEPLOYMENT_UNAVAILABLE (severity MEDIUM). Measured evidence: 1 replica unavailable; "
+                     "K8s root cause: no container-level fault detected (no ImagePullBackOff, CrashLoop or OOM). "
+                     "Recommended action: INVESTIGATE. Why is this action the right response?")
+            ex3_a = ("No image, crash or OOM fault was detected, so the cause is not yet identified; investigating "
+                     "the recent rollout, scheduling and readiness probes is the right first step before any rollback.")
             user_msg = (
                 f"Incident: {incident_type} (severity {severity}). "
                 f"Measured evidence: {evidence}. "
@@ -588,6 +630,8 @@ class InferenceEngine:
                             {"role": "assistant", "content": ex1_a},
                             {"role": "user", "content": ex2_u},
                             {"role": "assistant", "content": ex2_a},
+                            {"role": "user", "content": ex3_u},
+                            {"role": "assistant", "content": ex3_a},
                             {"role": "user", "content": user_msg},
                         ],
                         "stream": False,
@@ -604,7 +648,8 @@ class InferenceEngine:
             cut = len(raw)
             for mk in ["\n\n", "\n#", "\n**", "\nlet's", "\nlet me", "\nhere", "\nbelow",
                        "\nsure", "for the following", "as follows", " reasons:", "\n1.", "\n- ", "\n* ",
-                       "incident:", "measured evidence:", "recommended action:", "why is this"]:
+                       "incident:", "measured evidence:", "recommended action:", "why is this",
+                       "(severity"]:
                 j = low.find(mk)
                 if j != -1:
                     cut = min(cut, j)
@@ -617,12 +662,15 @@ class InferenceEngine:
                     continue
                 lt = t.lower()
                 if lt.startswith(("the incident", "this incident", "the recommended action",
-                                  "let's", "let me", "here's", "here is", "sure", "certainly")):
+                                  "let's", "let me", "here's", "here is", "sure", "certainly",
+                                  "you are", "your are", "as an", "i am", "i'm", "note:", "note that")):
                     continue
                 if t.endswith(":") or "#" in t or "**" in t:
                     continue
                 clean.append(t)
-                if len(clean) >= 2:
+                # Few-shot answers are a single sentence, so the model's first clean sentence IS
+                # the answer; anything after it is rambling/meta -> stop at one sentence.
+                if len(clean) >= 1:
                     break
             concise = " ".join(clean).strip()
             return concise if concise else None
