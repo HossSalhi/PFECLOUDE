@@ -35,11 +35,12 @@ public class IncidentServiceImpl implements IncidentService {
         this.tenantContext = tenantContext;
     }
 
-    private static final Pattern CONFIDENCE_PATTERN = Pattern.compile("confidence=([0-9.]+)");
+    // Matches both "confidence=0.44" (legacy) and "confidence 0.44" (explanation prose).
+    private static final Pattern CONFIDENCE_PATTERN = Pattern.compile("confidence[=\\s]([0-9.]+)");
 
-    private Double extractConfidence(String description) {
-        if (description == null) return null;
-        Matcher m = CONFIDENCE_PATTERN.matcher(description);
+    private Double extractConfidence(String text) {
+        if (text == null) return null;
+        Matcher m = CONFIDENCE_PATTERN.matcher(text);
         if (m.find()) {
             try { return Double.parseDouble(m.group(1)); } catch (NumberFormatException ignored) {}
         }
@@ -56,7 +57,7 @@ public class IncidentServiceImpl implements IncidentService {
                 i.getStatus(),
                 i.getSource(),
                 i.getIncidentType(),
-                extractConfidence(i.getDescription()),
+                extractConfidence(i.getExplanation()),
                 i.getNamespace(),
                 i.getApp(),
                 i.getCreatedAt(),

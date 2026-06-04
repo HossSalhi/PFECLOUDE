@@ -167,8 +167,8 @@
               {{ action.automationMode || (action.automated ? 'Automatique' : 'Manuel') }}
             </span>
           </td>
-          <td class="col-meta">{{ action.executedAt | date:'dd/MM/yy HH:mm' }}</td>
-          <td class="col-meta" style="max-width:180px;">{{ action.result || action.executorResult || '—' }}</td>
+          <td class="col-meta">{{ (action.executedAt || action.createdAt) | date:'dd/MM/yy HH:mm' }}</td>
+          <td class="col-meta" style="max-width:180px;">{{ action.result || action.executorResult || (action.status === 'PENDING' ? 'En attente d\'approbation' : '—') }}</td>
         </tr>
       </tbody>
     </table>

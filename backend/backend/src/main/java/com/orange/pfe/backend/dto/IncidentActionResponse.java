@@ -25,6 +25,7 @@ public class IncidentActionResponse {
     private int attemptCount;
     private String executorResult;
     private LocalDateTime executedAt;
+    private LocalDateTime createdAt;
     private String failedReason;
 
     // 🔹 Constructeurs
@@ -65,7 +66,7 @@ public class IncidentActionResponse {
             }
         }
 
-        return new IncidentActionResponse(
+        IncidentActionResponse resp = new IncidentActionResponse(
                 action.getId(),
                 action.getIncident() != null ? action.getIncident().getId() : null,
                 action.getType(),
@@ -80,6 +81,8 @@ public class IncidentActionResponse {
                 action.getExecutedAt(),
                 failedReason
         );
+        resp.setCreatedAt(action.getCreatedAt());
+        return resp;
     }
 
     // 🔹 Getters & Setters
@@ -124,4 +127,7 @@ public class IncidentActionResponse {
 
     public String getFailedReason() { return failedReason; }
     public void setFailedReason(String failedReason) { this.failedReason = failedReason; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

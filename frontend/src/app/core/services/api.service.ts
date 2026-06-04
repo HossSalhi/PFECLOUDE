@@ -48,6 +48,7 @@ export interface Action {
   incidentId: number;
   incidentTitle?: string;
   executedAt: string;
+  createdAt?: string;
   result?: string;
   executorResult?: string;
   automated: boolean;

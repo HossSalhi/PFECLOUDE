@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Action, RemediationSummary, PagedResponse } from '../../core/services/api.service';
+import { SseService } from '../../core/services/sse.service';
 
 @Component({
   selector: 'app-remediation',
@@ -16,10 +17,13 @@ export class RemediationComponent implements OnInit, OnDestroy {
   totalPages = 0;
   private subs: Subscription[] = [];
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, private sse: SseService) {}
 
   ngOnInit(): void {
     this.loadAll();
+    // Real-time: refresh the action history when incidents change.
+    this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.loadAll()));
+    this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.loadAll()));
   }
 
   loadAll(): void {
@@ -37,7 +41,7 @@ export class RemediationComponent implements OnInit, OnDestroy {
 
   loadActions(): void {
     this.loadingActions = true;
-    this.api.getActionsHistory(this.currentPage, 20).subscribe({
+    this.api.getActionsHistory(this.currentPage, 100).subscribe({
       next: (page: PagedResponse<Action>) => {
         this.actions = page.content || [];
         this.totalPages = page.totalPages || 0;

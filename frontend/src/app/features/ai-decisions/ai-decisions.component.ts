@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, PagedResponse } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
+import { SseService } from '../../core/services/sse.service';
 
 @Component({
   selector: 'app-ai-decisions',
@@ -28,15 +29,18 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
     { label: 'Low (<0.4)', value: 'LOW' }
   ];
 
-  constructor(private api: ApiService, private auth: AuthService) {}
+  constructor(private api: ApiService, private auth: AuthService, private sse: SseService) {}
 
   ngOnInit(): void {
     this.load();
+    // Real-time: refresh when any incident is created or updated.
+    this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.load()));
+    this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.load()));
   }
 
   load(): void {
     this.loading = true;
-    this.api.getIncidents(0, 100).subscribe({
+    this.api.getIncidents(0, 1000).subscribe({
       next: (page: PagedResponse<Incident>) => {
         this.incidents = (page.content || []).filter(i => i.source === 'AI' || i.confidence != null);
         this.applyFilter();

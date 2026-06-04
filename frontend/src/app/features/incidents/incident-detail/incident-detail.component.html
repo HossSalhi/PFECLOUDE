@@ -216,7 +216,7 @@
                   {{ a.automated ? 'Auto' : 'Manuel' }}
                 </span>
               </td>
-              <td class="col-meta">{{ formatDate(a.executedAt) }}</td>
+              <td class="col-meta">{{ formatDate(a.executedAt || a.createdAt || '') }}</td>
             </tr>
           </tbody>
         </table>

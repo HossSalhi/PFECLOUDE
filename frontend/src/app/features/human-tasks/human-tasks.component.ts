@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Task } from '../../core/services/api.service';
+import { SseService } from '../../core/services/sse.service';
 
 @Component({
   selector: 'app-human-tasks',
@@ -16,10 +17,13 @@ export class HumanTasksComponent implements OnInit, OnDestroy {
   errorMsg = '';
   private subs: Subscription[] = [];
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, private sse: SseService) {}
 
   ngOnInit(): void {
     this.loadTasks();
+    // Real-time: a new human task appears when an incident is remediated.
+    this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.loadTasks()));
+    this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.loadTasks()));
   }
 
   loadTasks(): void {
