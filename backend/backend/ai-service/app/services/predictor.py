@@ -317,27 +317,36 @@ class PredictorService:
             # Node-level fallback (covers NODE_NOT_READY / a VM going down): name the
             # NotReady node(s) and the underlying pressure condition when present.
             if not parts:
+                # A node that is powered off / unreachable reports Ready=Unknown (not False);
+                # a node whose kubelet is up but unhealthy reports Ready=False. Catch both.
                 notready = self.prometheus_client.query_raw(
-                    'kube_node_status_condition{condition="Ready",status="false"} == 1'
+                    'kube_node_status_condition{condition="Ready",status=~"false|unknown"} == 1'
                 )
-                bad_nodes = sorted({
-                    (row.get("metric", {}) or {}).get("node")
-                    for row in notready
-                    if (row.get("metric", {}) or {}).get("node")
-                })
-                if bad_nodes:
+                bad: dict[str, str] = {}
+                for row in notready:
+                    metric = row.get("metric", {}) or {}
+                    node = metric.get("node")
+                    if node:
+                        bad[node] = metric.get("status", "")
+                if bad:
                     conds = self.prometheus_client.query_raw(
                         'kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|'
                         'PIDPressure|NetworkUnavailable",status="true"} == 1'
                     )
-                    pressures = sorted({
-                        row["metric"].get("condition")
-                        for row in conds
-                        if (row.get("metric", {}) or {}).get("node") in bad_nodes
-                        and row["metric"].get("condition")
-                    })
-                    detail = (": " + ", ".join(pressures)) if pressures else ""
-                    parts.append(f"node(s) NotReady [{', '.join(bad_nodes)}]{detail}")
+                    pressures: dict[str, list[str]] = {}
+                    for row in conds:
+                        metric = row.get("metric", {}) or {}
+                        node, cond = metric.get("node"), metric.get("condition")
+                        if node in bad and cond:
+                            pressures.setdefault(node, []).append(cond)
+                    described = []
+                    for node, status in sorted(bad.items()):
+                        tag = "unreachable" if status == "unknown" else "NotReady"
+                        extra = pressures.get(node)
+                        described.append(
+                            f"{node} {tag}" + (f" ({', '.join(sorted(extra))})" if extra else "")
+                        )
+                    parts.append("node(s): " + "; ".join(described))
         except Exception as exc:
             logger.debug("root-cause collection failed for %s/%s: %s", namespace, app, exc)
             return None
