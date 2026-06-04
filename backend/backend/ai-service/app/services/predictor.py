@@ -314,6 +314,30 @@ class PredictorService:
             pod_reason = _reasons("kube_pod_status_reason")
             if pod_reason:
                 parts.append("pod status: " + ", ".join(pod_reason))
+            # Node-level fallback (covers NODE_NOT_READY / a VM going down): name the
+            # NotReady node(s) and the underlying pressure condition when present.
+            if not parts:
+                notready = self.prometheus_client.query_raw(
+                    'kube_node_status_condition{condition="Ready",status="false"} == 1'
+                )
+                bad_nodes = sorted({
+                    (row.get("metric", {}) or {}).get("node")
+                    for row in notready
+                    if (row.get("metric", {}) or {}).get("node")
+                })
+                if bad_nodes:
+                    conds = self.prometheus_client.query_raw(
+                        'kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|'
+                        'PIDPressure|NetworkUnavailable",status="true"} == 1'
+                    )
+                    pressures = sorted({
+                        row["metric"].get("condition")
+                        for row in conds
+                        if (row.get("metric", {}) or {}).get("node") in bad_nodes
+                        and row["metric"].get("condition")
+                    })
+                    detail = (": " + ", ".join(pressures)) if pressures else ""
+                    parts.append(f"node(s) NotReady [{', '.join(bad_nodes)}]{detail}")
         except Exception as exc:
             logger.debug("root-cause collection failed for %s/%s: %s", namespace, app, exc)
             return None
