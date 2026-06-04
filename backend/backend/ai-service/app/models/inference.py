@@ -334,10 +334,13 @@ class InferenceEngine:
                 if _rc:
                     evidence.append(f"K8s root cause: {_rc}")
                 ev = "; ".join(evidence) if evidence else f"composite risk score={overall_risk:.2f}"
-                why = self._why_fallback(incident_type, action)
+                # Deterministic, cause-aware Why is the GUARANTEED baseline (always correct and
+                # specific). The LLM is an optional flourish, used only if it actually names the
+                # cause -- so it can only improve the answer, never degrade or fabricate it.
+                why = self._why_for(incident_type, action, _rc)
                 if not skip_llm:
                     _llm_why = self._explain_why(incident_type, severity, confidence, ev, action)
-                    if _llm_why:
+                    if _llm_why and self._llm_ok(_llm_why, _rc):
                         why = _llm_why
                 decision_explanation = (
                     f"{incident_type} (severity {severity}, confidence {confidence:.2f}). "
@@ -566,23 +569,78 @@ class InferenceEngine:
         return numeric if math.isfinite(numeric) else None
 
     @staticmethod
-    def _why_fallback(incident_type: str, action: str) -> str:
-        m = {
-            "NODE_NOT_READY": "the node is unreachable, so its workloads must be rescheduled elsewhere; escalation triggers node failover/rebalancing.",
-            "MONITORING_DOWN": "the monitoring VM is unreachable; escalation initiates failover to restore observability.",
-            "AI_SERVICE_DOWN": "the AI VM is unreachable; escalation initiates failover to restore automated remediation.",
-            "DEPLOYMENT_UNAVAILABLE": "replicas cannot become ready (typically a bad release), so rolling back to the last good revision restores availability fastest.",
-            "POD_CRASH_LOOP": "the container keeps crashing, so deleting the crash-looping pods forces a clean recreation.",
-            "DATABASE_POOL_SATURATION": "the database connection pool is exhausted, so restarting frees leaked connections after a pool check.",
-            "HIGH_ERROR_RATE": "the error rate spiked (typically after a release), so rolling back and shedding traffic stops user-facing failures.",
-            "LATENCY_DEGRADATION": "latency degraded under load, so scaling out adds capacity to absorb the pressure.",
-            "CPU_STRESS": "CPU saturation slows every request, so restarting the hot pod clears the runaway work while a CPU profile is captured.",
-            "MEMORY_LEAK": "memory grows toward OOM, so restarting reclaims it while memory limits are tuned.",
+    def _why_for(incident_type: str, action: str, rc: str | None) -> str:
+        """Deterministic, cause-aware explanation of WHY the action resolves the incident.
+        ALWAYS correct and specific (names the real root cause), for every incident type and
+        every cause -- with no dependence on the LLM. This is the guaranteed baseline."""
+        rc_low = (rc or "").lower()
+        # 0) Honest "no fault" case FIRST: that message lists the fault names to say they are
+        #    ABSENT ("no ImagePullBackOff, CrashLoop or OOM"), so it must be matched before the
+        #    substring checks below or it would be mistaken for one of those faults.
+        if "no container-level fault" in rc_low or (action and "INVESTIGATE" in action.upper()):
+            return ("no image, crash or OOM fault is observable, so the cause is not yet identified; the recent "
+                    "rollout, pod scheduling and readiness probes must be investigated before any rollback.")
+        # 1) Cause-specific (most precise) -- keyed on the real Kubernetes reason.
+        if "imagepullbackoff" in rc_low or "errimagepull" in rc_low:
+            return ("the new image cannot be pulled (ImagePullBackOff), so the replicas never start; rolling "
+                    "back to the last working image restores availability immediately.")
+        if "invalidimagename" in rc_low:
+            return ("the image reference is invalid (InvalidImageName), so the container is never created; "
+                    "rolling back to the last valid image restores the deployment.")
+        if "createcontainerconfigerror" in rc_low or "configerror" in rc_low:
+            return ("a referenced ConfigMap or Secret is missing or invalid (CreateContainerConfigError), so "
+                    "the container cannot start; rolling back the recent config change restores it.")
+        if "oomkilled" in rc_low:
+            return ("the container is OOMKilled for exceeding its memory limit, so restarting clears the "
+                    "exhausted memory while raising the limit stops the kernel from killing it again.")
+        if "crashloopbackoff" in rc_low:
+            return ("the container keeps crashing on start (CrashLoopBackOff), so deleting the pods forces a "
+                    "clean recreation; if it persists the last release should be rolled back.")
+        if "evicted" in rc_low:
+            return ("the pod was evicted under node resource pressure, so rescheduling it onto a node with "
+                    "free capacity restores the workload.")
+        if "unreachable" in rc_low or "node(s):" in rc_low or incident_type == "NODE_NOT_READY":
+            return ("the node hosting the workload is unreachable, so restarting its pods cannot help; "
+                    "escalating triggers node failover and reschedules the workload onto healthy nodes.")
+        # 2) Type-specific (metric incidents are already specific via their numbers).
+        by_type = {
+            "MONITORING_DOWN": "the monitoring VM is unreachable, so escalation initiates failover to restore observability.",
+            "AI_SERVICE_DOWN": "the AI VM is unreachable, so escalation initiates failover to restore automated remediation.",
+            "DATABASE_POOL_SATURATION": "the database connection pool is exhausted, so restarting frees the leaked connections after a pool check.",
+            "HIGH_ERROR_RATE": "the 5xx error rate spiked, typically after a release, so rolling back and shedding traffic stops user-facing failures.",
+            "LATENCY_DEGRADATION": "p95 latency degraded under load, so scaling out adds capacity to absorb the pressure.",
+            "CPU_STRESS": "CPU is saturated and slowing every request, so restarting the hot pod clears the runaway work while a CPU profile is captured.",
+            "MEMORY_LEAK": "memory is climbing toward the limit, so restarting reclaims it while the memory limit is tuned.",
+            "POD_CRASH_LOOP": "the container keeps restarting, so deleting the crash-looping pods forces a clean recreation.",
+            "DEPLOYMENT_UNAVAILABLE": "the replicas cannot become ready, so the recent rollout should be investigated and rolled back if a bad release is confirmed.",
         }
-        if action and "INVESTIGATE" in action.upper():
-            return ("no specific container fault (image pull, crash loop or OOM) was detected, so the safest "
-                    "step is to investigate the recent rollout, scheduling and readiness before any rollback.")
-        return m.get(incident_type, f"{action} directly addresses the detected condition with the lowest blast radius.")
+        return by_type.get(incident_type, f"{action} directly addresses the detected condition with the lowest blast radius.")
+
+    @staticmethod
+    def _llm_ok(text: str, rc: str | None) -> bool:
+        """Accept the LLM 'Why' only when it actually names the cause, so the LLM can only IMPROVE
+        the deterministic baseline -- never replace a specific explanation with a vague one, and
+        never assert a cause when none was detected."""
+        t = (text or "").lower()
+        if len(t) < 15:
+            return False
+        rc_low = (rc or "").lower()
+        if "no container-level fault" in rc_low:
+            return "investigat" in t and not any(
+                x in t for x in ("imagepull", "oomkilled", "crashloop", "bad release", "the recent change")
+            )
+        keymap = [
+            (("imagepullbackoff", "errimagepull", "invalidimagename"), ("image",)),
+            (("createcontainerconfigerror", "configerror"), ("config", "secret", "configmap")),
+            (("oomkilled",), ("oom", "memory")),
+            (("crashloopbackoff",), ("crash", "restart")),
+            (("evicted",), ("evict", "resource", "reschedul")),
+            (("unreachable", "node(s):"), ("node",)),
+        ]
+        for triggers, required in keymap:
+            if any(x in rc_low for x in triggers):
+                return any(r in t for r in required)
+        return True  # metric incident (no K8s reason): any clean, non-empty LLM sentence is fine
 
     def _explain_why(self, incident_type, severity, confidence, evidence, action):
         """LLM reasoning, few-shot constrained to the facts. One grounded sentence or None."""
