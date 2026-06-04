@@ -157,13 +157,13 @@ public class InfrastructureHealthScheduler {
             // Rich description with the AI metadata, same format the AIOps
             // pipeline uses so the UI shows action / executionMode / confidence.
             String enrichedDesc = String.format(
-                    "%s | type=%s | action=%s | executionMode=%s | confidence=%.2f | explanation=%s",
+                    "%s | Type: %s | Severity: %s (confidence %.0f%%) | Recommended action: %s | Mode: %s",
                     safe(buildDescription(status)),
                     safe(prediction.getIncidentType()),
+                    safe(prediction.getSeverity()),
+                    (prediction.getConfidence() != null ? prediction.getConfidence() : 0.0) * 100.0,
                     safe(prediction.getRecommendedAction()),
-                    safe(prediction.getExecutionMode()),
-                    prediction.getConfidence() != null ? prediction.getConfidence() : 0.0,
-                    safe(aiExplanation)
+                    safe(prediction.getExecutionMode())
             );
             if (enrichedDesc.length() > 1000) {
                 enrichedDesc = enrichedDesc.substring(0, 997) + "...";

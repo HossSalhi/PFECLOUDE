@@ -196,14 +196,15 @@ public class OrchestrationService {
     }
 
     private String buildEnrichedDescription(String message, AIPredictResponse p) {
+        double conf = p.getConfidence() != null ? p.getConfidence() : 0.0;
         String enriched = String.format(
-                "%s | type=%s | action=%s | executionMode=%s | confidence=%.2f | explanation=%s",
+                "%s | Type: %s | Severity: %s (confidence %.0f%%) | Recommended action: %s | Mode: %s",
                 safe(message),
                 safe(p.getIncidentType()),
+                safe(p.getSeverity()),
+                conf * 100.0,
                 safe(p.getRecommendedAction()),
-                safe(p.getExecutionMode()),
-                p.getConfidence() != null ? p.getConfidence() : 0.0,
-                safe(p.getDecisionExplanation())
+                safe(p.getExecutionMode())
         );
         if (enriched.length() > 1000) enriched = enriched.substring(0, 997) + "...";
         return enriched;

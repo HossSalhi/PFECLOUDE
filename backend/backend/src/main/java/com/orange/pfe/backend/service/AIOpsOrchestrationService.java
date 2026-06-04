@@ -253,14 +253,16 @@ public class AIOpsOrchestrationService {
     }
 
     private String buildIncidentDescription(AIPredictResponse prediction) {
+        // Clean, structured at-a-glance summary. The full cause + Why prose lives in the
+        // incident's explanation field ("Explication IA"), so we do NOT repeat it here.
+        double conf = prediction.getConfidence() != null ? prediction.getConfidence() : 0.0;
         return String.format(
-                "%s | type=%s | action=%s | executionMode=%s | confidence=%.2f | explanation=%s",
-                safe(prediction.getSummary()),
+                "Type: %s | Severity: %s (confidence %.0f%%) | Recommended action: %s | Mode: %s",
                 safe(prediction.getIncidentType()),
+                safe(prediction.getSeverity()),
+                conf * 100.0,
                 safe(prediction.getRecommendedAction()),
-                safe(prediction.getExecutionMode()),
-                prediction.getConfidence() != null ? prediction.getConfidence() : 0.0,
-                safe(prediction.getDecisionExplanation())
+                safe(prediction.getExecutionMode())
         );
     }
 
