@@ -86,7 +86,15 @@ data:
   cnpg-database-template: |
     # For ANY PostgreSQL database — use CloudNativePG for automatic HA
     # primary runs on one worker, standby on the other
-    # If primary worker fails: standby auto-promoted — no manual action needed
+    #
+    # IMPORTANT — REAL behaviour on a NON-GRACEFUL node shutdown (VM hard stop / power loss):
+    #   Kubernetes does NOT auto-delete stateful pods on an unreachable node (the kubelet
+    #   can't confirm the pod is gone), so the pod stays "Terminating" forever and CNPG
+    #   will NOT promote the standby (split-brain protection). This is by design.
+    #   => If the DOWN node hosted the PRIMARY, the DB stays write-unavailable until you
+    #      fence the dead node. See the 'node-failure-runbook' ConfigMap below for the
+    #      one command that triggers failover. If the down node hosted only the STANDBY,
+    #      the DB keeps working with no action.
     apiVersion: postgresql.cnpg.io/v1
     kind: Cluster
     metadata:
@@ -124,3 +132,78 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: loki
+
+---
+# Node-failure runbook — VALIDATED 2026-06-04 by hard-stopping a worker in VMware.
+# Captures the TWO real gaps found vs. the aspirational "auto within 60s" claim above.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-failure-runbook
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: pfe-aiops-platform
+    purpose: node-failure-runbook
+data:
+  README: |
+    WHAT HAPPENS WHEN A WORKER IS HARD-STOPPED (VMware power off / power loss)
+    =========================================================================
+    DETECTION is automatic and robust: kube-state-metrics (on master) reports the
+    node NotReady, in-cluster Prometheus (2 replicas, 1 survives) federates it to
+    .160, and the surviving backend (leader) raises a NODE_NOT_READY incident
+    (HIGH, action ESCALATE_NODE_OUTAGE_AND_REBALANCE). Proven: incident #1252.
+
+    But for the incident to PERSIST and the stack to self-heal, two gaps had to be
+    closed — both are now fixed/documented:
+
+    GAP 1 — the CNPG operator could not survive a worker death (FIXED, durable)
+    --------------------------------------------------------------------------
+    The CNPG operator is a single pod. It happened to run on the worker that was
+    stopped, and its replacement could not schedule: master was tainted
+    control-plane and the surviving worker was memory-saturated (it had to absorb
+    the dead worker's whole load). No operator => no postgres failover => DB
+    write-unavailable => incident cannot be persisted.
+    FIX (two parts, apply once; survive pod restarts):
+    (a) TOLERATE the control-plane so the operator CAN fall back to master when both
+        workers are full/down:
+
+      kubectl -n cnpg-system patch deployment cnpg-controller-manager --type=json \
+        -p='[{"op":"add","path":"/spec/template/spec/tolerations",
+              "value":[{"key":"node-role.kubernetes.io/control-plane",
+                        "operator":"Exists","effect":"NoSchedule"}]}]'
+    (b) but PREFER a worker in steady state — the master is tiny (~1.67 GB) and the
+        operator crash-loops there (exitCode 1, loses its leader-election lease when
+        the API slows under memory pressure). Soft worker preference, master = FALLBACK
+        only (validated 2026-06-04: operator moved master->worker2, stable):
+      kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=merge -p \
+        '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"preferredDuringSchedulingIgnoredDuringExecution":[{"weight":100,"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"DoesNotExist"}]}}]}}}}}}'
+
+    GAP 2 (RESOLVED by GAP 1 fix) — postgres failover is now AUTOMATIC (~1 min)
+    --------------------------------------------------------------------------
+    With the operator alive on master, CNPG auto-fails-over when a worker dies:
+    confirmed worker1 test #1285, operator logged "Failing over newPrimary=..."
+    ~57s after the node went unreachable, DB writable right after. The earlier
+    "CNPG won't promote a dead primary / pod stuck Terminating" stall was a
+    SIDE-EFFECT of GAP 1 (the operator itself was dead on the stopped worker), not
+    an independent limitation. So no manual step is normally needed.
+
+    FALLBACK ONLY (if failover ever stalls, e.g. the operator was unavailable):
+      kubectl -n pfe delete pod <PRIMARY_POD> --grace-period=0 --force
+      # or the K8s-native non-graceful-shutdown taint:
+      kubectl taint node <DEAD_NODE> node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
+      kubectl taint node <DEAD_NODE> node.kubernetes.io/out-of-service-   # remove after recovery
+
+    The dominant node-down latency is now the scheduler LEADER HANDOVER (~4-5 min,
+    DB-lease TTL 300s) when the dead worker hosted the leader; otherwise ~1-2 min.
+
+    GAP 3 — HOST RAM over-commit (environmental, NOT a platform defect)
+    ------------------------------------------------------------------
+    The VMware host has 23.8 GB but the 5 VMs need ~24 GB+ (aiCamunda=12 GB). At
+    idle, all 5 up = ~1.5 GB free + ~11 GB swap. Stopping a worker is safe (frees
+    RAM, detection works), but RESTARTING it while everything runs + CNPG re-syncs
+    spikes memory and can FREEZE the other worker (cascade seen 2026-06-04). For HA
+    tests, `vmrun stop` aiCamunda first for 12 GB headroom (the AI isn't needed to
+    test/repair the node layer), restart it after. Real fix: more host RAM (→32 GB).
+    Recovery from a wedged CNPG after such a freeze: delete the stuck replica pod to
+    refresh its instance-manager; if it can't pg_rewind (diverged timeline), delete
+    its PVC too so CNPG re-bootstraps it fresh (the primary keeps all data).

@@ -165,6 +165,58 @@ kubectl -n pfe scale deployment/podinfo --replicas=0   # outage
 kubectl -n pfe scale deployment/podinfo --replicas=1   # restore
 ```
 
+### ⭐ Worker node down (HA — NODE_NOT_READY)  [validated 2026-06-04, incident #1252]
+Stop a whole worker VM in VMware. HELIOS detects it automatically (kube-state-metrics
+on master + the in-cluster Prometheus replica that survives), raises a **NODE_NOT_READY**
+incident (HIGH, action `ESCALATE_NODE_OUTAGE_AND_REBALANCE` — it does NOT try to restart
+pods on a dead node), and **auto-resolves it when the worker comes back** (~5 min window).
+
+**Before you start — pick the CLEAN demo path (zero manual steps):** stop the worker that
+does NOT host the Postgres **primary**, so the database keeps working on its own.
+```bash
+kubectl -n pfe get pods -l cnpg.io/cluster=postgres -L cnpg.io/instanceRole -o wide
+# note which NODE holds the 'primary' → in VMware, stop the OTHER worker.
+```
+Then, in VMware Workstation, **power off** that worker (hard stop is fine).
+
+```bash
+# Watch the node go NotReady (~40s) then the incident appear (~1-3 min, leader poll):
+watch -n5 'kubectl get nodes;
+  PG=$(kubectl -n pfe get pod -l cnpg.io/instanceRole=primary -o jsonpath="{.items[0].metadata.name}");
+  kubectl -n pfe exec $PG -- psql -U postgres pfe_db -t -c \
+   "SELECT id,status,app,incident_type FROM incident WHERE incident_type='\''NODE_NOT_READY'\'' AND status NOT IN ('\''RESOLVED'\'','\''CLOSED'\'') ORDER BY id DESC;"'
+```
+Also visible in the UI: **http://192.168.148.153:30880** → Incidents.
+
+**Timing:** if the down worker also hosted the postgres primary, CNPG **auto-fails-over in
+~1 min** (the operator runs on master and survives — durable fix applied). The dominant
+delay is the **scheduler leader handover (~4-5 min, lease TTL 300s)** when the dead worker
+hosted the leader; otherwise the incident shows in ~1-2 min. Confirmed worker1 → #1285,
+worker2 → #1252.
+
+**Recovery:** power the worker back on. Postgres re-syncs to 2/2, and the NODE_NOT_READY
+incident **auto-resolves** within ~5 min (the AI re-checks each polled app and sees the
+node is Ready again). Confirmed: #1252/#1253 (worker2 test) auto-resolved; #1285 (worker1) too.
+
+> ⚠️ **HOST RAM — read before doing this test (`MEMORY` host-ram note).** The VMware host
+> (23.8 GB) can barely run all 5 VMs (aiCamunda alone = 12 GB). **Stopping** a worker is
+> safe (frees RAM), but **restarting** it while everything else runs + postgres re-syncs
+> can spike memory and *freeze the other worker* (a cascade we hit on 2026-06-04). For a
+> live demo, either don't restart the worker live, or `vmrun stop` aiCamunda first for 12 GB
+> of headroom and restart it after.
+
+#### Fallback — if postgres failover ever stalls (e.g. operator was unavailable)
+On a non-graceful node shutdown the old primary pod can stay `Terminating`. Normally the
+operator-on-master promotes the standby automatically; if it ever stalls, fence the node:
+```bash
+kubectl -n pfe delete pod <PRIMARY_POD> --grace-period=0 --force
+# or the K8s-native non-graceful-shutdown taint:
+kubectl taint node <DEAD_WORKER> node.kubernetes.io/out-of-service=nodeshutdown:NoExecute
+kubectl taint node <DEAD_WORKER> node.kubernetes.io/out-of-service-   # remove after recovery
+```
+> Durable fix in place so the **CNPG operator survives** a worker loss (runs on master):
+> see `infra/k8s/worker-ha-config.yaml` → ConfigMap `node-failure-runbook`.
+
 ---
 
 ## 4. Checking incidents & email
@@ -249,10 +301,11 @@ ssh kube@192.168.148.161 "sshpass -p kube ssh -o StrictHostKeyChecking=no kube@1
 | AI features all 0, no incidents | VM160 Prometheus broken after reboot | Section 6b |
 | New pods stuck `ContainerCreating` | Calico CNI token expired | Section 6a |
 | Prometheus won't start on .160 | VM160 out of RAM | Section 6c (stop Grafana) |
-| `/api/ai/predict` → 403 | used non-admin account | login as `superadmin` |
+| `/api/ai/predict` → 403 | used non-admin account | login as `admin` (ADMIN, no 2FA); `superadmin` has 2FA |
 | No email for an auto-resolved incident | by design (email only on approval path) | trigger an approval-path incident |
 | Incident type looks wrong (e.g. POD_PENDING for CPU) | model labeling | CPU relabel rule is in inference.py; check `cpu_usage_cores` |
-| Duplicate incidents for one app | backend runs 2 replicas, no leader election | known issue; excluded apps unaffected |
+| Duplicate incidents for one app | — | prevented: DB-lease leader election + partial unique index `ux_incident_open_dedup` (Flyway V17) |
+| NODE_NOT_READY won't persist after stopping a worker | down node hosted the Postgres primary → DB write-down (CNPG won't auto-promote a dead primary) | fence the node — see §3 "Worker node down" |
 
 ---
 
