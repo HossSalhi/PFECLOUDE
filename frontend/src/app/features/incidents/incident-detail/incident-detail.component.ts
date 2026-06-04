@@ -120,7 +120,11 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
         const i = p.indexOf(':');
         return { label: p.slice(0, i).trim(), value: p.slice(i + 1).trim() };
       })
-      .filter(c => c.label.length > 0 && c.value.length > 0 && c.label.length < 30);
+      // Drop the AI-proposed "Mode": the REAL execution mode (Auto/Manuel) + status is shown
+      // authoritatively in the "Actions de Remédiation" table, so showing the AI's proposal here
+      // (which can differ from the backend's actual decision) only causes confusion.
+      .filter(c => c.label.length > 0 && c.value.length > 0 && c.label.length < 30
+                   && c.label.toLowerCase() !== 'mode');
   }
 
   /** Parse the AI explanation prose into labeled sections (Evidence / Root cause / Action / Why). */
