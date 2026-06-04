@@ -2305,6 +2305,8 @@ class InferenceEngine:
         normalized = recommended_action.upper()
         if "ESCALATE" in normalized:
             return "ESCALATION"
+        if "CRASHLOOP" in normalized or "DELETE_CRASH" in normalized:
+            return "DELETE_CRASHLOOPING_PODS"
         if "RESTART" in normalized or "ROLLBACK" in normalized or "FAILOVER" in normalized or "CHECK_" in normalized:
             return "RESTART_POD"
         if "SCALE" in normalized or "REBALANCE" in normalized or "SHIFT_TRAFFIC" in normalized:
