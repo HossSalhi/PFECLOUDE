@@ -45,8 +45,17 @@
       <div class="grid-2" style="gap:24px;">
 
         <div>
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:8px;">Description</div>
-          <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ incident.description || 'Aucune description disponible.' }}</div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:10px;">Description</div>
+          <!-- Structured chips (clean format) -->
+          <div *ngIf="descriptionChips().length > 0" style="display:flex;flex-direction:column;gap:8px;">
+            <div *ngFor="let c of descriptionChips()"
+                 style="display:flex;align-items:center;gap:12px;background:var(--gray-100);border:1px solid var(--gray-200);border-left:3px solid var(--orange-primary);border-radius:8px;padding:9px 13px;">
+              <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--gray-500);min-width:135px;">{{ c.label }}</span>
+              <span class="mono" style="font-size:13px;font-weight:600;color:var(--gray-800);word-break:break-word;">{{ c.value }}</span>
+            </div>
+          </div>
+          <!-- Fallback raw text (legacy format) -->
+          <div *ngIf="descriptionChips().length === 0" style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ incident.description || 'Aucune description disponible.' }}</div>
         </div>
 
         <div class="info-grid">
@@ -142,7 +151,24 @@
       </div>
     </div>
     <div class="card-body">
-      <div style="background:var(--gray-100);border-radius:8px;padding:16px;font-size:14px;line-height:1.7;color:var(--gray-700);border-left:3px solid var(--orange-primary);">
+      <!-- Structured sections (Evidence / Root cause / Action / Why) -->
+      <div *ngIf="hasStructuredExplanation()" style="display:flex;flex-direction:column;gap:12px;">
+        <div *ngFor="let s of explanationSections()"
+             [style.background]="s.highlight ? 'rgba(255,121,0,.06)' : 'var(--gray-100)'"
+             [style.borderLeft]="s.highlight ? '3px solid var(--orange-primary)' : '3px solid var(--gray-300)'"
+             style="display:flex;gap:14px;align-items:flex-start;border-radius:8px;padding:14px 16px;">
+          <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(255,121,0,.12);color:var(--orange-primary);">
+            <i class="fas" [ngClass]="s.icon"></i>
+          </div>
+          <div style="min-width:0;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--gray-500);margin-bottom:3px;">{{ s.label }}</div>
+            <div [class.mono]="s.label === 'Cause racine' || s.label === 'Action recommandée'"
+                 style="font-size:14px;line-height:1.6;color:var(--gray-800);word-break:break-word;">{{ s.text }}</div>
+          </div>
+        </div>
+      </div>
+      <!-- Fallback raw (non-standard explanation) -->
+      <div *ngIf="!hasStructuredExplanation()" style="background:var(--gray-100);border-radius:8px;padding:16px;font-size:14px;line-height:1.7;color:var(--gray-700);border-left:3px solid var(--orange-primary);">
         {{ incident.explanation }}
       </div>
     </div>

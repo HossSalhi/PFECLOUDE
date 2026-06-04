@@ -108,6 +108,43 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
     return new Date(d).toLocaleString('fr-FR');
   }
 
+  /** Parse the structured description "Label: Value | Label: Value" into chips.
+   *  Returns [] for the legacy verbose format so the template falls back to raw text. */
+  descriptionChips(): { label: string; value: string }[] {
+    const d = (this.incident?.description || '').trim();
+    if (!d || d.includes('explanation=') || d.includes('executionMode=')) return [];
+    return d.split('|')
+      .map(p => p.trim())
+      .filter(p => p.includes(':'))
+      .map(p => {
+        const i = p.indexOf(':');
+        return { label: p.slice(0, i).trim(), value: p.slice(i + 1).trim() };
+      })
+      .filter(c => c.label.length > 0 && c.value.length > 0 && c.label.length < 30);
+  }
+
+  /** Parse the AI explanation prose into labeled sections (Evidence / Root cause / Action / Why). */
+  explanationSections(): { label: string; icon: string; text: string; highlight?: boolean }[] {
+    const e = (this.incident?.explanation || '').trim();
+    if (!e) return [];
+    const grab = (re: RegExp): string => {
+      const m = e.match(re);
+      return m && m[1] ? m[1].trim().replace(/[.;]\s*$/, '') : '';
+    };
+    const evidence = grab(/Measured evidence:\s*(.*?)(?:;\s*K8s root cause:|\.\s*Recommended action:|$)/i);
+    const cause    = grab(/K8s root cause:\s*(.*?)(?:\.\s*Recommended action:|$)/i);
+    const action   = grab(/Recommended action:\s*(.*?)(?:\.\s*Why:|$)/i);
+    const why      = grab(/Why:\s*(.*)$/i);
+    const out: { label: string; icon: string; text: string; highlight?: boolean }[] = [];
+    if (evidence) out.push({ label: 'Preuves mesurées', icon: 'fa-magnifying-glass-chart', text: evidence });
+    if (cause)    out.push({ label: 'Cause racine',      icon: 'fa-triangle-exclamation',   text: cause });
+    if (action)   out.push({ label: 'Action recommandée', icon: 'fa-screwdriver-wrench',     text: action });
+    if (why)      out.push({ label: 'Pourquoi',          icon: 'fa-lightbulb',              text: why, highlight: true });
+    return out;
+  }
+
+  hasStructuredExplanation(): boolean { return this.explanationSections().length > 0; }
+
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
   }
