@@ -189,6 +189,20 @@ class PredictorService:
                     p for p in existing if p not in similar
                 ]
 
+        # Root-cause enrichment: when signals indicate a fault, fetch the REAL Kubernetes
+        # reason (ImagePullBackOff, OOMKilled, CrashLoopBackOff, Evicted, ...) so the AI
+        # "Why" names the actual cause instead of staying generic. Gated to fault cases to
+        # avoid extra Prometheus queries on healthy apps.
+        if not getattr(request, "skip_llm", False) and (
+            combined.get("unavailable_replicas", 0.0) >= 1.0
+            or combined.get("pod_restarts_total", 0.0) >= 1.0
+            or combined.get("node_not_ready_count", 0.0) >= 1.0
+            or combined.get("metric_risk_score", 0.0) >= 0.05
+        ):
+            root_cause = self._collect_root_cause(request.namespace, request.app)
+            if root_cause:
+                remediation_ctx["root_cause"] = root_cause
+
         result = self.inference_engine.predict(
             combined,
             remediation_context=remediation_ctx,
@@ -266,6 +280,44 @@ class PredictorService:
         if not self.memory_store:
             return 0
         return self.memory_store.count()
+
+    def _collect_root_cause(self, namespace: str, app: str) -> str | None:
+        """Query kube-state-metrics 'reason' series for the REAL Kubernetes root cause of an
+        incident (ImagePullBackOff, ErrImagePull, CrashLoopBackOff, CreateContainerConfigError,
+        OOMKilled, Evicted, ...). Returns a short human string or None. Best-effort and durable
+        for any app/incident: it reads standard KSM metrics, not app-specific signals."""
+        if not self.settings.enable_upstream_queries:
+            return None
+        if not (_SAFE_LABEL.match(namespace or "") and _SAFE_LABEL.match(app or "")):
+            return None
+        pod_re = f"{app}-.*"
+        ignore = {"ContainerCreating", "PodInitializing", "Completed", ""}
+        parts: list[str] = []
+        try:
+            def _reasons(metric: str) -> list[str]:
+                rows = self.prometheus_client.query_raw(
+                    f'{metric}{{namespace="{namespace}",pod=~"{pod_re}"}} == 1'
+                )
+                seen: list[str] = []
+                for row in rows:
+                    reason = (row.get("metric", {}) or {}).get("reason")
+                    if reason and reason not in ignore and reason not in seen:
+                        seen.append(reason)
+                return seen
+
+            waiting = _reasons("kube_pod_container_status_waiting_reason")
+            if waiting:
+                parts.append("container waiting: " + ", ".join(waiting))
+            terminated = _reasons("kube_pod_container_status_last_terminated_reason")
+            if terminated:
+                parts.append("last termination: " + ", ".join(terminated))
+            pod_reason = _reasons("kube_pod_status_reason")
+            if pod_reason:
+                parts.append("pod status: " + ", ".join(pod_reason))
+        except Exception as exc:
+            logger.debug("root-cause collection failed for %s/%s: %s", namespace, app, exc)
+            return None
+        return "; ".join(parts) if parts else None
 
     @staticmethod
     def _finite(value: float | int | None, default: float = 0.0) -> float:

@@ -298,6 +298,9 @@ class InferenceEngine:
                 incident, noise, incident_type = False, True, "NO_INCIDENT"
 
             if incident:
+                _rc = remediation_context.get("root_cause") if isinstance(remediation_context, dict) else None
+                if _rc:
+                    evidence.append(f"K8s root cause: {_rc}")
                 ev = "; ".join(evidence) if evidence else f"composite risk score={overall_risk:.2f}"
                 why = self._why_fallback(incident_type, action)
                 if not skip_llm:
@@ -553,18 +556,22 @@ class InferenceEngine:
             system_msg = (
                 "You are a senior SRE. Given an incident and its recommended action, reply with "
                 "ONE short sentence explaining WHY that action fixes it. Use only the facts given. "
+                "If a Kubernetes root cause is provided (e.g. ImagePullBackOff, OOMKilled, "
+                "CrashLoopBackOff, CreateContainerConfigError, Evicted), NAME it and tie the fix to it. "
                 "Never restate the type, severity or numbers. Never write a list or a preamble."
             )
             # Few-shot: small models copy the STYLE of these examples far better than rules.
-            ex1_u = ("Incident: POD_CRASH_LOOP (severity HIGH). Measured evidence: 7 restarts in window. "
-                     "Recommended action: DELETE_CRASHLOOPING_PODS. Why is this action the right response?")
-            ex1_a = ("Deleting the crash-looping pods forces Kubernetes to recreate them from a clean "
-                     "state, clearing the stuck condition that the repeated restarts could not resolve.")
-            ex2_u = ("Incident: DATABASE_POOL_SATURATION (severity HIGH). Measured evidence: pool pending=5, "
-                     "usage=0.97. Recommended action: CHECK_DATABASE_CONNECTION_POOL_AND_RESTART. "
-                     "Why is this action the right response?")
-            ex2_a = ("Restarting releases the leaked connections saturating the pool so new requests stop "
-                     "queueing, while the pool check confirms the leak is gone before traffic resumes.")
+            # Both examples NAME the K8s root cause so the model learns to do the same.
+            ex1_u = ("Incident: DEPLOYMENT_UNAVAILABLE (severity HIGH). Measured evidence: 1 replica unavailable; "
+                     "K8s root cause: container waiting: ImagePullBackOff. "
+                     "Recommended action: ROLLBACK_RECENT_CHANGE_AND_RESTART. Why is this action the right response?")
+            ex1_a = ("The new image cannot be pulled (ImagePullBackOff) so the replica never starts; rolling back "
+                     "to the last working image lets the pods become ready again immediately.")
+            ex2_u = ("Incident: POD_CRASH_LOOP (severity HIGH). Measured evidence: 7 restarts in window; "
+                     "K8s root cause: last termination: OOMKilled. "
+                     "Recommended action: RESTART_POD_AND_TUNE_MEMORY_LIMITS. Why is this action the right response?")
+            ex2_a = ("The container is OOMKilled because it exceeds its memory limit, so restarting clears the "
+                     "exhausted memory while raising the limit stops the kernel from killing it again.")
             user_msg = (
                 f"Incident: {incident_type} (severity {severity}). "
                 f"Measured evidence: {evidence}. "
@@ -596,7 +603,8 @@ class InferenceEngine:
             low = raw.lower()
             cut = len(raw)
             for mk in ["\n\n", "\n#", "\n**", "\nlet's", "\nlet me", "\nhere", "\nbelow",
-                       "\nsure", "for the following", "as follows", " reasons:", "\n1.", "\n- ", "\n* "]:
+                       "\nsure", "for the following", "as follows", " reasons:", "\n1.", "\n- ", "\n* ",
+                       "incident:", "measured evidence:", "recommended action:", "why is this"]:
                 j = low.find(mk)
                 if j != -1:
                     cut = min(cut, j)
