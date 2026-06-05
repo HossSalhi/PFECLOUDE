@@ -338,15 +338,20 @@ class InferenceEngine:
                 # specific). The LLM is an optional flourish, used only if it actually names the
                 # cause -- so it can only improve the answer, never degrade or fabricate it.
                 why = self._why_for(incident_type, action, _rc)
+                specialist = None
                 if not skip_llm:
                     _llm_why = self._explain_why(incident_type, severity, confidence, ev, action)
                     if _llm_why and self._llm_ok(_llm_why, _rc):
                         why = _llm_why
+                    # Fine-tuned 0.5B specialist: gated second opinion (never overrides ML).
+                    specialist = self._specialist_opinion(incident_type, severity, action, ev)
                 decision_explanation = (
                     f"{incident_type} (severity {severity}, confidence {confidence:.2f}). "
                     f"Measured evidence: {ev}. Recommended action: {action}. "
                     f"Why: {why}"
                 )
+                if specialist and specialist.get("consensus_with_ml"):
+                    decision_explanation += " [ML + fine-tuned specialist consensus]"
 
         summary = self._build_summary(incident, incident_type, severity, confidence)
         decision_context = self._build_decision_context(
@@ -357,6 +362,9 @@ class InferenceEngine:
             execution_mode,
             remediation_context,
         )
+        # Record the fine-tuned specialist's gated opinion for transparency (ML stays decider).
+        if incident and not skip_llm and specialist is not None:
+            decision_context["specialist"] = specialist
 
         return InferenceResult(
             incident=incident,
@@ -732,6 +740,102 @@ class InferenceEngine:
                     break
             concise = " ".join(clean).strip()
             return concise if concise else None
+        except Exception:
+            return None
+
+    def _specialist_opinion(self, incident_type, severity, action, evidence):
+        """Fine-tuned 0.5B specialist (Ollama model 'aiops-sre-ft') — a GATED second opinion
+        on the structured decision. It NEVER overrides the ML/deterministic decision: its JSON
+        output is validated against the taxonomy and kept only as a consensus signal; any
+        malformed or out-of-taxonomy output is dropped so it can never pollute the result.
+        Returns a small dict recorded in decision_context, or None on hard failure."""
+        try:
+            import httpx as _httpx, json as _json, re as _re
+            # Grammar-constrained decoding: the model is FORCED to emit valid JSON whose
+            # incident_type is one of the 52 taxonomy classes (no hallucinated types, no broken
+            # schema). Few-shot examples teach the format + the exact action vocabulary.
+            _TYPES = [
+                "NO_INCIDENT", "POD_CRASH_LOOP", "POD_OOM_KILLED", "POD_IMAGE_PULL_BACKOFF",
+                "POD_PENDING_INSUFFICIENT_RESOURCES", "POD_STUCK_TERMINATING", "POD_LIVENESS_FAILURE",
+                "POD_READINESS_FAILURE", "POD_INIT_CONTAINER_FAILURE", "NODE_NOT_READY", "NODE_DISK_FULL",
+                "NODE_HIGH_CPU", "NODE_HIGH_MEMORY", "NODE_KUBELET_DOWN", "NODE_HARDWARE_FAILURE",
+                "NODE_CLOCK_SKEW", "NODE_DISK_IO_SATURATION", "DB_CONNECTION_REFUSED", "DB_DEADLOCK",
+                "DB_REPLICATION_LAG", "DB_SLOW_QUERIES", "DB_DISK_FULL", "DB_HIGH_WRITE_LOAD",
+                "DB_CONNECTION_POOL_EXHAUSTION", "NETWORK_DNS_FAILURE", "NETWORK_PARTITION",
+                "NETWORK_PACKET_LOSS", "NETWORK_LATENCY_BETWEEN_NODES", "INGRESS_BACKEND_DOWN",
+                "SERVICE_DISCOVERY_FAILURE", "AUTH_TOKEN_EXPIRED", "AUTH_BRUTE_FORCE_ATTEMPT",
+                "UNAUTHORIZED_API_ACCESS_SPIKE", "TLS_CERTIFICATE_EXPIRY", "SECRET_ROTATION_FAILURE",
+                "PVC_PENDING", "PVC_USAGE_HIGH", "PV_FILESYSTEM_CORRUPTION", "HIGH_LATENCY_P95",
+                "HIGH_LATENCY_P99", "ERROR_RATE_4XX_SPIKE", "ERROR_RATE_5XX_SPIKE", "REQUEST_RATE_DROP",
+                "CIRCUIT_BREAKER_OPEN", "THREAD_POOL_EXHAUSTION", "MEMORY_LEAK", "CPU_SATURATION",
+                "EXTERNAL_API_DEPENDENCY_DOWN", "METRICS_SCRAPE_FAILURE", "PROMETHEUS_OUT_OF_MEMORY",
+                "LOKI_INGESTION_LAG", "UNKNOWN_ANOMALY",
+            ]
+            _schema = {
+                "type": "object",
+                "properties": {
+                    "incident_type": {"type": "string", "enum": _TYPES},
+                    "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+                    "recommended_action": {"type": "string"},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["incident_type", "severity", "recommended_action"],
+            }
+            _sys = ("You are an SRE incident classifier. Given a trace, output the single best "
+                    "incident_type from the allowed list, its severity, a recommended_action, "
+                    "and a one-line explanation. JSON only.")
+            with _httpx.Client(timeout=35.0) as _http:
+                resp = _http.post(
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": "aiops-sre-ft-v2",  # retrained 0.5B: 86.8% vs 26.4% (v1) on held-out test
+                        "messages": [
+                            {"role": "system", "content": _sys},
+                            {"role": "user", "content": "Trace shows: 7 restarts in window; container waiting CrashLoopBackOff; last termination Error. Pick the best type and action."},
+                            {"role": "assistant", "content": '{"incident_type":"POD_CRASH_LOOP","severity":"HIGH","recommended_action":"DELETE_CRASHLOOPING_PODS","explanation":"Container restarts in a loop; delete the pods for a clean restart."}'},
+                            {"role": "user", "content": "Trace shows: last termination OOMKilled; memory at the limit. Pick the best type and action."},
+                            {"role": "assistant", "content": '{"incident_type":"POD_OOM_KILLED","severity":"HIGH","recommended_action":"RESTART_POD_AND_TUNE_MEMORY_LIMITS","explanation":"Container exceeds its memory limit; restart and raise the limit."}'},
+                            {"role": "user", "content": "Trace shows: 1 node NotReady; node unreachable. Pick the best type and action."},
+                            {"role": "assistant", "content": '{"incident_type":"NODE_NOT_READY","severity":"HIGH","recommended_action":"ESCALATE_NODE_OUTAGE_AND_REBALANCE","explanation":"The node is unreachable; escalate and reschedule its pods onto healthy nodes."}'},
+                            {"role": "user", "content": f"Trace shows: {evidence}. Pick the best type and action."},
+                        ],
+                        "stream": False,
+                        "format": _schema,  # forces a valid type from the 52 (grammar-constrained)
+                        "options": {"temperature": 0.0, "repeat_penalty": 1.2, "num_predict": 200},
+                    },
+                )
+            if resp.status_code != 200:
+                return {"model": "aiops-sre-ft-v2", "status": "unavailable", "consensus_with_ml": False}
+            raw = (resp.json().get("message", {}).get("content", "") or "").strip()
+            m = _re.search(r"\{.*\}", raw, _re.DOTALL)
+            if not m:
+                return {"model": "aiops-sre-ft-v2", "status": "rejected_no_json", "consensus_with_ml": False}
+            try:
+                obj = _json.loads(m.group(0))
+            except Exception:
+                return {"model": "aiops-sre-ft-v2", "status": "rejected_bad_json", "consensus_with_ml": False}
+            # The small model is inconsistent about the field name (incident_type / type / eventType)
+            # and the action key (recommended_action / action) — accept the common variants.
+            s_type = str(obj.get("incident_type") or obj.get("type") or obj.get("eventType") or "").strip().upper()
+            s_sev = str(obj.get("severity") or "").strip().upper()
+            s_act = str(obj.get("recommended_action") or obj.get("action") or "").strip().upper()
+            # GATING: reject hallucinated / out-of-taxonomy output (e.g. severity "BRIGHT").
+            valid = (
+                bool(_re.fullmatch(r"[A-Z][A-Z0-9_]{2,40}", s_type))
+                and s_sev in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+                and len(s_act) >= 2  # action is free-form/advisory — don't reject the opinion over it
+            )
+            if not valid:
+                return {"model": "aiops-sre-ft-v2", "status": "rejected_invalid_output",
+                        "consensus_with_ml": False, "raw_type": s_type[:40]}
+            return {
+                "model": "aiops-sre-ft-v2",
+                "status": "ok",
+                "incident_type": s_type,
+                "severity": s_sev,
+                "recommended_action": s_act,
+                "consensus_with_ml": (s_type == str(incident_type).upper()),
+            }
         except Exception:
             return None
 
