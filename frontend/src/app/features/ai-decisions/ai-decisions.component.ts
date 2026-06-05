@@ -40,13 +40,28 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
 
   load(): void {
     this.loading = true;
-    this.api.getIncidents(0, 1000).subscribe({
-      next: (page: PagedResponse<Incident>) => {
-        this.incidents = (page.content || []).filter(i => i.source === 'AI' || i.confidence != null);
+    this.fetchPage(0, []);
+  }
+
+  // Fetch ALL pages (the API caps size at 100) so every AI-analysed incident is shown.
+  private fetchPage(page: number, acc: Incident[]): void {
+    this.api.getIncidents(page, 100).subscribe({
+      next: (resp: PagedResponse<Incident>) => {
+        const all = acc.concat(resp.content || []);
+        const totalPages = resp.totalPages || 1;
+        if (page + 1 < totalPages && page < 49) {
+          this.fetchPage(page + 1, all);
+        } else {
+          this.incidents = all.filter(i => i.source === 'AI' || i.confidence != null);
+          this.applyFilter();
+          this.loading = false;
+        }
+      },
+      error: () => {
+        this.incidents = acc.filter(i => i.source === 'AI' || i.confidence != null);
         this.applyFilter();
         this.loading = false;
-      },
-      error: () => { this.loading = false; }
+      }
     });
   }
 
