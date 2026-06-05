@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HELIOS — Plateforme AIOps · Architecture & Technologies</title>
+<style>
+  :root{
+    --orange:#ff7900; --orange-d:#e96400; --ink:#0a0a0a; --ink2:#1d1d1d;
+    --bg:#f5f6f8; --card:#ffffff; --line:#e4e6ea; --muted:#6b7280;
+    --green:#2e9e5b; --blue:#2563eb; --purple:#7c3aed; --red:#d92d20; --yellow:#f5a623;
+    --shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.06);
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:70px}
+  body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.6;font-size:16px}
+  a{color:var(--orange-d);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);background:#f0f1f3;padding:.1em .4em;border-radius:4px;font-size:.86em;color:#b5341a;border:1px solid #e7e8ea}
+  h2{font-size:1.9rem;margin:.2em 0 .1em;letter-spacing:-.02em}
+  h3{font-size:1.25rem;margin:1.4em 0 .4em;color:var(--ink2)}
+  h4{font-size:1.02rem;margin:1.1em 0 .3em;color:var(--ink2)}
+  p{margin:.5em 0}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 22px}
+
+  /* NAV */
+  nav{position:sticky;top:0;z-index:50;background:rgba(10,10,10,.96);backdrop-filter:blur(8px);border-bottom:3px solid var(--orange)}
+  nav .wrap{display:flex;align-items:center;gap:18px;height:60px;overflow-x:auto}
+  nav .brand{font-weight:800;color:#fff;font-size:1.05rem;white-space:nowrap;letter-spacing:.5px}
+  nav .brand b{color:var(--orange)}
+  nav .links{display:flex;gap:4px;flex-wrap:nowrap}
+  nav a{color:#cfd2d6;font-size:.82rem;padding:6px 10px;border-radius:6px;white-space:nowrap}
+  nav a:hover{background:rgba(255,121,0,.18);color:#fff;text-decoration:none}
+
+  /* HERO */
+  header.hero{background:linear-gradient(135deg,#0a0a0a 0%,#1d1d1d 55%,#3a2400 100%);color:#fff;padding:64px 0 56px;position:relative;overflow:hidden}
+  header.hero::after{content:"";position:absolute;right:-120px;top:-80px;width:420px;height:420px;border-radius:50%;background:radial-gradient(circle,rgba(255,121,0,.35),transparent 65%)}
+  .hero .tag{display:inline-block;background:var(--orange);color:#000;font-weight:700;font-size:.72rem;padding:5px 12px;border-radius:20px;letter-spacing:1px;text-transform:uppercase}
+  .hero h1{font-size:3.1rem;margin:.35em 0 .15em;line-height:1.05;letter-spacing:-.03em}
+  .hero h1 span{color:var(--orange)}
+  .hero .sub{font-size:1.2rem;color:#d4d7db;max-width:760px}
+  .hero .meta{margin-top:26px;display:flex;gap:26px;flex-wrap:wrap}
+  .hero .meta div{border-left:3px solid var(--orange);padding-left:12px}
+  .hero .meta .k{font-size:1.5rem;font-weight:800}
+  .hero .meta .v{font-size:.8rem;color:#b9bcc1;text-transform:uppercase;letter-spacing:.5px}
+
+  section{padding:44px 0;border-bottom:1px solid var(--line)}
+  section .eyebrow{color:var(--orange-d);font-weight:700;font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase}
+  .lead{font-size:1.08rem;color:#374151;max-width:880px}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:860px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:var(--shadow)}
+  .card h4{margin-top:0}
+  .card.k{border-top:3px solid var(--orange)}
+
+  .pill{display:inline-block;background:#fff3e6;color:#b5530a;border:1px solid #ffd9b0;border-radius:20px;padding:3px 11px;font-size:.78rem;font-weight:600;margin:3px 4px 3px 0;font-family:var(--mono)}
+  .pill.b{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
+  .pill.g{background:#e9f7ef;color:#1d6e3c;border-color:#b4e3c6}
+  .pill.p{background:#f5edff;color:#5b21b6;border-color:#ddc9fb}
+  .pill.gray{background:#f1f2f4;color:#444;border-color:#e0e2e6}
+
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.92rem;background:#fff;border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+  th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#0a0a0a;color:#fff;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px}
+  tr:last-child td{border-bottom:none}
+  tbody tr:nth-child(even){background:#fafbfc}
+  td.mono,th.mono{font-family:var(--mono);font-size:.84rem}
+
+  ul.clean{list-style:none;padding-left:0;margin:.4em 0}
+  ul.clean li{padding:5px 0 5px 26px;position:relative}
+  ul.clean li::before{content:"▸";color:var(--orange);position:absolute;left:6px;font-weight:700}
+  ul.check li::before{content:"✓";color:var(--green)}
+
+  /* FLOW DIAGRAM */
+  .flow{display:flex;flex-direction:column;gap:0;margin:18px 0}
+  .flow .row{display:flex;align-items:stretch;gap:12px;flex-wrap:wrap;justify-content:center}
+  .node{background:#fff;border:2px solid var(--line);border-radius:10px;padding:12px 14px;min-width:150px;text-align:center;box-shadow:var(--shadow);position:relative}
+  .node .t{font-weight:700;font-size:.92rem}
+  .node .d{font-size:.74rem;color:var(--muted)}
+  .node.o{border-color:var(--orange);background:#fff8f2}
+  .node.b{border-color:#bcd0ff;background:#f5f8ff}
+  .node.g{border-color:#bce6cc;background:#f4fbf6}
+  .node.p{border-color:#dcc9fb;background:#faf6ff}
+  .arrow{align-self:center;color:var(--orange);font-size:1.5rem;font-weight:700;padding:0 2px}
+  .varrow{text-align:center;color:var(--orange);font-size:1.6rem;line-height:1;margin:2px 0}
+
+  /* LAYER cards */
+  .layer{display:flex;gap:16px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-left:5px solid var(--orange);border-radius:10px;padding:16px 18px;margin:12px 0;box-shadow:var(--shadow)}
+  .layer .num{flex:0 0 46px;height:46px;border-radius:50%;background:var(--orange);color:#000;font-weight:800;font-size:1.3rem;display:flex;align-items:center;justify-content:center}
+  .layer.l2{border-left-color:var(--blue)} .layer.l2 .num{background:var(--blue);color:#fff}
+  .layer.l3{border-left-color:var(--purple)} .layer.l3 .num{background:var(--purple);color:#fff}
+
+  .stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;text-align:center;box-shadow:var(--shadow);border-bottom:3px solid var(--orange)}
+  .stat .n{font-size:2rem;font-weight:800;color:var(--ink);line-height:1}
+  .stat .l{font-size:.8rem;color:var(--muted);margin-top:6px}
+
+  .note{background:#fff8ec;border:1px solid #f6deb0;border-left:4px solid var(--yellow);border-radius:8px;padding:12px 16px;margin:14px 0;font-size:.92rem}
+  .note.ok{background:#eefaf2;border-color:#bfe6cd;border-left-color:var(--green)}
+  .note.info{background:#eef4ff;border-color:#c9d8fb;border-left-color:var(--blue)}
+
+  .vm{border-radius:12px;border:1px solid var(--line);overflow:hidden}
+  .vm thead th{background:var(--orange);color:#000}
+
+  footer{background:#0a0a0a;color:#9aa0a6;padding:30px 0;text-align:center;font-size:.85rem}
+  footer b{color:#fff}
+  .kbd{font-family:var(--mono);background:#111;color:#ffae5e;padding:2px 7px;border-radius:5px;font-size:.82rem}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:860px){.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand">⬡ <b>HELIOS</b> AIOps</span>
+    <div class="links">
+      <a href="#apercu">Aperçu</a>
+      <a href="#archi">Architecture</a>
+      <a href="#infra">Infrastructure</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#ia">Moteur IA</a>
+      <a href="#modeles">Modèles ML</a>
+      <a href="#remed">Remédiation</a>
+      <a href="#ha">Haute dispo</a>
+      <a href="#obs">Observabilité</a>
+      <a href="#secu">Sécurité</a>
+      <a href="#stack">Stack</a>
+      <a href="#resultats">Résultats</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">Projet de Fin d'Études · Orange</span>
+    <h1><span>HELIOS</span> — Plateforme AIOps<br>pour Kubernetes</h1>
+    <p class="sub">Détection, explication et <strong>remédiation automatique</strong> des incidents d'un cluster Kubernetes,
+       pilotées par une chaîne <strong>Machine Learning + LLM</strong> et orchestrées par des workflows BPMN.</p>
+    <div class="meta">
+      <div><div class="k">3 couches</div><div class="v">IA : anomalie · ML · LLM</div></div>
+      <div><div class="k">5 VMs</div><div class="v">cluster K8s réel</div></div>
+      <div><div class="k">F1 = 1.0</div><div class="v">détection d'incident</div></div>
+      <div><div class="k">83,5 %</div><div class="v">remédiation auto réussie</div></div>
+      <div><div class="k">~3 min</div><div class="v">MTTR médian</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- APERÇU -->
+<section id="apercu"><div class="wrap">
+  <div class="eyebrow">Vue d'ensemble</div>
+  <h2>Qu'est-ce que HELIOS ?</h2>
+  <p class="lead">HELIOS est une plateforme <strong>AIOps</strong> (Artificial Intelligence for IT Operations) qui surveille en continu
+  un cluster Kubernetes, <strong>détecte les incidents automatiquement</strong> grâce à un moteur d'intelligence artificielle,
+  en <strong>explique la cause racine</strong> en langage naturel, puis <strong>applique la correction</strong> (redémarrage, scaling, bascule…)
+  via des workflows automatisés — avec ou sans validation humaine selon le niveau de risque, et notification par e-mail.</p>
+
+  <div class="grid g4" style="margin-top:18px">
+    <div class="card k"><h4>👁️ Observer</h4><p>Collecte continue des métriques (Prometheus, cAdvisor, kube-state-metrics) et des logs (Loki) de tout le cluster.</p></div>
+    <div class="card k"><h4>🧠 Comprendre</h4><p>3 couches d'IA : détection d'anomalie statistique → classification ML (XGBoost) → explication par LLM ancrée sur la cause réelle.</p></div>
+    <div class="card k"><h4>⚙️ Agir</h4><p>Orchestration Camunda (BPMN) qui exécute des actions <code>kubectl</code> réelles, encadrées par une politique de sécurité.</p></div>
+    <div class="card k"><h4>🔁 Clôturer</h4><p>Vérification post-remédiation, <strong>auto-résolution</strong> quand la condition disparaît, notification e-mail.</p></div>
+  </div>
+
+  <div class="note info"><b>Le principe directeur :</b> une approche <strong>hybride</strong> — la décision (classification + action recommandée) combine
+  un <strong>raisonnement déterministe basé sur la cause racine réelle</strong> lue depuis Kubernetes <em>et</em> un <strong>score Machine Learning</strong>.
+  L'IA n'invente jamais une explication : elle est toujours ancrée sur ce que le cluster rapporte vraiment (ImagePullBackOff, OOMKilled, CrashLoopBackOff, nœud injoignable…).</div>
+</div></section>
+
+<!-- ARCHITECTURE -->
+<section id="archi"><div class="wrap">
+  <div class="eyebrow">Architecture logicielle</div>
+  <h2>Architecture globale</h2>
+  <p class="lead">Quatre grands blocs communiquent : la <strong>plateforme K8s observée</strong>, la <strong>couche d'observabilité</strong>,
+  le <strong>cerveau IA</strong>, et le <strong>backend d'orchestration</strong> exposé via une interface web.</p>
+
+  <div class="flow">
+    <div class="row">
+      <div class="node"><div class="t">Cluster Kubernetes</div><div class="d">apps + nœuds surveillés</div></div>
+      <span class="arrow">→</span>
+      <div class="node b"><div class="t">Prometheus + Loki</div><div class="d">métriques &amp; logs (fédérés)</div></div>
+      <span class="arrow">→</span>
+      <div class="node p"><div class="t">Service IA (FastAPI)</div><div class="d">anomalie → XGBoost → LLM</div></div>
+    </div>
+    <div class="varrow">↓</div>
+    <div class="row">
+      <div class="node o"><div class="t">Backend Spring Boot</div><div class="d">orchestration, API, sécurité</div></div>
+      <span class="arrow">→</span>
+      <div class="node g"><div class="t">Camunda 8 (BPMN)</div><div class="d">workflow de remédiation</div></div>
+      <span class="arrow">→</span>
+      <div class="node"><div class="t">K8s client-java</div><div class="d">exécute <code>kubectl</code></div></div>
+    </div>
+    <div class="varrow">↓</div>
+    <div class="row">
+      <div class="node o"><div class="t">PostgreSQL (CNPG HA)</div><div class="d">incidents, actions, historique</div></div>
+      <span class="arrow">→</span>
+      <div class="node b"><div class="t">Frontend Angular</div><div class="d">dashboard temps réel (SSE)</div></div>
+      <span class="arrow">→</span>
+      <div class="node g"><div class="t">MailHog (SMTP)</div><div class="d">notifications e-mail</div></div>
+    </div>
+  </div>
+
+  <h3>Les grands composants</h3>
+  <div class="grid g2">
+    <div class="card"><h4>Backend d'orchestration — Spring Boot</h4>
+      <p>Cœur applicatif : reçoit les prédictions, crée et persiste les incidents, applique la <strong>politique de remédiation</strong>,
+      lance les workflows Camunda, expose l'API REST sécurisée et les flux temps réel (SSE).</p>
+      <span class="pill">Java 17</span><span class="pill">Spring Boot 4.0.2</span><span class="pill g">REST + SSE</span></div>
+    <div class="card"><h4>Service IA — FastAPI (Python)</h4>
+      <p>Microservice indépendant qui calcule les <em>features</em>, exécute la détection d'anomalie, les modèles XGBoost et l'explication LLM.
+      Exposé sur <code>:8000</code> (<code>/predict</code>, <code>/health</code>, routes MLOps).</p>
+      <span class="pill p">FastAPI</span><span class="pill p">XGBoost</span><span class="pill p">Ollama / Qwen 3B</span></div>
+    <div class="card"><h4>Couche d'observabilité</h4>
+      <p>Prometheus (fédération des métriques cluster), kube-state-metrics (état des objets K8s), Loki (logs), Grafana (visualisation).</p>
+      <span class="pill b">Prometheus</span><span class="pill b">Loki</span><span class="pill b">kube-state-metrics</span></div>
+    <div class="card"><h4>Interface web — Angular</h4>
+      <p>Tableau de bord : incidents, décisions IA, actions de remédiation, tâches humaines, mises à jour <strong>temps réel</strong>, mode sombre, notifications.</p>
+      <span class="pill b">Angular 16</span><span class="pill">Boosted (Orange)</span><span class="pill b">Chart.js</span></div>
+  </div>
+</div></section>
+
+<!-- INFRASTRUCTURE -->
+<section id="infra"><div class="wrap">
+  <div class="eyebrow">Infrastructure</div>
+  <h2>Le cluster : 5 machines virtuelles</h2>
+  <p class="lead">Cluster Kubernetes <strong>réel</strong> (installé avec <code>kubeadm</code>) réparti sur 5 VMs VMware Workstation,
+  en <strong>environnement totalement isolé (sans accès Internet)</strong> — les images de conteneurs sont distribuées manuellement entre nœuds.</p>
+
+  <table class="vm">
+    <thead><tr><th>VM</th><th>IP</th><th>RAM</th><th>Rôle &amp; composants hébergés</th></tr></thead>
+    <tbody>
+      <tr><td><b>k8s-master</b></td><td class="mono">192.168.148.153</td><td>1,75 Go</td>
+        <td>Control-plane (API server, etcd, scheduler, controller-manager) · kube-state-metrics · points d'entrée NodePort : <code>30880</code> (UI), <code>30808</code> (API), <code>30090</code> (Prometheus fédéré)</td></tr>
+      <tr><td><b>k8s-worker1</b></td><td class="mono">192.168.148.158</td><td>2 Go</td>
+        <td>Charges applicatives : réplica backend, instance PostgreSQL, applications surveillées, réplica Prometheus in-cluster</td></tr>
+      <tr><td><b>k8s-worker2</b></td><td class="mono">192.168.148.155</td><td>2,5 Go</td>
+        <td>Charges applicatives (backup symétrique de worker1) : réplica backend, instance PostgreSQL, applications, réplica Prometheus</td></tr>
+      <tr><td><b>k8s-monitoring</b></td><td class="mono">192.168.148.160</td><td>2 Go</td>
+        <td>Prometheus (fédération des métriques du cluster) · Loki (agrégation des logs) · Grafana (dashboards)</td></tr>
+      <tr><td><b>k8s-aiCamunda</b></td><td class="mono">192.168.148.161</td><td>12 Go</td>
+        <td>Service IA FastAPI (<code>:8000</code>) · Ollama + LLM Qwen 3B · Camunda 8 (moteur BPMN) · MailHog (relais SMTP <code>:1025</code> / UI <code>:8025</code>)</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:.88rem;color:var(--muted)">Hyperviseur : VMware Workstation sur Windows 11 (hôte 23,8 Go de RAM). Réseau privé <code>192.168.148.0/24</code>.</p>
+
+  <h3>Briques Kubernetes &amp; système</h3>
+  <div class="grid g3">
+    <div class="card"><h4>Orchestration</h4>
+      <span class="pill">Kubernetes (kubeadm)</span><span class="pill b">Calico CNI</span><span class="pill gray">containerd</span>
+      <p style="font-size:.88rem;margin-top:8px">3 nœuds (1 master + 2 workers), réseau de pods géré par Calico.</p></div>
+    <div class="card"><h4>Stockage</h4>
+      <span class="pill">local-path (Rancher)</span><span class="pill gray">PVC RWO</span>
+      <p style="font-size:.88rem;margin-top:8px"><code>WaitForFirstConsumer</code> — volumes locaux liés au nœud, base de l'architecture HA PostgreSQL.</p></div>
+    <div class="card"><h4>Base de données</h4>
+      <span class="pill">PostgreSQL</span><span class="pill g">CloudNativePG (CNPG)</span>
+      <p style="font-size:.88rem;margin-top:8px">Opérateur CNPG : 2 instances (1 primary + 1 replica), bascule automatique.</p></div>
+  </div>
+</div></section>
+
+<!-- PIPELINE -->
+<section id="pipeline"><div class="wrap">
+  <div class="eyebrow">De bout en bout</div>
+  <h2>Le pipeline complet d'un incident</h2>
+  <p class="lead">Du signal brut jusqu'à la résolution : 8 étapes, entièrement automatisées.</p>
+
+  <table>
+    <thead><tr><th style="width:38px">#</th><th>Étape</th><th>Ce qui se passe</th></tr></thead>
+    <tbody>
+      <tr><td><b>1</b></td><td><b>Collecte</b></td><td>Prometheus fédère les métriques du cluster (CPU/mémoire via cAdvisor, état des objets via kube-state-metrics) ; Loki agrège les logs.</td></tr>
+      <tr><td><b>2</b></td><td><b>Scrutation</b></td><td>Le backend interroge chaque application surveillée toutes les <strong>120 s</strong> (fenêtre d'analyse de <strong>5 min</strong>). Une <strong>élection de leader</strong> garantit qu'un seul réplica scrute (pas de doublons).</td></tr>
+      <tr><td><b>3</b></td><td><b>Prédiction IA</b></td><td>Appel à <code>/predict</code> : calcul des features → détection d'anomalie (Z-score) → classification XGBoost (incident ? sévérité ? action ?) → explication LLM.</td></tr>
+      <tr><td><b>4</b></td><td><b>Création d'incident</b></td><td>Si incident, le backend le persiste (type, sévérité, confiance, cause racine, action recommandée, explication). Un <strong>index unique partiel</strong> empêche les doublons ouverts.</td></tr>
+      <tr><td><b>5</b></td><td><b>Décision auto / humain</b></td><td>La <code>RemediationPolicyService</code> tranche : exécution <strong>automatique</strong> si la politique est satisfaite, sinon création d'une <strong>tâche humaine</strong> + e-mail de demande d'approbation.</td></tr>
+      <tr><td><b>6</b></td><td><b>Orchestration</b></td><td>Un workflow <strong>Camunda (BPMN)</strong> est lancé ; un <em>job worker</em> exécute l'action <code>kubectl</code> réelle via le client Kubernetes Java.</td></tr>
+      <tr><td><b>7</b></td><td><b>Vérification</b></td><td>Service de vérification post-remédiation : l'action a-t-elle rétabli la situation ? (avec compensation si échec).</td></tr>
+      <tr><td><b>8</b></td><td><b>Auto-résolution</b></td><td>L'IA re-vérifie chaque app ; dès que la condition a disparu, l'incident passe <strong>RESOLVED</strong> automatiquement + notification.</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<!-- MOTEUR IA -->
+<section id="ia"><div class="wrap">
+  <div class="eyebrow">Le cerveau</div>
+  <h2>Le moteur d'IA en 3 couches</h2>
+  <p class="lead">Chaque couche affine la précédente : on détecte d'abord <em>qu'il se passe quelque chose</em>, puis <em>de quoi il s'agit</em>, puis <em>pourquoi et quoi faire</em>.</p>
+
+  <div class="layer l1">
+    <div class="num">1</div>
+    <div>
+      <h4 style="margin:0">Détection d'anomalie statistique (Z-score)</h4>
+      <p style="margin:.3em 0">Repère les écarts anormaux d'une métrique par rapport à son comportement habituel (moyenne ± écarts-types) sur la fenêtre glissante.
+      Premier filtre rapide et non supervisé. <span style="color:var(--muted);font-size:.86rem">Module <code>anomaly/statistical_anomaly.py</code>.</span></p>
+      <span class="pill p">scipy</span><span class="pill p">numpy</span>
+    </div>
+  </div>
+
+  <div class="layer l2">
+    <div class="num">2</div>
+    <div>
+      <h4 style="margin:0">Classification supervisée — XGBoost (3 modèles)</h4>
+      <p style="margin:.3em 0">Trois modèles de gradient boosting travaillent ensemble sur un vecteur de <strong>416 features</strong> :
+      <strong>(a)</strong> y a-t-il un incident ? <strong>(b)</strong> quelle sévérité ? <strong>(c)</strong> quelle action recommander ?
+      Entraînés sur un jeu de <strong>1 200 échantillons</strong> couvrant ~52 scénarios. <span style="color:var(--muted);font-size:.86rem">Modules <code>models/inference.py</code>, <code>features/</code>.</span></p>
+      <span class="pill b">XGBoost 2.1.1</span><span class="pill b">scikit-learn 1.5.2</span><span class="pill b">pandas / numpy</span>
+    </div>
+  </div>
+
+  <div class="layer l3">
+    <div class="num">3</div>
+    <div>
+      <h4 style="margin:0">Explication par LLM — Qwen 3B (Ollama)</h4>
+      <p style="margin:.3em 0">Génère l'explication « <em>Preuves → Cause racine → Action → Pourquoi</em> » en langage naturel.
+      <strong>Point clé :</strong> l'explication est <strong>déterministe et ancrée sur la cause racine réelle</strong> lue depuis kube-state-metrics
+      (ImagePullBackOff, OOMKilled, CrashLoopBackOff, nœud injoignable…). Le LLM n'est qu'un <em>vernis</em> optionnel, validé par un garde-fou
+      (<code>_llm_ok</code>) qui le rejette s'il ne nomme pas la vraie cause — éliminant toute hallucination.</p>
+      <span class="pill p">Ollama</span><span class="pill p">Qwen 3B (F16)</span><span class="pill gray">prompt 51 types</span>
+    </div>
+  </div>
+
+  <h3>Les features : métriques + logs</h3>
+  <div class="grid g3">
+    <div class="card"><h4>Features métriques</h4><p>Extraites de Prometheus/cAdvisor : CPU, mémoire (niveau + tendance/dérivée), taux de requêtes, redémarrages, replicas indisponibles, pods pending, état des nœuds…</p><span class="pill b">metric_features.py</span></div>
+    <div class="card"><h4>Features logs</h4><p>Statistiques sur les logs Loki (volume, motifs d'erreur) + <strong>embeddings sémantiques</strong> des logs.</p><span class="pill p">sentence-transformers</span><span class="pill p">log_features.py</span></div>
+    <div class="card"><h4>Base vectorielle</h4><p>Les embeddings de logs sont stockés/recherchés dans <strong>ChromaDB</strong> pour la corrélation sémantique.</p><span class="pill p">ChromaDB</span><span class="pill p">log_embeddings.py</span></div>
+  </div>
+
+  <h3>Capacités MLOps avancées</h3>
+  <div class="grid g4">
+    <div class="card"><h4>Détection de dérive</h4><p>Surveille le <em>data drift</em> pour signaler quand le modèle se dégrade.</p><span class="pill gray">drift_detector</span></div>
+    <div class="card"><h4>Tests A/B</h4><p>Comparaison de versions de modèles en parallèle.</p><span class="pill gray">ab_tester</span></div>
+    <div class="card"><h4>Ré-entraînement auto</h4><p>Pipeline d'auto-entraînement + registre de modèles versionnés.</p><span class="pill gray">auto_trainer · model_registry</span></div>
+    <div class="card"><h4>Mode proactif</h4><p>Monitoring autonome &amp; corrélation d'incidents.</p><span class="pill gray">proactive · correlation</span></div>
+  </div>
+</div></section>
+
+<!-- MODELES ML -->
+<section id="modeles"><div class="wrap">
+  <div class="eyebrow">Résultats des modèles</div>
+  <h2>Performance des modèles ML</h2>
+  <p class="lead">Jeu de données : <strong>1 200 échantillons</strong>, <strong>416 features</strong>, découpage <em>holdout</em> 80/20 (960 entraînement / 240 test).</p>
+
+  <div class="grid g3" style="margin:12px 0 6px">
+    <div class="stat"><div class="n">1.00</div><div class="l">F1 — Détection d'incident</div></div>
+    <div class="stat"><div class="n">93,5 %</div><div class="l">Exactitude — Sévérité (3 classes)</div></div>
+    <div class="stat"><div class="n">98,2 %</div><div class="l">Exactitude — Action (5 classes)</div></div>
+  </div>
+
+  <h3>Modèle 1 — Détection d'incident (binaire)</h3>
+  <table>
+    <thead><tr><th>Classe</th><th>Précision</th><th>Rappel</th><th>F1</th><th>Support</th></tr></thead>
+    <tbody>
+      <tr><td>no_incident</td><td>1.00</td><td>1.00</td><td>1.00</td><td>23</td></tr>
+      <tr><td>incident</td><td>1.00</td><td>1.00</td><td>1.00</td><td>217</td></tr>
+      <tr><td><b>Exactitude globale</b></td><td colspan="3"><b>100 %</b></td><td>240</td></tr>
+    </tbody>
+  </table>
+
+  <div class="two">
+    <div>
+      <h3>Modèle 2 — Sévérité</h3>
+      <table>
+        <thead><tr><th>Classe</th><th>Préc.</th><th>Rappel</th><th>F1</th></tr></thead>
+        <tbody>
+          <tr><td>CRITICAL</td><td>1.00</td><td>1.00</td><td>1.00</td></tr>
+          <tr><td>HIGH</td><td>0.92</td><td>0.99</td><td>0.95</td></tr>
+          <tr><td>MEDIUM</td><td>0.94</td><td>0.73</td><td>0.83</td></tr>
+          <tr><td><b>Exactitude</b></td><td colspan="3"><b>93,5 %</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3>Modèle 3 — Action recommandée</h3>
+      <table>
+        <thead><tr><th>Classe</th><th>F1</th></tr></thead>
+        <tbody>
+          <tr><td>CHECK_DB_CONNECTIVITY_AND_RESTART</td><td>1.00</td></tr>
+          <tr><td>ESCALATE_VM_OUTAGE_AND_FAILOVER</td><td>1.00</td></tr>
+          <tr><td>RESTART_OR_SCALE</td><td>0.98</td></tr>
+          <tr><td>INVESTIGATE</td><td>0.97</td></tr>
+          <tr><td>SCALE_DEPLOYMENT_AND_REBALANCE</td><td>0.97</td></tr>
+          <tr><td><b>Exactitude</b></td><td><b>98,2 %</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div></section>
+
+<!-- REMEDIATION -->
+<section id="remed"><div class="wrap">
+  <div class="eyebrow">Passage à l'action</div>
+  <h2>Remédiation &amp; orchestration</h2>
+
+  <div class="two">
+    <div class="card">
+      <h4>Politique de remédiation automatique</h4>
+      <p>Une action ne s'exécute <strong>automatiquement</strong> que si <em>toutes</em> ces conditions sont réunies :</p>
+      <ul class="clean check">
+        <li>automatisation activée</li>
+        <li>action dans la liste autorisée (<code>RESTART_POD</code>, <code>DELETE_CRASHLOOPING_PODS</code>…)</li>
+        <li>action jugée « sûre » (restart, scale, recreate)</li>
+        <li>application &amp; namespace dans l'allowlist</li>
+        <li>confiance ≥ seuil &nbsp;·&nbsp; sévérité ≠ CRITICAL</li>
+        <li>incident non lié à la base &nbsp;·&nbsp; hors période de cooldown</li>
+      </ul>
+      <p style="font-size:.86rem;color:var(--muted)">Sinon → tâche humaine + e-mail d'approbation. Les actions consultatives (INVESTIGATE, ESCALATE) ne s'exécutent jamais seules.</p>
+    </div>
+    <div class="card">
+      <h4>Orchestration Camunda 8 (BPMN)</h4>
+      <p>Chaque remédiation est un <strong>processus métier</strong> modélisé en BPMN :</p>
+      <ul class="clean">
+        <li>démarrage d'une instance de workflow par incident</li>
+        <li><em>job workers</em> qui exécutent les tâches techniques</li>
+        <li>tâches utilisateur (validation humaine) intégrées</li>
+        <li>exécution réelle via le <strong>client Kubernetes Java</strong> (<code>kubectl</code> programmatique)</li>
+        <li>service de récupération de workflow en cas de panne</li>
+      </ul>
+      <span class="pill g">Camunda 8.8</span><span class="pill">K8s client-java 24.0</span>
+    </div>
+  </div>
+
+  <h3>Types d'actions de remédiation</h3>
+  <p>
+    <span class="pill">RESTART_POD</span>
+    <span class="pill">DELETE_CRASHLOOPING_PODS</span>
+    <span class="pill">SCALE_DEPLOYMENT</span>
+    <span class="pill">SCALE_DOWN</span>
+    <span class="pill">FORCE_RECREATE_DEPLOYMENT</span>
+    <span class="pill">ROLLBACK</span>
+    <span class="pill gray">INVESTIGATION (consultative)</span>
+    <span class="pill gray">ESCALATION (consultative)</span>
+  </p>
+
+  <div class="note ok"><b>Auto-résolution prouvée :</b> l'incident se referme tout seul. Une <strong>élection de leader</strong> (bail stocké en base PostgreSQL, TTL 300 s)
+  garantit qu'un seul réplica backend pilote la scrutation et la résolution — évitant tout doublon même avec plusieurs réplicas.</div>
+</div></section>
+
+<!-- HAUTE DISPO -->
+<section id="ha"><div class="wrap">
+  <div class="eyebrow">Résilience</div>
+  <h2>Haute disponibilité</h2>
+  <p class="lead">La plateforme survit à la perte d'un nœud worker entier : la base bascule, la détection continue, l'incident est enregistré.</p>
+
+  <div class="grid g2">
+    <div class="card k"><h4>Base de données — CloudNativePG</h4>
+      <p>2 instances PostgreSQL (1 primary + 1 replica) sur des nœuds différents. Si le nœud du primary tombe, l'opérateur CNPG
+      <strong>promeut automatiquement le replica</strong> (~30 s à 1 min). Le service <code>postgres-rw</code> suit toujours le primary courant.</p></div>
+    <div class="card k"><h4>Élection de leader</h4>
+      <p>Bail en base (TTL 300 s) : un seul backend est « leader » et pilote la scrutation. Si son nœud meurt, un autre réplica reprend le bail automatiquement.</p></div>
+    <div class="card k"><h4>Observabilité redondante</h4>
+      <p>Prometheus in-cluster en <strong>2 réplicas</strong> (1 par worker, anti-affinité) ; kube-state-metrics épinglé sur le master → la source de détection survit à la perte d'un worker.</p></div>
+    <div class="card k"><h4>Anti-doublons &amp; bascule rapide</h4>
+      <p>Index unique partiel (Flyway <code>V17</code>) sur les incidents ouverts ; tolérances d'éviction rapides (10 s) sur les pods critiques pour accélérer la bascule.</p></div>
+  </div>
+
+  <h3>Placement de l'opérateur CNPG (correctif HA)</h3>
+  <p>Pour que la bascule de base fonctionne même quand un worker meurt, l'opérateur CNPG doit <strong>survivre</strong> : il <em>tolère</em> le nœud master (refuge de secours)
+  mais <em>préfère</em> tourner sur un worker (le master est trop petit). Sans ce correctif, la perte du worker hébergeant l'opérateur bloquait toute bascule.</p>
+
+  <div class="note ok"><b>Validé par test réel (arrêt brutal de VM depuis VMware) :</b>
+  &nbsp;• <b>worker1 coupé</b> → plateforme maintenue (primary restait sur worker2) → incident <code>NODE_NOT_READY</code> enregistré → auto-résolu au retour.
+  &nbsp;• <b>worker2 coupé</b> → bascule PostgreSQL automatique ~30 s → plateforme maintenue → incident enregistré → auto-résolu. <b>Aucune cascade.</b></div>
+</div></section>
+
+<!-- OBSERVABILITE -->
+<section id="obs"><div class="wrap">
+  <div class="eyebrow">Voir pour comprendre</div>
+  <h2>Observabilité</h2>
+  <div class="grid g4">
+    <div class="card"><h4>Prometheus</h4><p>Métriques + <strong>fédération</strong> : le Prometheus de monitoring agrège les métriques depuis le cluster (NodePort master).</p><span class="pill b">métriques</span></div>
+    <div class="card"><h4>kube-state-metrics</h4><p>État des objets K8s : raisons de panne (waiting/terminated reasons), conditions de nœuds — source de la <strong>cause racine</strong>.</p><span class="pill b">état K8s</span></div>
+    <div class="card"><h4>Loki</h4><p>Agrégation des logs, base des features de logs et des embeddings sémantiques.</p><span class="pill b">logs</span></div>
+    <div class="card"><h4>Grafana + Micrometer</h4><p>Dashboards ; le backend expose ses propres métriques au format Prometheus (Actuator + Micrometer).</p><span class="pill b">dashboards</span></div>
+  </div>
+  <div class="note"><b>Correctif clé découvert :</b> les métriques kube-state-metrics étaient inexploitables (le scrape écrasait les labels <code>namespace</code>/<code>pod</code>).
+  L'ajout de <code>honor_labels: true</code> a préservé les vrais labels → <strong>détection crash-loop / pending / indisponibilité débloquée pour toutes les apps</strong>.</div>
+</div></section>
+
+<!-- SECURITE -->
+<section id="secu"><div class="wrap">
+  <div class="eyebrow">Sécurité</div>
+  <h2>Sécurité &amp; contrôle d'accès</h2>
+  <div class="grid g3">
+    <div class="card"><h4>Authentification JWT</h4><p>Jetons signés (JJWT 0.12.6). Login → access token porté dans chaque appel API.</p><span class="pill">JWT</span></div>
+    <div class="card"><h4>Double authentification (2FA)</h4><p>TOTP compatible Google Authenticator (lib <code>dev.samstevens.totp</code>) pour les comptes sensibles.</p><span class="pill">TOTP 2FA</span></div>
+    <div class="card"><h4>Rôles (RBAC)</h4><p>Spring Security : rôles <code>ADMIN</code> / <code>USER</code>, endpoints protégés (ex. <code>/api/ai/**</code> réservé admin).</p><span class="pill">Spring Security</span></div>
+    <div class="card"><h4>NetworkPolicies K8s</h4><p>Filtrage du trafic entre pods (ex. egress backend restreint au relais SMTP).</p><span class="pill b">NetworkPolicy</span></div>
+    <div class="card"><h4>Isolement réseau</h4><p>Cluster <strong>sans accès Internet</strong> : surface d'attaque réduite, images distribuées en interne.</p><span class="pill gray">air-gapped</span></div>
+    <div class="card"><h4>Migrations versionnées</h4><p>Schéma de base géré par Flyway (migrations reproductibles, ex. <code>V17</code> anti-doublons).</p><span class="pill">Flyway</span></div>
+  </div>
+</div></section>
+
+<!-- FRONTEND -->
+<section id="front"><div class="wrap">
+  <div class="eyebrow">Expérience utilisateur</div>
+  <h2>Interface web temps réel</h2>
+  <div class="grid g4">
+    <div class="card"><h4>⚡ Temps réel</h4><p>Mises à jour live via <strong>SSE</strong> : incidents, décisions et actions apparaissent sans rafraîchir.</p></div>
+    <div class="card"><h4>📊 Visualisations</h4><p>Graphiques Chart.js : confiance réelle de l'IA, répartition, tendances.</p></div>
+    <div class="card"><h4>🌙 Mode sombre</h4><p>Thème clair/sombre persistant.</p></div>
+    <div class="card"><h4>🔔 Notifications</h4><p>Centre de notifications reflétant les alertes critiques.</p></div>
+    <div class="card"><h4>🗂️ Vues complètes</h4><p>Incidents, Décisions IA, Remédiation, Tâches humaines, détail + historique.</p></div>
+    <div class="card"><h4>🧩 Explication structurée</h4><p>« Preuves → Cause → Action → Pourquoi » mise en forme par bloc.</p></div>
+    <div class="card"><h4>🎨 Design Orange</h4><p>Construit sur <strong>Boosted</strong>, le design system d'Orange (basé Bootstrap).</p></div>
+    <div class="card"><h4>💬 Feedback</h4><p>L'opérateur peut valider/corriger une décision IA (boucle d'amélioration).</p></div>
+  </div>
+</div></section>
+
+<!-- STACK -->
+<section id="stack"><div class="wrap">
+  <div class="eyebrow">Technologies</div>
+  <h2>Stack technologique complète</h2>
+
+  <h3>Backend — Java / Spring</h3>
+  <table>
+    <thead><tr><th>Technologie</th><th>Version</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>Java</td><td class="mono">17</td><td>Langage</td></tr>
+      <tr><td>Spring Boot</td><td class="mono">4.0.2</td><td>Framework applicatif</td></tr>
+      <tr><td>Spring Data JPA</td><td class="mono">—</td><td>Persistance (entités incident, action, historique, tâche)</td></tr>
+      <tr><td>Spring Security</td><td class="mono">—</td><td>Authentification &amp; autorisation (RBAC)</td></tr>
+      <tr><td>Spring Web / WebMVC</td><td class="mono">—</td><td>API REST + SSE</td></tr>
+      <tr><td>Camunda</td><td class="mono">8.8.0</td><td>Moteur de workflow BPMN (client Java)</td></tr>
+      <tr><td>Kubernetes client-java</td><td class="mono">24.0.0</td><td>Exécution d'actions sur le cluster</td></tr>
+      <tr><td>PostgreSQL JDBC</td><td class="mono">—</td><td>Pilote base de données</td></tr>
+      <tr><td>Flyway (core + postgresql)</td><td class="mono">—</td><td>Migrations de schéma versionnées</td></tr>
+      <tr><td>JJWT</td><td class="mono">0.12.6</td><td>Jetons JWT</td></tr>
+      <tr><td>dev.samstevens.totp</td><td class="mono">1.7.1</td><td>2FA TOTP</td></tr>
+      <tr><td>Spring Mail</td><td class="mono">—</td><td>Notifications e-mail (SMTP)</td></tr>
+      <tr><td>Actuator + Micrometer</td><td class="mono">—</td><td>Métriques exposées au format Prometheus</td></tr>
+      <tr><td>springdoc-openapi</td><td class="mono">3.0.0</td><td>Documentation API (Swagger UI)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Service IA — Python</h3>
+  <table>
+    <thead><tr><th>Technologie</th><th>Version</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>FastAPI</td><td class="mono">0.115.2</td><td>API du service IA</td></tr>
+      <tr><td>Uvicorn</td><td class="mono">0.30.6</td><td>Serveur ASGI</td></tr>
+      <tr><td>XGBoost</td><td class="mono">2.1.1</td><td>Modèles de classification (incident / sévérité / action)</td></tr>
+      <tr><td>scikit-learn</td><td class="mono">1.5.2</td><td>Outillage ML (préparation, métriques)</td></tr>
+      <tr><td>pandas</td><td class="mono">2.2.3</td><td>Manipulation des features</td></tr>
+      <tr><td>numpy</td><td class="mono">2.1.1</td><td>Calcul numérique</td></tr>
+      <tr><td>scipy</td><td class="mono">≥1.13</td><td>Statistiques (Z-score)</td></tr>
+      <tr><td>sentence-transformers</td><td class="mono">3.2.0</td><td>Embeddings sémantiques des logs</td></tr>
+      <tr><td>ChromaDB</td><td class="mono">≥0.5</td><td>Base vectorielle (recherche de logs)</td></tr>
+      <tr><td>Ollama + Qwen 3B</td><td class="mono">F16</td><td>LLM d'explication</td></tr>
+      <tr><td>joblib</td><td class="mono">1.4.2</td><td>Sérialisation des modèles</td></tr>
+      <tr><td>httpx</td><td class="mono">0.27.2</td><td>Client HTTP (Prometheus/Loki)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Frontend — Angular</h3>
+  <table>
+    <thead><tr><th>Technologie</th><th>Version</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>Angular</td><td class="mono">16.2</td><td>Framework SPA</td></tr>
+      <tr><td>TypeScript</td><td class="mono">5.1</td><td>Langage</td></tr>
+      <tr><td>Boosted</td><td class="mono">5.3.3</td><td>Design system Orange (UI)</td></tr>
+      <tr><td>Chart.js + ng2-charts</td><td class="mono">4.5 / 4.1</td><td>Graphiques</td></tr>
+      <tr><td>RxJS</td><td class="mono">7.8</td><td>Programmation réactive (flux SSE)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Infrastructure &amp; observabilité</h3>
+  <table>
+    <thead><tr><th>Technologie</th><th>Usage</th></tr></thead>
+    <tbody>
+      <tr><td>Kubernetes (kubeadm)</td><td>Orchestration de conteneurs (1 master + 2 workers)</td></tr>
+      <tr><td>Calico</td><td>Plugin réseau (CNI)</td></tr>
+      <tr><td>containerd</td><td>Runtime de conteneurs</td></tr>
+      <tr><td>CloudNativePG (CNPG)</td><td>Opérateur PostgreSQL haute disponibilité</td></tr>
+      <tr><td>local-path provisioner</td><td>Stockage persistant local (PVC)</td></tr>
+      <tr><td>Prometheus</td><td>Métriques + fédération</td></tr>
+      <tr><td>kube-state-metrics</td><td>État des objets Kubernetes</td></tr>
+      <tr><td>Loki + Grafana</td><td>Logs &amp; dashboards</td></tr>
+      <tr><td>MailHog</td><td>Relais SMTP / boîte de réception de test</td></tr>
+      <tr><td>Docker</td><td>Images applicatives (<code>pfe-backend</code>, <code>pfe-frontend</code>)</td></tr>
+      <tr><td>VMware Workstation</td><td>Hyperviseur (5 VMs)</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<!-- RESULTATS -->
+<section id="resultats"><div class="wrap">
+  <div class="eyebrow">Mesures réelles</div>
+  <h2>Résultats en production (≈ 2 mois)</h2>
+  <p class="lead">Données extraites de la base <code>pfe_db</code> sur la période avril → juin 2026.</p>
+
+  <div class="grid g4">
+    <div class="stat"><div class="n">617</div><div class="l">incidents détectés par l'IA</div></div>
+    <div class="stat"><div class="n">15</div><div class="l">applications surveillées</div></div>
+    <div class="stat"><div class="n">83,5 %</div><div class="l">remédiation auto réussie</div></div>
+    <div class="stat"><div class="n">~3 min</div><div class="l">MTTR médian (auto)</div></div>
+    <div class="stat"><div class="n">104</div><div class="l">incidents auto-résolus</div></div>
+    <div class="stat"><div class="n">245</div><div class="l">demandes d'approbation (e-mails)</div></div>
+    <div class="stat"><div class="n">5,5 %</div><div class="l">proxy faux positifs</div></div>
+    <div class="stat"><div class="n">100 %</div><div class="l">incidents récents correctement typés</div></div>
+  </div>
+
+  <h3>Validation « chaos » — scénarios injectés sur l'application réelle <code>podinfo</code></h3>
+  <table>
+    <thead><tr><th>Scénario</th><th>Méthode</th><th>Résultat HELIOS</th></tr></thead>
+    <tbody>
+      <tr><td><b>Stress CPU</b></td><td>charge CPU réelle dans le pod</td><td>✅ <code>CPU_STRESS</code> → remédiation auto (restart) → auto-résolu (bout en bout)</td></tr>
+      <tr><td><b>Crash loop</b></td><td>conteneur forcé à échouer (CrashLoopBackOff réel)</td><td>✅ <code>POD_CRASH_LOOP</code> détecté</td></tr>
+      <tr><td><b>Fuite mémoire</b></td><td>tendance mémoire croissante</td><td>✅ mémoire ↗ → <code>MEMORY_LEAK</code> ; plate → <code>NO_INCIDENT</code> (anti-faux-positif)</td></tr>
+      <tr><td><b>Nœud non prêt</b></td><td>arrêt d'un worker</td><td>✅ <code>NODE_NOT_READY</code> / <code>VM_DOWN</code> HIGH, cause nommée</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:.86rem;color:var(--muted)">Note d'honnêteté méthodologique : une partie des <code>VM_DOWN</code> de l'historique provient de redémarrages de VM en développement (bruit). Les chiffres les plus représentatifs sont : remédiation auto <b>83,5 %</b>, MTTR médian <b>~3–4 min</b>, faux positifs <b>≈ 5,5 %</b>.</p>
+</div></section>
+
+<footer>
+  <div class="wrap">
+    <p><b>HELIOS</b> — Plateforme AIOps pour Kubernetes · Projet de Fin d'Études réalisé chez <b>Orange</b></p>
+    <p>Détection ML + LLM · Remédiation automatique Camunda · Haute disponibilité validée · Air-gapped</p>
+    <p style="margin-top:10px;color:#6b7280">Document technique généré à partir du code et des métriques réelles du projet.</p>
+  </div>
+</footer>
+
+</body>
+</html>
