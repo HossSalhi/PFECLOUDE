@@ -8,13 +8,13 @@ metadata:
     aiops.io/monitor: "true"
     aiops.io/app: "frontend"
 spec:
-  replicas: 1
+  replicas: 2                  # HA: one replica per worker (see required podAntiAffinity below)
   revisionHistoryLimit: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 0              # required anti-affinity + 2 replicas on 2 workers -> recreate in place
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: frontend
@@ -39,13 +39,13 @@ spec:
                     operator: In
                     values: [worker]
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                topologyKey: kubernetes.io/hostname
-                labelSelector:
-                  matchLabels:
-                    app: frontend
+          # REQUIRED (not preferred): guarantees the 2 replicas land on different workers,
+          # so losing one worker always leaves a frontend serving the UI (no outage).
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app: frontend
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -69,7 +69,7 @@ spec:
         fsGroup: 101
       containers:
         - name: frontend
-          image: pfe-frontend:1.0.0
+          image: pfe-frontend:1.1.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
