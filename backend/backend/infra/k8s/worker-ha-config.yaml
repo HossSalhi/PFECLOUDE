@@ -171,12 +171,18 @@ data:
         -p='[{"op":"add","path":"/spec/template/spec/tolerations",
               "value":[{"key":"node-role.kubernetes.io/control-plane",
                         "operator":"Exists","effect":"NoSchedule"}]}]'
-    (b) but PREFER a worker in steady state — the master is tiny (~1.67 GB) and the
-        operator crash-loops there (exitCode 1, loses its leader-election lease when
-        the API slows under memory pressure). Soft worker preference, master = FALLBACK
-        only (validated 2026-06-04: operator moved master->worker2, stable):
+    (b) and PREFER THE MASTER in steady state. The operator MUST survive a worker death:
+        if it sits on the worker that is stopped, postgres never fails over and the
+        platform's DB/API go down. CONFIRMED 2026-06-05: a prior "prefer worker" rule put
+        the operator on worker2; when worker2 was hard-stopped, no failover happened and the
+        API was down until the operator was moved to master. So pin it to the always-up master
+        (the brief leader-election flap under master memory pressure is the lesser evil):
       kubectl -n cnpg-system patch deploy cnpg-controller-manager --type=merge -p \
-        '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"preferredDuringSchedulingIgnoredDuringExecution":[{"weight":100,"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"DoesNotExist"}]}}]}}}}}}'
+        '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"preferredDuringSchedulingIgnoredDuringExecution":[{"weight":100,"preference":{"matchExpressions":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists"}]}}]}}}}}}'
+    (c) front-of-house deployments (frontend, backend) must use REQUIRED pod anti-affinity
+        (1 replica per worker) — not preferred — so a worker death always leaves one serving.
+        Validated 2026-06-05: worker-down kept UI at HTTP 200 with no interruption (API ~15s
+        DB-failover blip). See frontend-deployment.yaml.
 
     GAP 2 (RESOLVED by GAP 1 fix) — postgres failover is now AUTOMATIC (~1 min)
     --------------------------------------------------------------------------
