@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _SYSTEM_NAMESPACES = frozenset({
     "kube-system", "kube-public", "kube-node-lease",
     "monitoring", "cert-manager", "ingress-nginx",
-    "local-path-storage", "metallb-system",
+    "local-path-storage", "metallb-system", "cnpg-system",
 })
 
 
@@ -203,6 +203,13 @@ class AutonomousMonitor:
                 if ns.strip()
             }
 
+        # HELIOS's own components — never monitor them (no self-incidents).
+        excluded = {
+            a.strip().lower()
+            for a in (self._settings.autonomous_monitor_exclude_apps or "").split(",")
+            if a.strip()
+        }
+
         seen: set[tuple[str, str]] = set()
         apps: list[tuple[str, str]] = []
         for item in results:
@@ -214,6 +221,8 @@ class AutonomousMonitor:
             if ns in _SYSTEM_NAMESPACES:
                 continue
             if allowed and ns not in allowed:
+                continue
+            if container.lower() in excluded:
                 continue
             key = (ns, container)
             if key not in seen:

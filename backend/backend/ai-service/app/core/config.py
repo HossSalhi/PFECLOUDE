@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     autonomous_monitor_cooldown_minutes: int = 15
     # Comma-separated namespaces to monitor (empty = all non-system namespaces)
     autonomous_monitor_namespaces: str = ""
+    # Comma-separated container/app names to NEVER auto-monitor — HELIOS's own stack,
+    # so the platform doesn't raise incidents against itself (unprofessional + false positives).
+    autonomous_monitor_exclude_apps: str = "backend,frontend,chromadb,postgres,prometheus-incluster,grafana,loki,prometheus,ollama,camunda,ai-service,alertmanager,node-exporter,kube-state-metrics"
     # Comma-separated K8s worker/master IPs for NodePort access to the backend
     autonomous_monitor_backend_ips: str = "192.168.148.158,192.168.148.153,192.168.148.155"
     autonomous_monitor_username: str = "admin"
