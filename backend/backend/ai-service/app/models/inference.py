@@ -685,7 +685,7 @@ class InferenceEngine:
                 f"Measured evidence: {evidence}. "
                 f"Recommended action: {action}. Why is this action the right response?"
             )
-            with _httpx.Client(timeout=180.0) as _http:
+            with _httpx.Client(timeout=5.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
@@ -784,7 +784,7 @@ class InferenceEngine:
             _sys = ("You are an SRE incident classifier. Given a trace, output the single best "
                     "incident_type from the allowed list, its severity, a recommended_action, "
                     "and a one-line explanation. JSON only.")
-            with _httpx.Client(timeout=35.0) as _http:
+            with _httpx.Client(timeout=4.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
@@ -948,7 +948,7 @@ class InferenceEngine:
                 "auto_execute=true only if confidence>=0.70 AND severity in (MEDIUM, HIGH)."
             )
 
-            with _httpx.Client(timeout=90.0) as _http:
+            with _httpx.Client(timeout=5.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
