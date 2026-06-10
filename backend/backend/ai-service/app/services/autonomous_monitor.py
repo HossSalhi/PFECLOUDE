@@ -142,6 +142,10 @@ class AutonomousMonitor:
         self._last_run_utc = datetime.now(timezone.utc).isoformat()
         loop = asyncio.get_event_loop()
 
+        # Cluster/infra layer: detect NotReady nodes (NODE_NOT_READY) independently
+        # of app discovery — a node can be down even when every app looks fine.
+        await self._check_and_trigger_nodes(loop)
+
         apps = await loop.run_in_executor(None, self._discover_apps)
         self._last_apps_analyzed = len(apps)
 
@@ -230,6 +234,38 @@ class AutonomousMonitor:
                 apps.append(key)
 
         return apps
+
+    # ------------------------------------------------------------------
+    # Node / cluster outage detection (NODE_NOT_READY)
+    # ------------------------------------------------------------------
+
+    def _discover_not_ready_nodes(self) -> list[str]:
+        """Query Prometheus (kube-state-metrics) for nodes whose Ready condition is false/unknown."""
+        results = self._prometheus.query_raw(
+            'kube_node_status_condition{condition="Ready",status=~"false|unknown"} == 1'
+        )
+        nodes: list[str] = []
+        for item in results:
+            node = item.get("metric", {}).get("node", "")
+            if node and node not in nodes:
+                nodes.append(node)
+        return nodes
+
+    async def _check_and_trigger_nodes(self, loop) -> None:
+        """Create a NODE_NOT_READY incident for each NotReady node (cooldown-guarded)."""
+        try:
+            nodes = await loop.run_in_executor(None, self._discover_not_ready_nodes)
+        except Exception as exc:
+            logger.debug("Node check failed: %s", exc)
+            return
+        for node in nodes:
+            if self._in_cooldown("cluster", node):
+                continue
+            logger.warning("NODE NotReady detected: %s — creating NODE_NOT_READY incident", node)
+            if await self._trigger_backend("kube-system", node):
+                self._incidents_triggered += 1
+                secs = self._settings.autonomous_monitor_cooldown_minutes * 60
+                self._cooldowns[("cluster", node)] = time.monotonic() + secs
 
     # ------------------------------------------------------------------
     # Analysis
