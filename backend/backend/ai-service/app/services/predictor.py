@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 class PredictorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Shared executor for _collect_root_cause — avoids creating/destroying a thread pool
+        # on every prediction that triggers root-cause collection (which happens under load).
+        self._root_cause_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="root-cause"
+        )
         self.loki_client = LokiClient(
             base_url=settings.loki_base_url,
             timeout_seconds=settings.loki_timeout_seconds,
@@ -294,16 +299,15 @@ class PredictorService:
             return None
 
         overall_timeout = self.settings.prometheus_timeout_seconds * 2.0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(self._collect_root_cause_impl, namespace, app)
-            try:
-                return future.result(timeout=overall_timeout)
-            except concurrent.futures.TimeoutError:
-                logger.warning(
-                    "root-cause collection timed out after %.0fs for %s/%s",
-                    overall_timeout, namespace, app,
-                )
-                return None
+        future = self._root_cause_executor.submit(self._collect_root_cause_impl, namespace, app)
+        try:
+            return future.result(timeout=overall_timeout)
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "root-cause collection timed out after %.0fs for %s/%s",
+                overall_timeout, namespace, app,
+            )
+            return None
 
     def _collect_root_cause_impl(self, namespace: str, app: str) -> str | None:
         """Inner implementation — called inside a bounded ThreadPoolExecutor by _collect_root_cause."""

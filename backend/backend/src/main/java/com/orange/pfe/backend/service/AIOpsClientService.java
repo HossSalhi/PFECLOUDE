@@ -108,9 +108,11 @@ public class AIOpsClientService {
 
     private void recordFailure() {
         int failures = consecutiveFailures.incrementAndGet();
-        if (failures >= circuitBreakerThreshold && openedAt.get() == null) {
-            openedAt.set(Instant.now());
-            log.warn("AI service circuit breaker OPEN after {} consecutive failures", failures);
+        if (failures >= circuitBreakerThreshold) {
+            // compareAndSet ensures exactly one thread opens the circuit even under concurrent load.
+            if (openedAt.compareAndSet(null, Instant.now())) {
+                log.warn("AI service circuit breaker OPEN after {} consecutive failures", failures);
+            }
         }
     }
 

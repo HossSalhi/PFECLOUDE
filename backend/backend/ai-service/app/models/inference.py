@@ -387,11 +387,11 @@ class InferenceEngine:
                             self._specialist_opinion, incident_type, severity, action, ev
                         )
                         try:
-                            _llm_why = _fut_why.result(timeout=15)
+                            _llm_why = _fut_why.result(timeout=self._llm_timeout)
                         except Exception:
                             _llm_why = None
                         try:
-                            specialist = _fut_spec.result(timeout=15)
+                            specialist = _fut_spec.result(timeout=self._llm_timeout)
                         except Exception:
                             specialist = None
                     if _llm_why and self._llm_ok(_llm_why, _rc):
@@ -1036,7 +1036,11 @@ class InferenceEngine:
             if start == -1 or end == 0:
                 return None
 
-            data = _json.loads(raw[start:end])
+            try:
+                data = _json.loads(raw[start:end])
+            except _json.JSONDecodeError as _je:
+                logger.debug("_full_llm_predict: LLM returned malformed JSON — %s (raw excerpt: %.120s)", _je, raw)
+                return None
 
             valid_types = {
                 "CPU_STRESS", "MEMORY_STRESS", "APPLICATION_ERROR_STORM",

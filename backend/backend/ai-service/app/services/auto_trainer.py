@@ -229,8 +229,9 @@ class AutoTrainer:
             xgb_result.get("training_size", "?"), script,
         )
         try:
+            import sys as _sys
             proc = subprocess.Popen(
-                ["python", str(script)],
+                [_sys.executable, str(script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -420,7 +421,9 @@ class AutoTrainer:
             else:
                 client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
 
-            collection = client.get_or_create_collection("helios_incidents")
+            # Must match ChromaMemoryStore.COLLECTION_NAME — both sides of the feedback loop
+            # read/write the same collection or the harvest always returns 0 rows.
+            collection = client.get_or_create_collection("aiops_incident_memory")
             count = collection.count()
             if count == 0:
                 return 0

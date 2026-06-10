@@ -247,6 +247,15 @@ class AutonomousMonitor:
 
         logger.info("Monitor cycle %d: %d app(s) to analyze", self._total_cycles, len(apps))
 
+        # Prune streak entries for apps that are no longer visible in Prometheus.
+        # Keeps memory bounded when deployments are deleted or scaled to zero mid-streak.
+        current_keys = set(apps)
+        stale = [k for k in self._anomaly_streak if k not in current_keys]
+        for k in stale:
+            self._anomaly_streak.pop(k, None)
+        if stale:
+            logger.debug("Pruned %d stale streak entries for gone apps", len(stale))
+
         # Orphan cleanup: close incidents for apps that no longer exist
         known_apps = {app for _, app in apps}
         await self._cleanup_orphan_incidents(known_apps)
@@ -467,7 +476,7 @@ class AutonomousMonitor:
             base = f"http://{ip}:30880"
             try:
                 async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=500", headers=headers)
                     if resp.status_code == 401:
                         # JWT expired server-side before our estimate — clear cache
                         self._jwt_token = None
@@ -556,7 +565,7 @@ class AutonomousMonitor:
             base = f"http://{ip}:30880"
             try:
                 async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=500", headers=headers)
                     if resp.status_code == 401:
                         self._jwt_token = None
                         self._jwt_expires_at = 0.0
@@ -576,6 +585,7 @@ class AutonomousMonitor:
                             r = await client.put(f"{base}/api/incidents/{iid}/status/RESOLVED", headers=headers)
                             if r.status_code in (200, 201, 204):
                                 self._cooldowns.pop(("cluster", node), None)
+                                self._save_cooldowns()  # persist removal so restart doesn't reload stale cooldown
                                 logger.info("Auto-resolved NODE_NOT_READY incident id=%s — node %s recovered", iid, node)
                             else:
                                 logger.warning(
