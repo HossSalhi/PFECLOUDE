@@ -481,7 +481,9 @@ class AutoTrainer:
                     incoming[col] = 0
             incoming = incoming[[c for c in existing.columns if c in incoming.columns]]
             combined = pd.concat([existing, incoming], ignore_index=True)
-            combined.to_csv(str(csv_path), index=False)
+            tmp_path = csv_path.with_suffix(".tmp")
+            combined.to_csv(str(tmp_path), index=False)
+            os.replace(str(tmp_path), str(csv_path))
             self._last_harvest_ts = max_ts
             return len(new_rows)
 
@@ -491,8 +493,11 @@ class AutoTrainer:
 
     def _save_last_retrain(self, result: dict) -> None:
         try:
-            Path(LAST_RETRAIN_FILE).parent.mkdir(parents=True, exist_ok=True)
-            Path(LAST_RETRAIN_FILE).write_text(json.dumps(result, indent=2))
+            p = Path(LAST_RETRAIN_FILE)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(result, indent=2))
+            os.replace(str(tmp), str(p))
         except Exception as exc:
             logger.warning("AutoTrainer: could not save last_retrain: %s", exc)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import time
 from dataclasses import asdict, dataclass
@@ -122,10 +123,16 @@ class ModelRegistry:
         self._active = version_id
         if self._shadow == version_id:
             self._shadow = None
-        # Copy promoted model to canonical path
+        # Copy promoted model to canonical path — read destination from settings so a
+        # non-default AIOPS_MODEL_PATH is respected at runtime.
         src = Path(self._versions[version_id].model_file)
         if src.exists():
-            shutil.copy2(str(src), "model_artifacts/model.joblib")
+            try:
+                from app.core.config import get_settings
+                dest = get_settings().model_path
+            except Exception:
+                dest = "model_artifacts/model.joblib"
+            shutil.copy2(str(src), dest)
         self._save()
         logger.info("ModelRegistry: promoted %s → active", version_id)
         return True
@@ -182,7 +189,9 @@ class ModelRegistry:
                 "versions": {k: asdict(v) for k, v in self._versions.items()},
             }
             self._file.parent.mkdir(parents=True, exist_ok=True)
-            self._file.write_text(json.dumps(state, indent=2))
+            tmp = self._file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state, indent=2))
+            os.replace(str(tmp), str(self._file))
         except Exception as exc:
             logger.warning("ModelRegistry save failed: %s", exc)
 

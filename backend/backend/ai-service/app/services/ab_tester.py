@@ -45,6 +45,9 @@ class ABTester:
         self._total: int = 0
         self._winner: str | None = None
         self._history: list[dict[str, Any]] = []
+        # Shadow bundle cache — avoids repeated joblib.load() from disk for each shadow run
+        self._shadow_bundle_cache: Any | None = None
+        self._shadow_version_cached: str | None = None
         self._load()
 
     @property
@@ -68,7 +71,11 @@ class ABTester:
         if not self.active:
             return None
 
-        shadow_bundle = self._registry.load_shadow_bundle()
+        current_shadow_version = self._registry.shadow_version
+        if current_shadow_version != self._shadow_version_cached:
+            self._shadow_bundle_cache = self._registry.load_shadow_bundle()
+            self._shadow_version_cached = current_shadow_version
+        shadow_bundle = self._shadow_bundle_cache
         if shadow_bundle is None:
             return None
 
@@ -169,6 +176,8 @@ class ABTester:
             "promoted": promoted,
         }
         self._history.append(session)
+        if len(self._history) > 50:
+            self._history = self._history[-50:]
         self._save()
 
         # Reset for next A/B session

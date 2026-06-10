@@ -83,6 +83,22 @@ class InferenceEngine:
         "incident_type from the allowed list, its severity, a recommended_action, "
         "and a one-line explanation. JSON only."
     )
+    _LLM_VALID_TYPES = frozenset({
+        "CPU_STRESS", "MEMORY_STRESS", "APPLICATION_ERROR_STORM",
+        "DATABASE_CONNECTIVITY", "AVAILABILITY_DROP", "RESTART_LOOP",
+        "GENERAL_DEGRADATION", "VM_DOWN", "NO_INCIDENT",
+    })
+    _LLM_VALID_ACTIONS = frozenset({
+        "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE",
+        "RESTART_POD_AND_SCALE_MEMORY_LIMITS",
+        "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC",
+        "FAILOVER_DATABASE_AND_RESTART_WORKLOAD",
+        "SCALE_DEPLOYMENT_AND_REBALANCE",
+        "ROLLBACK_RECENT_CHANGE_AND_RESTART",
+        "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
+        "RESTART_POD_AND_INVESTIGATE",
+        "NO_ACTION",
+    })
 
     def __init__(self, model_bundle: ModelBundle, settings=None) -> None:
         self.model_bundle = model_bundle
@@ -1045,29 +1061,12 @@ class InferenceEngine:
                 logger.debug("_full_llm_predict: LLM returned malformed JSON — %s (raw excerpt: %.120s)", _je, raw)
                 return None
 
-            valid_types = {
-                "CPU_STRESS", "MEMORY_STRESS", "APPLICATION_ERROR_STORM",
-                "DATABASE_CONNECTIVITY", "AVAILABILITY_DROP", "RESTART_LOOP",
-                "GENERAL_DEGRADATION", "VM_DOWN", "NO_INCIDENT",
-            }
-            valid_actions = {
-                "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE",
-                "RESTART_POD_AND_SCALE_MEMORY_LIMITS",
-                "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC",
-                "FAILOVER_DATABASE_AND_RESTART_WORKLOAD",
-                "SCALE_DEPLOYMENT_AND_REBALANCE",
-                "ROLLBACK_RECENT_CHANGE_AND_RESTART",
-                "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
-                "RESTART_POD_AND_INVESTIGATE",
-                "NO_ACTION",
-            }
-
             incident_type = str(data.get("incident_type", "")).upper()
-            if incident_type not in valid_types:
+            if incident_type not in self._LLM_VALID_TYPES:
                 return None
 
             action = str(data.get("recommended_action", "")).upper()
-            if action not in valid_actions:
+            if action not in self._LLM_VALID_ACTIONS:
                 action = "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
 
             confidence = float(data.get("confidence", 0.5))
