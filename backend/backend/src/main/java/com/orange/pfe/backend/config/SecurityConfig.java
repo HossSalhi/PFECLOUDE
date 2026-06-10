@@ -182,7 +182,8 @@ public class SecurityConfig {
 
                 auth.requestMatchers(
                         "/api/finetuning/**",
-                        "/api/mlops/**"
+                        "/api/mlops/**",
+                        "/api/audit/**"
                 ).hasAnyRole("ADMIN", "SUPER_ADMIN");
 
                 // ── SUPER_ADMIN uniquement ────────────────────────────────────
