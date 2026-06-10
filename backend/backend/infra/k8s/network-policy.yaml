@@ -1,5 +1,16 @@
 ---
-# Allow external traffic (NodePort) to reach the frontend
+# Default deny all ingress for pfe namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: pfe
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow external traffic (NodePort) to reach the frontend on HTTP and HTTPS
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,18 +26,23 @@ spec:
     - ports:
         - protocol: TCP
           port: 8080
+        - protocol: TCP
+          port: 8443
 ---
-# Allow frontend to reach backend only
+# Allow frontend pods and NodePort traffic to reach backend
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: frontend-to-backend
+  name: allow-backend-ingress
   namespace: pfe
 spec:
   podSelector:
     matchLabels:
       app: backend
+  policyTypes:
+    - Ingress
   ingress:
+    # From frontend pods
     - from:
         - podSelector:
             matchLabels:
@@ -34,18 +50,15 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # From AI VM (.161), Monitoring VM (.160), and all internal nodes
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: pfe
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
+        - ipBlock:
+            cidr: 192.168.148.0/24
       ports:
         - protocol: TCP
           port: 8080
 ---
-# Allow backend to reach PostgreSQL (CNPG pods)
+# Allow backend (and CNPG replicas) to reach PostgreSQL pods
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -55,6 +68,8 @@ spec:
   podSelector:
     matchLabels:
       cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
   ingress:
     - from:
         - podSelector:
@@ -63,38 +78,14 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+    # CNPG streaming replication between primary and replica
     - from:
         - podSelector:
             matchLabels:
               cnpg.io/cluster: postgres
----
-# Default deny all ingress for pfe namespace
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-ingress
-  namespace: pfe
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
----
-# Allow external (NodePort) traffic to reach the backend directly
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-external-backend
-  namespace: pfe
-spec:
-  podSelector:
-    matchLabels:
-      app: backend
-  policyTypes:
-    - Ingress
-  ingress:
-    - ports:
+      ports:
         - protocol: TCP
-          port: 8080
+          port: 5432
 ---
 # Allow CNPG operator (in cnpg-system) to manage the postgres cluster
 apiVersion: networking.k8s.io/v1
@@ -119,7 +110,7 @@ spec:
         - protocol: TCP
           port: 9187
 ---
-# Allow external Prometheus (monitoring VM 192.168.148.160) to scrape postgres exporter
+# Allow external Prometheus (monitoring VM .160, scrape direct) to scrape postgres metrics exporter
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -135,14 +126,12 @@ spec:
     - from:
         - ipBlock:
             cidr: 192.168.148.160/32
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
       ports:
         - protocol: TCP
           port: 9187
 ---
-# Backend egress: PostgreSQL + AI service + Camunda + monitoring stack + DNS
+# Backend egress: postgres + AI VM + Camunda + monitoring stack + DNS + K8s API
+# All external traffic is scoped to 192.168.148.0/24 subnet for least privilege
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -155,11 +144,13 @@ spec:
   policyTypes:
     - Egress
   egress:
+    # DNS (CoreDNS in-cluster)
     - ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
+    # PostgreSQL via CNPG pods (same namespace, service routed through pod IP after DNAT)
     - to:
         - podSelector:
             matchLabels:
@@ -167,17 +158,19 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
-    # External VMs: AI service (8000), Camunda REST (8088), Camunda gRPC (26500),
-    # Prometheus (9090), Grafana (3000), Loki read (3100), Loki push (3101),
-    # Alertmanager (9093), Ollama LLM (11434), backend/frontend NodePort (8080),
-    # Kubernetes API (6443), HTTPS (443)
-    - ports:
+    # External VMs (192.168.148.0/24):
+    #   AI service (8000), Camunda REST (8080), Camunda gRPC (26500)
+    #   Prometheus (9090), Grafana (3000), Loki read (3100), Loki push (3101)
+    #   Ollama LLM (11434), K8s API server (6443), HTTPS (443)
+    #   Backend/Frontend NodePort (30808, 30880)
+    - to:
+        - ipBlock:
+            cidr: 192.168.148.0/24
+      ports:
         - protocol: TCP
           port: 8000
         - protocol: TCP
           port: 8080
-        - protocol: TCP
-          port: 8088
         - protocol: TCP
           port: 26500
         - protocol: TCP
@@ -189,10 +182,66 @@ spec:
         - protocol: TCP
           port: 3101
         - protocol: TCP
-          port: 9093
-        - protocol: TCP
           port: 11434
         - protocol: TCP
           port: 443
         - protocol: TCP
           port: 6443
+        - protocol: TCP
+          port: 30808
+        - protocol: TCP
+          port: 30880
+        - protocol: TCP
+          port: 30443
+---
+# Allow Prometheus (.160) to scrape backend /actuator/prometheus
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape-backend
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.148.160/32
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Frontend egress: only needs to reach the backend (NodePort) and DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-egress
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Backend NodePort (requests routed through kube-proxy DNAT)
+    - ports:
+        - protocol: TCP
+          port: 8080
+    # Backend pods directly (in-cluster proxy routing)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 8080

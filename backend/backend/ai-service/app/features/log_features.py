@@ -6,11 +6,70 @@ ERROR_TERMS = (
     "timeout",
     "connection refused",
     "oom",
+    # Java stack traces
+    "caused by:",
+    "at com.",
+    "at org.",
+    "at java.",
+    "stacktrace:",
+    "stackoverflowerror",
+    "outofmemoryerror",
+    "nullpointerexception",
+    "illegalstateexception",
+    "runtimeexception",
+    # K8s / container signals
+    "oomkilled",
+    "crashloopbackoff",
+    "errimagepull",
+    "imagepullbackoff",
+    "backoff pulling image",
+    "liveness probe failed",
+    "readiness probe failed",
+    "container died",
+    # Network / connectivity
+    "connection reset",
+    "broken pipe",
+    "no route to host",
+    "network unreachable",
+    "dial tcp",
+    # Security / auth
+    "unauthorized",
+    "forbidden",
+    "certificate",
+    "tls handshake",
+    # Application-level
+    "panic:",
+    "fatal:",
+    "segfault",
+    "killed",
 )
 
-WARNING_TERMS = ("warn", "warning")
-RESTART_TERMS = ("crash", "restart", "backoff", "crashloop")
-DB_TERMS = ("postgres", "jdbc", "database")
+WARNING_TERMS = (
+    "warn",
+    "warning",
+    "deprecated",
+    "retrying",
+    "retry",
+    "slow query",
+    "high memory",
+    "high cpu",
+    "throttl",
+)
+
+RESTART_TERMS = ("crash", "restart", "backoff", "crashloop", "restarting", "exited with code")
+DB_TERMS = ("postgres", "jdbc", "database", "datasource", "hikari", "connection pool", "deadlock", "transaction")
+
+# Critical patterns that alone indicate a serious problem (bypass error_ratio threshold)
+CRITICAL_SINGLE_TERMS = (
+    "outofmemoryerror",
+    "oomkilled",
+    "crashloopbackoff",
+    "panic:",
+    "fatal:",
+    "killed",
+    "segfault",
+    "stackoverflowerror",
+)
 
 # Prefixes that identify infrastructure/framework noise lines — these contain column
 # names like "failed_reason" or SQL keywords that would generate false positives when
@@ -75,6 +134,8 @@ def extract_log_features(lines: list[str]) -> dict[str, float]:
             "db_keyword_hits": 0.0,
             "unique_log_templates": 0.0,
             "error_ratio": 0.0,
+            "critical_term_hits": 0.0,
+            "stack_trace_depth": 0.0,
         }
 
     lowered = [line.lower() for line in lines]
@@ -83,6 +144,15 @@ def extract_log_features(lines: list[str]) -> dict[str, float]:
     warning_count = sum(1 for line in semantic if _contains_any(line, WARNING_TERMS))
     restart_hits = sum(1 for line in semantic if _contains_any(line, RESTART_TERMS))
     db_hits = sum(1 for line in semantic if _contains_any(line, DB_TERMS))
+
+    # Critical single terms — a single occurrence is already significant
+    critical_hits = sum(1 for line in semantic if _contains_any(line, CRITICAL_SINGLE_TERMS))
+
+    # Stack trace depth: consecutive "at " lines indicate exception propagation depth
+    stack_depth = sum(
+        1 for line in lowered
+        if line.lstrip().startswith("at ") or "caused by:" in line
+    )
 
     # Lightweight template approximation to reduce cardinality noise.
     unique_templates = len({line[:120] for line in lowered})
@@ -96,6 +166,8 @@ def extract_log_features(lines: list[str]) -> dict[str, float]:
         "db_keyword_hits": float(db_hits),
         "unique_log_templates": float(unique_templates),
         "error_ratio": float(error_ratio),
+        "critical_term_hits": float(critical_hits),
+        "stack_trace_depth": float(min(stack_depth, 50)),
     }
 
 
@@ -103,9 +175,20 @@ def score_log_risk(features: dict[str, float]) -> float:
     log_count = features.get("log_line_count", 0.0)
     error_ratio = features.get("error_ratio", 0.0)
     restart_hits = features.get("restart_keyword_hits", 0.0)
+    critical_hits = features.get("critical_term_hits", 0.0)
+    stack_depth = features.get("stack_trace_depth", 0.0)
 
     density_signal = min(log_count / 200.0, 1.0)
     restart_signal = min(restart_hits / 5.0, 1.0)
-    score = (0.55 * error_ratio) + (0.25 * restart_signal) + (0.20 * density_signal)
+    critical_signal = min(critical_hits / 2.0, 1.0)   # even 1 OOMKilled = 0.5
+    stack_signal = min(stack_depth / 20.0, 1.0)
+
+    score = (
+        (0.40 * error_ratio)
+        + (0.20 * restart_signal)
+        + (0.20 * critical_signal)
+        + (0.10 * stack_signal)
+        + (0.10 * density_signal)
+    )
 
     return max(0.0, min(1.0, score))

@@ -22,6 +22,9 @@ public class IncidentRequest {
     @NotNull(message = "Source obligatoire")
     private IncidentSource source;
 
+    private String namespace;
+    private String app;
+
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
 
@@ -33,4 +36,10 @@ public class IncidentRequest {
 
     public IncidentSource getSource() { return source; }
     public void setSource(IncidentSource source) { this.source = source; }
+
+    public String getNamespace() { return namespace; }
+    public void setNamespace(String namespace) { this.namespace = namespace; }
+
+    public String getApp() { return app; }
+    public void setApp(String app) { this.app = app; }
 }

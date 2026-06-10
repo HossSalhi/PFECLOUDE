@@ -81,3 +81,41 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: backend-aiops-discovery
+---
+# Node operations: cordon (patch) + read node status
+# Drain requires evicting pods from any namespace, so we add pod eviction cluster-wide
+# but scope the node patch to minimize blast radius.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backend-remediator-node-ops
+rules:
+  # Cordon / uncordon = PATCH on nodes spec.unschedulable
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Drain: evict pods from any namespace (safer than bare delete)
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  # Drain also needs to list pods across namespaces to find what to evict
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # ReplicaSets needed to identify Deployment-owned pods during drain
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backend-remediator-node-ops
+subjects:
+  - kind: ServiceAccount
+    name: backend-remediator
+    namespace: pfe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backend-remediator-node-ops

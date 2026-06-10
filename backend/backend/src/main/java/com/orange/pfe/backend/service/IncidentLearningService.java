@@ -122,6 +122,16 @@ public class IncidentLearningService {
     private void pushToAiMemory(Incident incident, String incidentType, String severity,
                                 String action, boolean success, int minutes) {
         try {
+            // Fetch real current metric features from the AI service so ChromaDB stores
+            // an actual metric vector, not a placeholder. skip_llm=true keeps it fast.
+            Map<String, Double> features = fetchRealFeatures(
+                    incident.getNamespace() != null ? incident.getNamespace() : "pfe",
+                    incident.getApp() != null ? incident.getApp() : "backend"
+            );
+
+            // Extract confidence from the incident description if present
+            double confidence = parseConfidenceFromDescription(incident.getDescription());
+
             AILearnRequest req = new AILearnRequest();
             req.setIncidentType(incidentType);
             req.setSeverity(severity);
@@ -131,14 +141,58 @@ public class IncidentLearningService {
             req.setMinutesToResolve(minutes);
             req.setApp(incident.getApp() != null ? incident.getApp() : "backend");
             req.setNamespace(incident.getNamespace() != null ? incident.getNamespace() : "pfe");
-            req.setConfidence(0.6);
-            // Build minimal feature map from incident description fields
-            Map<String, Double> features = new HashMap<>();
-            features.put("overall_risk_score", success ? 0.6 : 0.4);
+            req.setConfidence(confidence);
             req.setFeatures(features);
             aiopsClientService.learn(req);
         } catch (Exception ex) {
             log.debug("Could not push outcome to AI memory for incident {}: {}", incident.getId(), ex.getMessage());
+        }
+    }
+
+    /**
+     * Calls the AI /predict endpoint with skip_llm=true to obtain the actual metric
+     * feature vector for the given app. Returns a non-empty map even on failure so
+     * the caller always has something meaningful to store in ChromaDB.
+     */
+    private Map<String, Double> fetchRealFeatures(String namespace, String app) {
+        try {
+            com.orange.pfe.backend.dto.AIPredictRequest req = new com.orange.pfe.backend.dto.AIPredictRequest();
+            req.setNamespace(namespace);
+            req.setApp(app);
+            req.setWindowMinutes(5);
+            req.setSkipLlm(true);
+            com.orange.pfe.backend.dto.AIPredictResponse resp = aiopsClientService.predict(req);
+            if (resp.getFeatures() != null && !resp.getFeatures().isEmpty()) {
+                return resp.getFeatures();
+            }
+        } catch (Exception ex) {
+            log.debug("Could not fetch real features for {}/{} — using fallback: {}", namespace, app, ex.getMessage());
+        }
+        // Fallback: minimal informative vector rather than a single fake value
+        Map<String, Double> fallback = new HashMap<>();
+        fallback.put("overall_risk_score", 0.0);
+        fallback.put("metric_risk_score", 0.0);
+        fallback.put("log_risk_score", 0.0);
+        return fallback;
+    }
+
+    /**
+     * Parses the confidence percentage from the incident description field.
+     * Format: "Type: X | Severity: Y (confidence 72%) | ..."
+     * Returns 0.5 as a neutral default if parsing fails.
+     */
+    private double parseConfidenceFromDescription(String description) {
+        if (description == null) return 0.5;
+        try {
+            int idx = description.indexOf("confidence ");
+            if (idx < 0) return 0.5;
+            int start = idx + "confidence ".length();
+            int end = description.indexOf('%', start);
+            if (end < 0) return 0.5;
+            double pct = Double.parseDouble(description.substring(start, end).trim());
+            return Math.max(0.0, Math.min(1.0, pct / 100.0));
+        } catch (NumberFormatException ex) {
+            return 0.5;
         }
     }
 

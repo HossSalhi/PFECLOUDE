@@ -1,6 +1,7 @@
 package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.config.RemediationProperties;
+import com.orange.pfe.backend.dto.AILearnRequest;
 import com.orange.pfe.backend.model.action.ActionStatus;
 import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.model.action.AutomationMode;
@@ -29,6 +30,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -58,8 +60,12 @@ public class CamundaJobWorkerLifecycle {
     private final RemediationProperties remediationProperties;
     private final IncidentHistoryService incidentHistoryService;
 
+    private final AIOpsClientService aiOpsClientService;
+
     private JobWorker executeWorker;
     private JobWorker verifyWorker;
+    private JobWorker autoEscalateWorker;
+    private JobWorker rejectionWorker;
 
     public CamundaJobWorkerLifecycle(
             CamundaClient camundaClient,
@@ -73,7 +79,8 @@ public class CamundaJobWorkerLifecycle {
             HumanTaskRepository humanTaskRepository,
             HumanTaskService humanTaskService,
             RemediationProperties remediationProperties,
-            IncidentHistoryService incidentHistoryService
+            IncidentHistoryService incidentHistoryService,
+            AIOpsClientService aiOpsClientService
     ) {
         this.camundaClient = camundaClient;
         this.camundaWorkflowService = camundaWorkflowService;
@@ -87,6 +94,7 @@ public class CamundaJobWorkerLifecycle {
         this.humanTaskService = humanTaskService;
         this.remediationProperties = remediationProperties;
         this.incidentHistoryService = incidentHistoryService;
+        this.aiOpsClientService = aiOpsClientService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -124,6 +132,23 @@ public class CamundaJobWorkerLifecycle {
                     .fetchVariables("workflowId", "targetNamespace", "targetName")
                     .open();
 
+            autoEscalateWorker = camundaClient.newWorker()
+                    .jobType("auto-escalate-incident")
+                    .handler(this::handleAutoEscalateIncident)
+                    .name("backend-auto-escalate")
+                    .maxJobsActive(2)
+                    .fetchVariables("workflowId", "incidentId", "incidentSeverity", "approvalTimeoutIso")
+                    .open();
+
+            rejectionWorker = camundaClient.newWorker()
+                    .jobType("handle-incident-rejection")
+                    .handler(this::handleRejectionFeedback)
+                    .name("backend-rejection-feedback")
+                    .maxJobsActive(2)
+                    .fetchVariables("workflowId", "incidentId", "incidentSeverity", "incidentType",
+                                   "targetNamespace", "targetName")
+                    .open();
+
             logger.info("Camunda remediation workers started");
         } catch (Exception ex) {
             logger.error("Unable to start Camunda remediation workers", ex);
@@ -138,6 +163,36 @@ public class CamundaJobWorkerLifecycle {
     public void closeWorkers() {
         closeQuietly(executeWorker);
         closeQuietly(verifyWorker);
+        closeQuietly(autoEscalateWorker);
+        closeQuietly(rejectionWorker);
+    }
+
+    /**
+     * Detect and recover from Camunda worker disconnections.
+     * The Camunda gRPC channel may silently drop after a Camunda restart;
+     * this scheduler re-opens all workers every 30 s if any are closed.
+     */
+    @Scheduled(fixedDelayString  = "${camunda.worker.reconnect-check-ms:30000}",
+               initialDelayString = "${camunda.worker.reconnect-initial-delay-ms:90000}")
+    public void checkAndReconnectWorkers() {
+        boolean anyDown = (executeWorker == null || !executeWorker.isOpen())
+                || (verifyWorker == null || !verifyWorker.isOpen())
+                || (autoEscalateWorker == null || !autoEscalateWorker.isOpen())
+                || (rejectionWorker == null || !rejectionWorker.isOpen());
+        if (!anyDown) return;
+
+        logger.warn("One or more Camunda job workers are closed — attempting reconnect...");
+        closeWorkers();
+        executeWorker = null;
+        verifyWorker  = null;
+        autoEscalateWorker = null;
+        rejectionWorker    = null;
+        try {
+            startWorkers();
+            logger.info("Camunda workers successfully reconnected");
+        } catch (Exception ex) {
+            logger.error("Camunda worker reconnect failed — will retry in 30s", ex);
+        }
     }
 
     private void handleExecuteRemediation(JobClient jobClient, ActivatedJob job) {
@@ -259,6 +314,96 @@ public class CamundaJobWorkerLifecycle {
         }
     }
 
+    private void handleAutoEscalateIncident(JobClient jobClient, ActivatedJob job) {
+        Map<String, Object> variables = job.getVariablesAsMap();
+        try {
+            Long workflowId = longValue(variables.get("workflowId"));
+            String timeoutIso = stringValueOrDefault(variables.get("approvalTimeoutIso"), "PT1H");
+            String severity   = stringValueOrDefault(variables.get("incidentSeverity"), "MEDIUM");
+
+            WorkflowInstance workflow = workflowService.getWorkflowInstance(workflowId);
+
+            incidentHistoryService.record(
+                    workflow.getIncident(),
+                    IncidentStatus.WAITING_FOR_APPROVAL,
+                    "ESCALATED — approval timeout reached (" + timeoutIso + ", severity=" + severity
+                    + "). Incident auto-escalated to on-call team."
+            );
+            workflowService.updateOrchestrationState(
+                    workflow,
+                    WorkflowOrchestrationState.ESCALATED,
+                    IncidentStatus.WAITING_FOR_APPROVAL,
+                    "Auto-escalated after approval timeout " + timeoutIso
+            );
+
+            logger.warn("Incident #{} auto-escalated (timeout={}, severity={})",
+                    workflow.getIncident().getId(), timeoutIso, severity);
+
+            completeJobWithRetry(
+                    jobClient,
+                    job,
+                    Map.of("escalatedAutomatically", true, "escalationReason", "approval_timeout"),
+                    "auto-escalate-incident"
+            );
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            failJob(jobClient, job, ex, variables);
+        } catch (Exception ex) {
+            logger.error("Auto-escalate worker failed for job {}", job.getKey(), ex);
+            failJob(jobClient, job, ex, variables);
+        }
+    }
+
+    /**
+     * Called when an operator rejects a remediation proposal.
+     * Feeds the rejection back to the AI so the model learns from it.
+     */
+    private void handleRejectionFeedback(JobClient jobClient, ActivatedJob job) {
+        Map<String, Object> variables = job.getVariablesAsMap();
+        try {
+            Long workflowId = longValue(variables.get("workflowId"));
+            String severity  = stringValueOrDefault(variables.get("incidentSeverity"), "MEDIUM");
+            String incType   = stringValueOrDefault(variables.get("incidentType"), "UNKNOWN");
+            String namespace = stringValue(variables.get("targetNamespace"));
+            String name      = stringValue(variables.get("targetName"));
+
+            WorkflowInstance workflow = workflowService.getWorkflowInstance(workflowId);
+            incidentHistoryService.record(
+                    workflow.getIncident(),
+                    IncidentStatus.WAITING_FOR_APPROVAL,
+                    "Remediation rejected by operator — AI learn feedback sent"
+            );
+            workflowService.updateOrchestrationState(
+                    workflow,
+                    WorkflowOrchestrationState.REJECTED,
+                    IncidentStatus.WAITING_FOR_APPROVAL,
+                    "Remediation rejected by operator"
+            );
+
+            // Teach the AI that the suggested action was not accepted
+            AILearnRequest learnReq = new AILearnRequest();
+            learnReq.setIncidentType(incType);
+            learnReq.setSeverity(severity);
+            learnReq.setSuccess(false);
+            learnReq.setAction("rejected");
+            learnReq.setNamespace(namespace);
+            learnReq.setApp(name);
+            learnReq.setMinutesToResolve(0);
+            aiOpsClientService.learn(learnReq);
+
+            logger.info("Rejection feedback sent to AI for incident #{}", workflow.getIncident().getId());
+
+            completeJobWithRetry(
+                    jobClient, job,
+                    Map.of("rejectionFeedbackSent", true),
+                    "handle-incident-rejection"
+            );
+        } catch (Exception ex) {
+            logger.error("Rejection feedback worker failed for job {}", job.getKey(), ex);
+            failJob(jobClient, job, ex, variables);
+        }
+    }
+
     private void parkWorkflowForApproval(WorkflowInstance workflow, String reason) {
         workflowService.updateOrchestrationState(
                 workflow,
@@ -306,6 +451,33 @@ public class CamundaJobWorkerLifecycle {
 
     private void failJob(JobClient jobClient, ActivatedJob job, Exception ex, Map<String, Object> variables) {
         int retries = Math.max(0, job.getRetries() - 1);
+
+        if (retries == 0) {
+            // Last retry exhausted — park the workflow so operators know manual action is needed.
+            Long workflowId = null;
+            try { workflowId = longValue(variables.get("workflowId")); } catch (Exception ignored) {}
+            if (workflowId != null) {
+                try {
+                    WorkflowInstance wf = workflowService.getWorkflowInstance(workflowId);
+                    incidentHistoryService.record(
+                            wf.getIncident(),
+                            IncidentStatus.WAITING_FOR_APPROVAL,
+                            "Job '" + job.getType() + "' exhausted all retries — manual intervention required. "
+                            + "Error: " + ex.getMessage()
+                    );
+                    workflowService.updateOrchestrationState(
+                            wf,
+                            WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                            IncidentStatus.WAITING_FOR_APPROVAL,
+                            "Job '" + job.getType() + "' failed permanently after all retries"
+                    );
+                    logger.error("Job '{}' for workflow #{} failed permanently — moved to MANUAL_FOLLOW_UP",
+                            job.getType(), workflowId);
+                } catch (Exception notifyEx) {
+                    logger.warn("Could not park workflow after permanent job failure", notifyEx);
+                }
+            }
+        }
         Map<String, Object> failureVariables = new HashMap<>();
         failureVariables.put("workerFailureMessage", ex.getMessage());
         failureVariables.putAll(variables);

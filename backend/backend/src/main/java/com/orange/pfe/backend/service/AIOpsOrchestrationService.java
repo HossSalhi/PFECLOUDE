@@ -208,6 +208,13 @@ public class AIOpsOrchestrationService {
                     "AI returned recommendation-only guidance");
             historyService.record(incident, IncidentStatus.OPEN, "Incident opened with recommendation-only AI guidance");
             log.info("Incident {} set to OPEN — recommendation-only path", incident.getId());
+        } else if (actionType == ActionType.ESCALATION) {
+            incident.setStatus(IncidentStatus.OPEN);
+            workflowService.updateOrchestrationState(workflow, WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                    "ESCALATION — critical incident requires immediate human attention");
+            historyService.record(incident, IncidentStatus.OPEN, "ESCALATION — forwarded to on-call team");
+            notificationService.notifyEscalation(incident);
+            log.warn("Incident {} ESCALATED — webhook + email triggered for on-call team", incident.getId());
         } else if (plan.approvalRequired()) {
             camundaWorkflowService.startWorkflow(workflow, action, plan, prediction);
             humanTaskService.createTask("Validate AI remediation for incident #" + incident.getId(), workflow);

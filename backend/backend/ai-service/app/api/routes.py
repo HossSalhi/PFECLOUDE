@@ -174,3 +174,28 @@ def predict_proactive(request: ProactiveRequest) -> ProactiveResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Proactive prediction failed: {exc}") from exc
+
+
+@router.get("/monitor/maintenance")
+def get_maintenance_mode() -> dict:
+    """Return the current maintenance mode state of the autonomous monitor."""
+    if _monitor is None:
+        return {"maintenance_mode": False, "message": "Monitor not initialized"}
+    return {"maintenance_mode": _monitor.is_maintenance_mode()}
+
+
+@router.post("/monitor/maintenance")
+def set_maintenance_mode(enabled: bool) -> dict:
+    """
+    Toggle maintenance mode on the autonomous monitor.
+    When enabled, the monitor loop skips analysis and does not create incidents.
+    Use during planned maintenance to avoid false-positive incident storms.
+    """
+    if _monitor is None:
+        raise HTTPException(status_code=503, detail="Monitor not initialized")
+    _monitor.set_maintenance_mode(enabled)
+    return {
+        "maintenance_mode": enabled,
+        "message": "Maintenance mode enabled — monitor paused" if enabled
+                   else "Maintenance mode disabled — monitor resuming",
+    }

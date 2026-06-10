@@ -35,12 +35,20 @@ def _svc():
 @mlops_router.get("/status")
 def mlops_status() -> dict:
     """Full MLOps system health overview."""
+    from app.core.config import get_settings
     svc = _svc()
+    settings = get_settings()
     drift_report = svc.drift_detector.compute_drift()
     active = svc.model_registry.get_active()
     shadow = svc.model_registry.get_shadow()
     trainer_st = svc.auto_trainer.get_status()
     ab_st = svc.ab_tester.get_status()
+
+    new_incidents = trainer_st["new_incidents_since_last_train"]
+    drift_alert = (drift_report.get("max_psi") or 0) > 0.25
+    # LLM retrain is recommended when drift is significant AND enough real incidents
+    # have accumulated.  Run manually: python scripts/llm_continuous_learning.py
+    llm_retrain_recommended = new_incidents >= settings.llm_retrain_min_incidents and drift_alert
 
     return {
         "mlops_ready": True,
@@ -66,8 +74,14 @@ def mlops_status() -> dict:
         },
         "auto_trainer": {
             "is_training": trainer_st["is_training"],
-            "new_incidents_since_last_train": trainer_st["new_incidents_since_last_train"],
+            "new_incidents_since_last_train": new_incidents,
             "trigger_threshold": trainer_st["trigger_threshold"],
+        },
+        "llm": {
+            "retrain_recommended": llm_retrain_recommended,
+            "min_incidents_required": settings.llm_retrain_min_incidents,
+            "new_incidents": new_incidents,
+            "hint": "Run: python scripts/llm_continuous_learning.py" if llm_retrain_recommended else None,
         },
         "ab_test": {
             "active": ab_st["active"],

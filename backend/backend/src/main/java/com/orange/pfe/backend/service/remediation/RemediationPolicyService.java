@@ -37,7 +37,7 @@ public class RemediationPolicyService {
         String targetName = request.getApp();
         RemediationTargetKind targetKind = mapTargetKind(actionType);
         boolean dbRelated = isDbRelated(prediction);
-        boolean cooldownBlocked = isCooldownBlocked(targetNamespace, targetName, actionType);
+        boolean cooldownBlocked = isCooldownBlocked(targetNamespace, targetName, actionType, prediction.getIncidentType());
         boolean confidenceEligible = isConfidenceEligible(actionType, prediction.getConfidence());
         boolean severityEligible = isSeverityEligible(prediction.getSeverity());
         boolean appAllowlisted = isAppAllowlisted(request.getApp());
@@ -264,12 +264,23 @@ public class RemediationPolicyService {
         return combined.contains("DB") || combined.contains("DATABASE") || combined.contains("POSTGRES");
     }
 
-    private boolean isCooldownBlocked(String namespace, String targetName, ActionType actionType) {
+    private boolean isCooldownBlocked(String namespace, String targetName, ActionType actionType, String newIncidentType) {
         if (namespace == null || targetName == null || targetName.isBlank() || actionType == null) {
             return false;
         }
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(properties.getCooldownMinutes());
-        return !actionRepository.findRecentActionsForTarget(namespace, targetName, actionType, cutoff).isEmpty();
+        if (actionRepository.findRecentActionsForTarget(namespace, targetName, actionType, cutoff).isEmpty()) {
+            return false;
+        }
+        // Smart cooldown bypass: if the new incident type differs from the last one on this target,
+        // the failure has escalated to a new cause — do not block; the situation changed.
+        if (newIncidentType != null && !newIncidentType.isBlank()) {
+            String lastType = actionRepository.findLastIncidentTypeForTarget(namespace, targetName);
+            if (lastType != null && !lastType.equalsIgnoreCase(newIncidentType)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean isConfidenceEligible(ActionType actionType, Double confidence) {

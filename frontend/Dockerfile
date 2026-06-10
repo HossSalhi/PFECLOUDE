@@ -25,8 +25,22 @@ RUN node node_modules/@angular/cli/bin/ng.js build --configuration=production
 
 # ---- Stage 2: nginx runtime -----------------------------------------------------
 FROM nginx:1.27-alpine
+
+# Run nginx as non-root on port 8080
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && mkdir -p /var/cache/nginx/client_temp /var/run \
+    && chown -R appuser:appgroup /var/cache/nginx /var/run /usr/share/nginx/html \
+    && sed -i 's|user  nginx;||g' /etc/nginx/nginx.conf \
+    && sed -i 's|/var/run/nginx.pid|/tmp/nginx.pid|g' /etc/nginx/nginx.conf
+
 COPY --from=build /app/dist/frontend /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+USER appuser
+
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/ > /dev/null || exit 1
+
 CMD ["nginx", "-g", "daemon off;"]

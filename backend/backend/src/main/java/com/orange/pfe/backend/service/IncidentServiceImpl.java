@@ -11,6 +11,8 @@ import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -65,15 +67,33 @@ public class IncidentServiceImpl implements IncidentService {
         );
     }
 
+    private static final List<IncidentStatus> ACTIVE_STATUSES = List.of(
+            IncidentStatus.NEW, IncidentStatus.OPEN, IncidentStatus.IN_PROGRESS,
+            IncidentStatus.WAITING_FOR_APPROVAL);
+
     @Override
     @Transactional
     public IncidentResponse createIncident(IncidentRequest r) {
+        // Dedup: if an active incident already exists for the same (namespace, app, source),
+        // return it instead of creating a duplicate. Prevents storm of identical incidents
+        // when the autonomous monitor or CI/CD retriggers within the cooldown window.
+        if (r.getNamespace() != null && r.getApp() != null && r.getSource() != null) {
+            Optional<Incident> existing = repository
+                    .findFirstByStatusInAndSourceAndNamespaceAndAppOrderByCreatedAtDesc(
+                            ACTIVE_STATUSES, r.getSource(), r.getNamespace(), r.getApp());
+            if (existing.isPresent()) {
+                return map(existing.get());
+            }
+        }
+
         Incident i = new Incident();
         i.setTitle(r.getTitle());
         i.setDescription(r.getDescription());
         i.setSeverity(r.getSeverity());
         i.setSource(r.getSource());
         i.setStatus(IncidentStatus.NEW);
+        if (r.getNamespace() != null) i.setNamespace(r.getNamespace());
+        if (r.getApp() != null)       i.setApp(r.getApp());
 
         Incident saved = repository.save(i);
 

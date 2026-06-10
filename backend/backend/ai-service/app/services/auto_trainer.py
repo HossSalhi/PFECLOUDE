@@ -17,9 +17,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-RETRAIN_TRIGGER_INCIDENTS = 50
+RETRAIN_TRIGGER_INCIDENTS = 25
 MIN_IMPROVEMENT = 0.005   # Promote new model only if avg_F1 improves by ≥ 0.5%
 LAST_RETRAIN_FILE = "model_artifacts/last_retrain.json"
+MAX_DATASET_ROWS = 2000   # Keep only the most recent N rows to prevent quality degradation
+
+# Features stored in ChromaDB incident metadata — subset of full feature set.
+# Used to harvest real production data into the training CSV.
+_CHROMA_FEATURES = [
+    "cpu_usage_cores", "memory_working_set_bytes", "http_5xx_ratio",
+    "http_latency_p95_seconds", "pod_restarts_total", "unavailable_replicas",
+    "db_keyword_hits", "db_pool_pending", "log_risk_score", "metric_risk_score",
+    "overall_risk_score", "error_ratio", "error_line_count", "restart_keyword_hits",
+]
 
 
 class AutoTrainer:
@@ -90,6 +100,14 @@ class AutoTrainer:
 
         try:
             logger.info("AutoTrainer: starting pipeline (trigger=%s)", trigger)
+
+            pruned = self._prune_dataset()
+            if pruned > 0:
+                logger.info("AutoTrainer: pruned %d stale rows (dataset capped at %d)", pruned, MAX_DATASET_ROWS)
+
+            harvested = self._harvest_chroma_to_csv()
+            if harvested > 0:
+                logger.info("AutoTrainer: harvested %d real incident rows from ChromaDB", harvested)
 
             data = self._load_data()
             if data is None:
@@ -165,6 +183,28 @@ class AutoTrainer:
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #
     # ------------------------------------------------------------------ #
+
+    def _prune_dataset(self) -> int:
+        """Cap the training CSV at MAX_DATASET_ROWS by dropping the oldest rows.
+        Older incidents drift out of distribution; keeping only recent data
+        prevents the model from learning on stale patterns.
+        Returns number of rows removed (0 if no pruning needed).
+        """
+        try:
+            import pandas as pd
+            path = self._dataset_path
+            if not path.exists():
+                return 0
+            df = pd.read_csv(str(path))
+            before = len(df)
+            if before <= MAX_DATASET_ROWS:
+                return 0
+            df = df.tail(MAX_DATASET_ROWS).reset_index(drop=True)
+            df.to_csv(str(path), index=False)
+            return before - len(df)
+        except Exception as exc:
+            logger.warning("AutoTrainer: dataset pruning failed (non-critical): %s", exc)
+            return 0
 
     def _load_data(self):
         """Load CSV dataset. Returns (X, y_incident, y_severity, y_action, feature_names) or None."""
@@ -266,6 +306,78 @@ class AutoTrainer:
             },
         }
         return bundle, metrics
+
+    def _harvest_chroma_to_csv(self, max_entries: int = 500) -> int:
+        """
+        Fetch resolved incident vectors stored in ChromaDB by IncidentLearningService
+        and append them as feature rows to the training CSV.
+        Returns number of rows appended; 0 on any error or if ChromaDB unavailable.
+        """
+        try:
+            import chromadb
+            import pandas as pd
+            from app.core.config import get_settings
+
+            settings = get_settings()
+            if not settings.memory_enabled:
+                return 0
+
+            if settings.chroma_mode == "http":
+                client = chromadb.HttpClient(
+                    host=settings.chroma_http_host,
+                    port=settings.chroma_http_port,
+                    ssl=settings.chroma_http_ssl,
+                )
+            else:
+                client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+
+            collection = client.get_or_create_collection("helios_incidents")
+            count = collection.count()
+            if count == 0:
+                return 0
+
+            results = collection.get(
+                limit=min(max_entries, count),
+                include=["metadatas"],
+            )
+            metadatas = results.get("metadatas") or []
+            if not metadatas:
+                return 0
+
+            new_rows = []
+            for meta in metadatas:
+                if not meta or not meta.get("incident_type"):
+                    continue
+                row: dict = {
+                    "incident": 1 if meta.get("resolved", True) else 0,
+                    "severity": meta.get("severity", "MEDIUM"),
+                    "recommended_action": meta.get("action", "INVESTIGATE"),
+                }
+                for feat in _CHROMA_FEATURES:
+                    row[feat] = float(meta.get(feat, 0.0))
+                new_rows.append(row)
+
+            if not new_rows:
+                return 0
+
+            csv_path = self._dataset_path
+            if not csv_path.exists():
+                return 0
+
+            existing = pd.read_csv(str(csv_path))
+            incoming = pd.DataFrame(new_rows)
+            # Align columns — fill missing feature cols with 0, drop extras not in CSV
+            for col in existing.columns:
+                if col not in incoming.columns:
+                    incoming[col] = 0
+            incoming = incoming[[c for c in existing.columns if c in incoming.columns]]
+            combined = pd.concat([existing, incoming], ignore_index=True)
+            combined.to_csv(str(csv_path), index=False)
+            return len(new_rows)
+
+        except Exception as exc:
+            logger.debug("AutoTrainer: ChromaDB harvest skipped (%s)", exc)
+            return 0
 
     def _save_last_retrain(self, result: dict) -> None:
         try:

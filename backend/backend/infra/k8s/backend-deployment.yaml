@@ -8,13 +8,13 @@ metadata:
     aiops.io/monitor: "true"
     aiops.io/app: "backend"
 spec:
-  replicas: 1
+  replicas: 2
   revisionHistoryLimit: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+      maxSurge: 1       # allows a 3rd pod during rollout so both workers stay covered
+      maxUnavailable: 0 # never reduce below 2 running pods during rollout
   selector:
     matchLabels:
       app: backend

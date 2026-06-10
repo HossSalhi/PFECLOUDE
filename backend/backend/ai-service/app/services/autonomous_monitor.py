@@ -8,8 +8,12 @@ and triggers backend incident creation when anomalies are detected.
 Cycle:
   1. Query Prometheus for all active (namespace, container) pairs
   2. For each app: ProactiveService.predict_proactive()
-  3. If severity HIGH/CRITICAL predicted: POST /api/ai/predict to backend
-  4. Backend creates incident → triggers Camunda workflow → SSE notification
+  3. Multi-signal correlation: if 2+ metrics breach threshold simultaneously
+     → emit single MULTI_SIGNAL_DEGRADATION instead of N separate incidents
+  4. If severity HIGH/CRITICAL predicted: POST /api/ai/predict to backend
+  5. Backend creates incident → triggers Camunda workflow → SSE notification
+  6. Prometheus watchdog: if Prometheus itself is unreachable → VM_DOWN incident
+  7. Orphan cleanup: close IN_PROGRESS incidents whose app no longer exists in Prometheus
 """
 
 import asyncio
@@ -55,6 +59,7 @@ class AutonomousMonitor:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._maintenance_mode: bool = settings.maintenance_mode
         self._prometheus = PrometheusClient(
             base_url=settings.prometheus_base_url,
             timeout_seconds=settings.prometheus_timeout_seconds,
@@ -75,6 +80,11 @@ class AutonomousMonitor:
 
         # (namespace, app) → monotonic timestamp when cooldown expires
         self._cooldowns: dict[tuple[str, str], float] = {}
+
+        # Prometheus liveness — tracks consecutive failures to detect .160 outage
+        self._prometheus_consecutive_failures: int = 0
+        self._prometheus_down_incident_created: bool = False
+        _PROMETHEUS_FAILURE_THRESHOLD = 3  # 3 consecutive misses → incident
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -137,10 +147,24 @@ class AutonomousMonitor:
                 self._recent_errors.append(msg)
             await asyncio.sleep(self._settings.autonomous_monitor_interval_seconds)
 
+    def set_maintenance_mode(self, enabled: bool) -> None:
+        self._maintenance_mode = enabled
+        logger.info("Maintenance mode %s", "ENABLED — monitor paused" if enabled else "DISABLED — monitor resuming")
+
+    def is_maintenance_mode(self) -> bool:
+        return self._maintenance_mode
+
     async def _run_cycle(self) -> None:
+        if self._maintenance_mode:
+            logger.info("Maintenance mode active — skipping monitor cycle %d", self._total_cycles + 1)
+            return
+
         self._total_cycles += 1
         self._last_run_utc = datetime.now(timezone.utc).isoformat()
         loop = asyncio.get_event_loop()
+
+        # Prometheus watchdog: detect .160 outage without Alertmanager
+        await self._check_prometheus_health(loop)
 
         # Cluster/infra layer: detect NotReady nodes (NODE_NOT_READY) independently
         # of app discovery — a node can be down even when every app looks fine.
@@ -155,7 +179,16 @@ class AutonomousMonitor:
 
         logger.info("Monitor cycle %d: %d app(s) to analyze", self._total_cycles, len(apps))
 
+        # Orphan cleanup: close incidents for apps that no longer exist
+        known_apps = {app for _, app in apps}
+        await self._cleanup_orphan_incidents(known_apps)
+
         anomalies = 0
+
+        # --- Multi-signal correlation window ---
+        # Collect per-app proactive results first, then look for correlated patterns
+        # before deciding how many incidents to create.
+        app_results: list[tuple[str, str, str]] = []  # (namespace, app, explanation)
         for namespace, app in apps:
             if self._in_cooldown(namespace, app):
                 logger.debug("Cooldown active for %s/%s, skipping", namespace, app)
@@ -164,18 +197,53 @@ class AutonomousMonitor:
             explanation = await loop.run_in_executor(
                 None, self._check_app, namespace, app
             )
-
             if explanation:
+                app_results.append((namespace, app, explanation))
+
+        # Group by namespace: if 2+ apps in the same namespace are anomalous
+        # within the same cycle, treat as correlated (shared infra cause).
+        ns_groups: dict[str, list[tuple[str, str, str]]] = {}
+        for ns, app, expl in app_results:
+            ns_groups.setdefault(ns, []).append((ns, app, expl))
+
+        for ns, group in ns_groups.items():
+            if len(group) >= 2:
+                # Correlated: create one MULTI_SIGNAL_DEGRADATION per namespace
+                affected = [app for _, app, _ in group]
+                logger.warning(
+                    "MULTI-SIGNAL CORRELATION in %s: %d apps affected simultaneously: %s",
+                    ns, len(affected), affected,
+                )
+                # Trigger on the first app but annotate all in explanation
+                _, first_app, _ = group[0]
+                if not self._in_cooldown(ns, f"__correlated_{ns}"):
+                    triggered = await self._trigger_backend(
+                        ns, first_app,
+                        extra_context={
+                            "correlatedApps": affected,
+                            "correlationType": "MULTI_SIGNAL_DEGRADATION",
+                        },
+                    )
+                    if triggered:
+                        anomalies += 1
+                        self._incidents_triggered += 1
+                        secs = self._settings.autonomous_monitor_cooldown_minutes * 60
+                        self._cooldowns[(ns, f"__correlated_{ns}")] = time.monotonic() + secs
+                        for _, app, _ in group:
+                            self._cooldowns[(ns, app)] = time.monotonic() + secs
+            else:
+                # Isolated anomaly — normal single-app incident
+                ns_val, app, explanation = group[0]
                 anomalies += 1
-                logger.warning("ANOMALY %s/%s: %s", namespace, app, explanation)
-                triggered = await self._trigger_backend(namespace, app)
+                logger.warning("ANOMALY %s/%s: %s", ns_val, app, explanation)
+                triggered = await self._trigger_backend(ns_val, app)
                 if triggered:
                     self._incidents_triggered += 1
                     cooldown_secs = self._settings.autonomous_monitor_cooldown_minutes * 60
-                    self._cooldowns[(namespace, app)] = time.monotonic() + cooldown_secs
+                    self._cooldowns[(ns_val, app)] = time.monotonic() + cooldown_secs
                     logger.info(
                         "Incident triggered for %s/%s — cooldown %dm",
-                        namespace, app, self._settings.autonomous_monitor_cooldown_minutes,
+                        ns_val, app, self._settings.autonomous_monitor_cooldown_minutes,
                     )
 
         self._last_anomalies_found = anomalies
@@ -234,6 +302,100 @@ class AutonomousMonitor:
                 apps.append(key)
 
         return apps
+
+    # ------------------------------------------------------------------
+    # Prometheus watchdog (L7 — without Alertmanager)
+    # ------------------------------------------------------------------
+
+    async def _check_prometheus_health(self, loop) -> None:
+        """
+        Detect Prometheus (.160) outage purely from the AI side — no Alertmanager.
+        After _PROMETHEUS_FAILURE_THRESHOLD consecutive query failures, create a
+        MONITORING_DOWN incident. Clears the flag when Prometheus recovers.
+        """
+        _THRESHOLD = 3
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._prometheus.query_raw("up{job='prometheus'}"),
+            )
+            # Any non-exception response means Prometheus is reachable
+            self._prometheus_consecutive_failures = 0
+            if self._prometheus_down_incident_created:
+                self._prometheus_down_incident_created = False
+                logger.info("Prometheus recovered — clearing MONITORING_DOWN flag")
+        except Exception as exc:
+            self._prometheus_consecutive_failures += 1
+            logger.warning(
+                "Prometheus unreachable (%d/%d): %s",
+                self._prometheus_consecutive_failures, _THRESHOLD, exc,
+            )
+            if (
+                self._prometheus_consecutive_failures >= _THRESHOLD
+                and not self._prometheus_down_incident_created
+                and not self._in_cooldown("infra", "monitoring-vm")
+            ):
+                logger.error("Prometheus down for %d consecutive cycles — creating MONITORING_DOWN incident", _THRESHOLD)
+                triggered = await self._trigger_backend(
+                    "infra", "monitoring-vm",
+                    extra_context={"incidentType": "MONITORING_DOWN"},
+                )
+                if triggered:
+                    self._prometheus_down_incident_created = True
+                    self._incidents_triggered += 1
+                    secs = self._settings.autonomous_monitor_cooldown_minutes * 60 * 2
+                    self._cooldowns[("infra", "monitoring-vm")] = time.monotonic() + secs
+
+    # ------------------------------------------------------------------
+    # Orphan incident cleanup (L24)
+    # ------------------------------------------------------------------
+
+    async def _cleanup_orphan_incidents(self, active_apps: set) -> None:
+        """
+        Close IN_PROGRESS incidents whose app no longer appears in Prometheus metrics.
+        An app absent from Prometheus for >1 cycle is considered gone (deleted/scaled-to-0).
+        NODE_NOT_READY incidents are handled separately by _resolve_recovered_node_incidents.
+        """
+        token = await self._get_jwt()
+        if not token:
+            return
+        headers = {"Authorization": f"Bearer {token}"}
+        for ip in self._settings.autonomous_monitor_backend_ips.split(","):
+            ip = ip.strip()
+            if not ip:
+                continue
+            base = f"http://{ip}:30880"
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    items = data.get("content", data) if isinstance(data, dict) else data
+                    for inc in (items or []):
+                        itype = inc.get("incidentType", "")
+                        status = inc.get("status", "")
+                        app = inc.get("app", "")
+                        iid = inc.get("id")
+                        if (
+                            status not in ("RESOLVED", "CLOSED", "AUTO_RESOLVED")
+                            and itype != "NODE_NOT_READY"
+                            and app
+                            and app not in active_apps
+                            and iid
+                        ):
+                            r = await client.put(
+                                f"{base}/api/incidents/{iid}/status/RESOLVED",
+                                headers=headers,
+                            )
+                            if r.status_code in (200, 201, 204):
+                                logger.info(
+                                    "Auto-resolved orphan incident id=%s app=%s (app absent from cluster)",
+                                    iid, app,
+                                )
+                return
+            except Exception as exc:
+                logger.debug("Orphan cleanup via %s failed: %s", ip, exc)
 
     # ------------------------------------------------------------------
     # Node / cluster outage detection (NODE_NOT_READY)
@@ -324,22 +486,31 @@ class AutonomousMonitor:
     # Backend notification
     # ------------------------------------------------------------------
 
-    async def _trigger_backend(self, namespace: str, app: str) -> bool:
+    async def _trigger_backend(
+        self,
+        namespace: str,
+        app: str,
+        extra_context: dict | None = None,
+    ) -> bool:
         """
         Call backend POST /api/ai/predict so the backend creates the incident,
         triggers the Camunda workflow, and pushes an SSE notification to the UI.
+        extra_context is merged into the payload for enriched incident creation
+        (e.g. correlatedApps, correlationType, incidentType override).
         """
         token = await self._get_jwt()
         if not token:
             logger.warning("Cannot trigger backend for %s/%s: no JWT", namespace, app)
             return False
 
-        payload = {
+        payload: dict = {
             "namespace": namespace,
             "app": app,
             "windowMinutes": 5,
             "createIncident": True,
         }
+        if extra_context:
+            payload.update(extra_context)
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
         for ip in self._settings.autonomous_monitor_backend_ips.split(","):

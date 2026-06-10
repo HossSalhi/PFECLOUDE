@@ -177,7 +177,11 @@ class ProactiveService:
         current = values[-1]
         slope = self._linear_slope(values)  # units per data point (1 min)
 
-        # Time to threshold breach
+        # Spike and statistical anomaly detection (complements linear regression)
+        is_spike = self._sudden_spike(values)
+        is_zscore_outlier, z_score = self._zscore_anomaly(values)
+
+        # Time to threshold breach (linear model)
         time_to_threshold = -1.0
         if slope > 0:
             if current < critical_threshold:
@@ -185,11 +189,15 @@ class ProactiveService:
             elif current < high_threshold:
                 time_to_threshold = (high_threshold - current) / slope
 
-        # Determine if trending bad (slope positive + approaching threshold)
+        # Determine if trending bad: slope-based OR spike/outlier detected
         is_trending_bad = (
-            slope > 0 and
-            current > warn_threshold * 0.7 and  # at least 70% of warning threshold
-            (time_to_threshold < self.PREDICTION_HORIZON_MINUTES or current > high_threshold)
+            (
+                slope > 0 and
+                current > warn_threshold * 0.7 and
+                (time_to_threshold < self.PREDICTION_HORIZON_MINUTES or current > high_threshold)
+            )
+            or is_spike
+            or (is_zscore_outlier and current > warn_threshold * 0.5)
         )
 
         # Determine severity based on current value
@@ -201,6 +209,14 @@ class ProactiveService:
             severity = "MEDIUM"
         else:
             severity = "LOW"
+
+        # Elevate severity for spikes or strong Z-score outliers even below threshold
+        if is_spike and current >= warn_threshold * 0.7:
+            severity = max(severity, "HIGH", key=lambda s: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(s))
+        if is_zscore_outlier and z_score >= 4.0:
+            severity = "CRITICAL"
+        elif is_zscore_outlier and z_score >= 3.0 and severity == "LOW":
+            severity = "MEDIUM"
 
         # If trending toward critical within horizon, elevate
         if is_trending_bad and 0 < time_to_threshold < 5:
@@ -227,6 +243,33 @@ class ProactiveService:
         numerator = sum((i - x_mean) * (v - y_mean) for i, v in enumerate(values))
         denominator = sum((i - x_mean) ** 2 for i in range(n))
         return numerator / denominator if denominator != 0 else 0.0
+
+    def _zscore_anomaly(self, values: list[float], z_threshold: float = 2.5) -> tuple[bool, float]:
+        """Detect if the latest value is a statistical outlier vs the historical window.
+        Returns (is_anomaly, z_score). Uses the rolling window as the reference distribution."""
+        if len(values) < 6:
+            return False, 0.0
+        reference = values[:-1]
+        mean = sum(reference) / len(reference)
+        variance = sum((v - mean) ** 2 for v in reference) / len(reference)
+        std = variance ** 0.5
+        if std < 1e-9:
+            return False, 0.0
+        z = (values[-1] - mean) / std
+        return z > z_threshold, round(z, 3)
+
+    def _sudden_spike(self, values: list[float], spike_ratio: float = 2.0) -> bool:
+        """Detect a sudden jump in the last 2 data points relative to the recent baseline.
+        A spike is flagged when current/prev > spike_ratio AND current > rolling mean * spike_ratio."""
+        if len(values) < 3:
+            return False
+        current = values[-1]
+        prev = values[-2]
+        if prev < 1e-9:
+            return False
+        jump = current / prev
+        baseline_mean = sum(values[:-1]) / len(values[:-1])
+        return jump >= spike_ratio and current >= baseline_mean * spike_ratio
 
     def _classify_incident_type(self, bad_trends: list[MetricTrend]) -> str:
         names = {t.metric_name for t in bad_trends}

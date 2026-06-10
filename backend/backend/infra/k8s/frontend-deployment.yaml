@@ -74,6 +74,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: https
+              containerPort: 8443
           readinessProbe:
             httpGet:
               path: /
@@ -110,6 +112,9 @@ spec:
               mountPath: /var/cache/nginx
             - name: nginx-run
               mountPath: /var/run
+            - name: tls-cert
+              mountPath: /etc/nginx/tls
+              readOnly: true
       volumes:
         - name: nginx-conf
           configMap:
@@ -118,3 +123,6 @@ spec:
           emptyDir: {}
         - name: nginx-run
           emptyDir: {}
+        - name: tls-cert
+          secret:
+            secretName: helios-tls

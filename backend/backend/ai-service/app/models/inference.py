@@ -209,12 +209,28 @@ class InferenceEngine:
                 chosen_plan_id = None
                 decision_explanation = self._build_no_incident_explanation(confidence)
 
-        # ── ML Scenario Classifier Override (52 classes) ────────────────
+        # ── ML Scenario Classifier Override (52 classes + UNKNOWN_ANOMALY) ────────
         # The dedicated scenario classifier is the authoritative source for
         # incident_type. It can also promote incident=True if very confident,
         # bypassing the conservative rule-based incident detection.
+        # UNKNOWN_ANOMALY: emitted when confidence < 0.30 — forces INVESTIGATION
+        # with approval required so a human reviews the signal.
         _ml_type, _ml_conf = self._predict_scenario_ml(safe_features)
-        if _ml_type and _ml_type != "NO_INCIDENT":
+        if _ml_type == "UNKNOWN_ANOMALY" and rule_score >= 0.15:
+            # Unknown pattern with non-trivial risk score → escalate to human
+            incident_type = "UNKNOWN_ANOMALY"
+            if not incident:
+                incident = True
+                noise = False
+                severity = "MEDIUM"
+                action = "INVESTIGATE"
+                final_executable_action = None
+                execution_mode = "RECOMMEND_ONLY"
+                recommendation_only_reason = (
+                    f"Anomaly detected (score={rule_score:.2f}) but does not match any known "
+                    f"incident class (ML confidence={_ml_conf:.2f}). Human review required."
+                )
+        elif _ml_type and _ml_type not in ("NO_INCIDENT", "UNKNOWN_ANOMALY"):
             incident_type = _ml_type
             if not incident and _ml_conf >= 0.50:
                 incident = True
@@ -340,11 +356,26 @@ class InferenceEngine:
                 why = self._why_for(incident_type, action, _rc)
                 specialist = None
                 if not skip_llm:
-                    _llm_why = self._explain_why(incident_type, severity, confidence, ev, action)
+                    # Run explainer + specialist in parallel threads so total LLM
+                    # latency = max(explainer, specialist) instead of sum.
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    with ThreadPoolExecutor(max_workers=2) as _pool:
+                        _fut_why = _pool.submit(
+                            self._explain_why, incident_type, severity, confidence, ev, action
+                        )
+                        _fut_spec = _pool.submit(
+                            self._specialist_opinion, incident_type, severity, action, ev
+                        )
+                        try:
+                            _llm_why = _fut_why.result(timeout=15)
+                        except Exception:
+                            _llm_why = None
+                        try:
+                            specialist = _fut_spec.result(timeout=15)
+                        except Exception:
+                            specialist = None
                     if _llm_why and self._llm_ok(_llm_why, _rc):
                         why = _llm_why
-                    # Fine-tuned 0.5B specialist: gated second opinion (never overrides ML).
-                    specialist = self._specialist_opinion(incident_type, severity, action, ev)
                 decision_explanation = (
                     f"{incident_type} (severity {severity}, confidence {confidence:.2f}). "
                     f"Measured evidence: {ev}. Recommended action: {action}. "
@@ -429,10 +460,16 @@ class InferenceEngine:
 
         if idx < 0 or idx >= len(bundle.scenario_labels):
             return None, 0.0
-        if conf < 0.30:
-            return None, conf
 
-        return str(bundle.scenario_labels[idx]).upper(), conf
+        label = str(bundle.scenario_labels[idx]).upper()
+
+        # Low confidence → UNKNOWN_ANOMALY instead of silently ignoring.
+        # This allows the backend to create an INVESTIGATION incident rather than
+        # discarding signals that don't match any known class well.
+        if conf < 0.30:
+            return "UNKNOWN_ANOMALY", conf
+
+        return label, conf
 
     def _predict_incident_score(self, features: dict[str, float]) -> float | None:
         if not self.model_bundle.loaded:

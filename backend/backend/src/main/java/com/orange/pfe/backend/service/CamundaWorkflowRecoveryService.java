@@ -16,14 +16,21 @@ import com.orange.pfe.backend.service.remediation.RecoveryVerificationService;
 import com.orange.pfe.backend.service.remediation.RemediationMetricsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @ConditionalOnProperty(name = "camunda.enabled", havingValue = "true")
@@ -32,6 +39,16 @@ public class CamundaWorkflowRecoveryService {
     private static final Logger logger = LoggerFactory.getLogger(CamundaWorkflowRecoveryService.class);
     private static final int EXECUTION_PENDING_GRACE_SECONDS = 45;
     private static final int APPROVED_GRACE_SECONDS = 20;
+    private static final int CAMUNDA_DOWN_THRESHOLD = 3;
+    private static final int CREATED_GRACE_MINUTES = 5;
+
+    @Value("${camunda.rest-address:http://192.168.148.161:8080}")
+    private String camundaRestAddress;
+
+    private final AtomicInteger camundaConsecutiveFailures = new AtomicInteger(0);
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
 
     private final WorkflowRepository workflowRepository;
     private final IncidentActionRepository incidentActionRepository;
@@ -105,6 +122,72 @@ public class CamundaWorkflowRecoveryService {
             } catch (Exception ex) {
                 logger.warn("Unable to recover approved workflow {}", workflow.getId(), ex);
             }
+        }
+    }
+
+    /**
+     * Health-check Camunda every 60 s.  After CAMUNDA_DOWN_THRESHOLD consecutive
+     * failures, any workflow stuck in CREATED state for more than CREATED_GRACE_MINUTES
+     * is moved to MANUAL_FOLLOW_UP so operators know it will never progress automatically.
+     * Resets the counter when Camunda is reachable again.
+     */
+    @Scheduled(fixedDelayString = "${camunda.health.check-delay-ms:60000}",
+               initialDelayString = "${camunda.health.check-initial-delay-ms:60000}")
+    @Transactional
+    public void checkCamundaHealthAndParkStuckWorkflows() {
+        if (!leaderElectionService.isLeader()) return;
+
+        boolean reachable = isCamundaReachable();
+        if (reachable) {
+            int prev = camundaConsecutiveFailures.getAndSet(0);
+            if (prev >= CAMUNDA_DOWN_THRESHOLD) {
+                logger.info("Camunda recovered after {} consecutive health-check failures", prev);
+            }
+            return;
+        }
+
+        int failures = camundaConsecutiveFailures.incrementAndGet();
+        logger.warn("Camunda health-check failed ({}/{})", failures, CAMUNDA_DOWN_THRESHOLD);
+        if (failures < CAMUNDA_DOWN_THRESHOLD) return;
+
+        // Camunda is down — park CREATED workflows that have been waiting too long
+        List<WorkflowInstance> stuck = workflowRepository.findByStatusAndOrchestrationState(
+                WorkflowStatus.RUNNING, WorkflowOrchestrationState.CREATED);
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(CREATED_GRACE_MINUTES);
+        for (WorkflowInstance wf : stuck) {
+            if (wf.getStartedAt() != null && wf.getStartedAt().isAfter(cutoff)) continue;
+            try {
+                logger.warn("Camunda DOWN: parking stuck CREATED workflow {} as MANUAL_FOLLOW_UP", wf.getId());
+                workflowService.updateOrchestrationState(
+                        wf,
+                        WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                        IncidentStatus.WAITING_FOR_APPROVAL,
+                        "Camunda unreachable for " + failures + " consecutive checks — workflow parked for manual follow-up"
+                );
+                if (!humanTaskRepository.existsByWorkflowInstanceIdAndDecision(wf.getId(), TaskDecision.PENDING)) {
+                    humanTaskService.createTask(
+                            "Camunda DOWN — manual follow-up for incident #" + wf.getIncident().getId(),
+                            wf
+                    );
+                }
+            } catch (Exception ex) {
+                logger.warn("Could not park workflow {} during Camunda-down recovery", wf.getId(), ex);
+            }
+        }
+    }
+
+    private boolean isCamundaReachable() {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(camundaRestAddress + "/actuator/health"))
+                    .timeout(Duration.ofSeconds(4))
+                    .GET()
+                    .build();
+            HttpResponse<Void> resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding());
+            return resp.statusCode() < 500;
+        } catch (Exception ex) {
+            logger.debug("Camunda health-check exception: {}", ex.getMessage());
+            return false;
         }
     }
 

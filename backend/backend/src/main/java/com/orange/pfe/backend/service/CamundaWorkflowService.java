@@ -178,6 +178,16 @@ public class CamundaWorkflowService {
         variables.put("incidentType", prediction.getIncidentType());
         variables.put("confidence", prediction.getConfidence() == null ? 0.0d : prediction.getConfidence());
         variables.put("verificationDelayIso", "PT" + remediationProperties.getVerifyDelaySeconds() + "S");
+        // Approval timeout by severity: CRITICAL=30m, HIGH=1h, others=2h
+        String severity = workflow.getIncident().getSeverity() != null
+                ? workflow.getIncident().getSeverity().name()
+                : "MEDIUM";
+        String approvalTimeoutIso = switch (severity) {
+            case "CRITICAL" -> "PT30M";
+            case "HIGH"     -> "PT1H";
+            default         -> "PT2H";
+        };
+        variables.put("approvalTimeoutIso", approvalTimeoutIso);
         variables.put("approvalDecision", "PENDING");
         variables.put("executionSucceeded", false);
         variables.put("recoveryResolved", false);

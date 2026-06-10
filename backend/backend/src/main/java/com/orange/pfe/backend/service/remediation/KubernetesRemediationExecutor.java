@@ -57,6 +57,16 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
 
     @Override
     public RemediationExecutionResult execute(RemediationPlan plan) {
+        return execute(plan, false);
+    }
+
+    /**
+     * Execute with optional dry-run mode.
+     * When dryRun=true, all Kubernetes API calls are issued with dryRun=All — the API server
+     * validates the request (admission, RBAC, schema) but does not persist any change.
+     * Returns a result with message prefixed by "[DRY-RUN]" so callers can distinguish.
+     */
+    public RemediationExecutionResult execute(RemediationPlan plan, boolean dryRun) {
         if (plan.actionType() == null) {
             return new RemediationExecutionResult(false, plan.targetName(), "No executable action was selected");
         }
@@ -68,27 +78,52 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
             );
         }
 
-        try {
-            return switch (plan.actionType()) {
-                case RESTART_POD             -> restartPod(plan.targetNamespace(), plan.targetName());
-                case SCALE_DEPLOYMENT        -> scaleDeployment(plan.targetNamespace(), plan.targetName());
-                case SCALE_DOWN              -> scaleDown(plan.targetNamespace(), plan.targetName());
-                case ROLLBACK_DEPLOYMENT     -> rollbackDeployment(plan.targetNamespace(), plan.targetName());
-                case DELETE_CRASHLOOPING_PODS -> deleteCrashloopingPods(plan.targetNamespace(), plan.targetName());
-                case FORCE_RECREATE_DEPLOYMENT -> forceRecreateDeployment(plan.targetNamespace(), plan.targetName());
-                case CORDON_NODE             -> cordonNode(plan.targetName());
-                case DRAIN_NODE              -> drainNode(plan.targetNamespace(), plan.targetName());
-                case RESTART_VM              -> restartVm(plan.targetName());
-                default -> new RemediationExecutionResult(
-                        false,
-                        plan.targetName(),
-                        "Action type " + plan.actionType() + " is not directly executable by the Kubernetes remediation executor"
-                );
-            };
-        } catch (ApiException | IOException ex) {
-            logger.error("Remediation execution failed for {}/{}: {}", plan.targetNamespace(), plan.targetName(), ex.getMessage());
-            return new RemediationExecutionResult(false, plan.targetName(), ex.getMessage());
+        int maxAttempts = 3;
+        int attemptDelayMs = 500;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                RemediationExecutionResult result = switch (plan.actionType()) {
+                    case RESTART_POD              -> restartPod(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case SCALE_DEPLOYMENT         -> scaleDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case SCALE_DOWN               -> scaleDown(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case ROLLBACK_DEPLOYMENT      -> rollbackDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case DELETE_CRASHLOOPING_PODS -> deleteCrashloopingPods(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case FORCE_RECREATE_DEPLOYMENT -> forceRecreateDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case CORDON_NODE              -> cordonNode(plan.targetName(), dryRun);
+                    case DRAIN_NODE               -> drainNode(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case RESTART_VM               -> restartVm(plan.targetName());
+                    default -> new RemediationExecutionResult(
+                            false,
+                            plan.targetName(),
+                            "Action type " + plan.actionType() + " is not directly executable by the Kubernetes remediation executor"
+                    );
+                };
+                if (dryRun && result.success()) {
+                    return new RemediationExecutionResult(true, result.targetName(),
+                            "[DRY-RUN] " + result.message() + " — no change applied");
+                }
+                return result;
+            } catch (ApiException ex) {
+                int status = ex.getCode();
+                boolean transient_ = status == 429 || status == 500 || status == 503 || status == 0;
+                if (!transient_ || attempt == maxAttempts) {
+                    logger.error("Remediation failed for {}/{} (HTTP {}): {}",
+                            plan.targetNamespace(), plan.targetName(), status, ex.getMessage());
+                    return new RemediationExecutionResult(false, plan.targetName(), ex.getMessage());
+                }
+                logger.warn("Transient K8s API error (HTTP {}) for {}/{} — retry {}/{}",
+                        status, plan.targetNamespace(), plan.targetName(), attempt, maxAttempts - 1);
+                try { Thread.sleep((long) attemptDelayMs * attempt); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return new RemediationExecutionResult(false, plan.targetName(), "Interrupted during retry");
+                }
+            } catch (IOException ex) {
+                logger.error("Remediation IO error for {}/{}: {}", plan.targetNamespace(), plan.targetName(), ex.getMessage());
+                return new RemediationExecutionResult(false, plan.targetName(), ex.getMessage());
+            }
         }
+        return new RemediationExecutionResult(false, plan.targetName(), "All retry attempts exhausted");
     }
 
     @Override
@@ -139,6 +174,10 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
     }
 
     private RemediationExecutionResult restartPod(String namespace, String appLabel) throws ApiException, IOException {
+        return restartPod(namespace, appLabel, false);
+    }
+
+    private RemediationExecutionResult restartPod(String namespace, String appLabel, boolean dryRun) throws ApiException, IOException {
         ensureApis();
         List<V1Pod> pods = coreV1Api.listNamespacedPod(namespace)
                 .labelSelector("app=" + appLabel)
@@ -159,16 +198,21 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         }
 
         String podName = selectedPod.getMetadata().getName();
-        coreV1Api.deleteNamespacedPod(podName, namespace)
-                .gracePeriodSeconds(5)
-                .propagationPolicy("Background")
-                .body(new V1DeleteOptions())
-                .execute();
-
+        if (!dryRun) {
+            coreV1Api.deleteNamespacedPod(podName, namespace)
+                    .gracePeriodSeconds(5)
+                    .propagationPolicy("Background")
+                    .body(new V1DeleteOptions())
+                    .execute();
+        }
         return new RemediationExecutionResult(true, podName, "Deleted pod " + podName + " to trigger restart");
     }
 
     private RemediationExecutionResult scaleDeployment(String namespace, String deploymentName) throws ApiException, IOException {
+        return scaleDeployment(namespace, deploymentName, false);
+    }
+
+    private RemediationExecutionResult scaleDeployment(String namespace, String deploymentName, boolean dryRun) throws ApiException, IOException {
         ensureApis();
         V1Deployment deployment = appsV1Api.readNamespacedDeployment(deploymentName, namespace).execute();
         List<V1Pod> pods = coreV1Api.listNamespacedPod(namespace)
@@ -187,11 +231,13 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
 
         if (unreadyPod != null && unreadyPod.getMetadata() != null && unreadyPod.getMetadata().getName() != null) {
             String podName = unreadyPod.getMetadata().getName();
-            coreV1Api.deleteNamespacedPod(podName, namespace)
-                    .gracePeriodSeconds(5)
-                    .propagationPolicy("Background")
-                    .body(new V1DeleteOptions())
-                    .execute();
+            if (!dryRun) {
+                coreV1Api.deleteNamespacedPod(podName, namespace)
+                        .gracePeriodSeconds(5)
+                        .propagationPolicy("Background")
+                        .body(new V1DeleteOptions())
+                        .execute();
+            }
             return new RemediationExecutionResult(
                     true, deploymentName,
                     "Recycled unready pod " + podName + " before bounded scale-up to restore healthy capacity"
@@ -211,11 +257,13 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                             + properties.getMaxAutoScaleReplicas() + " replicas");
         }
 
-        V1Scale scale = appsV1Api.readNamespacedDeploymentScale(deploymentName, namespace).execute();
-        if (scale.getSpec() != null) {
-            scale.getSpec().replicas(desiredReplicas);
+        if (!dryRun) {
+            V1Scale scale = appsV1Api.readNamespacedDeploymentScale(deploymentName, namespace).execute();
+            if (scale.getSpec() != null) {
+                scale.getSpec().replicas(desiredReplicas);
+            }
+            appsV1Api.replaceNamespacedDeploymentScale(deploymentName, namespace, scale).execute();
         }
-        appsV1Api.replaceNamespacedDeploymentScale(deploymentName, namespace, scale).execute();
 
         return new RemediationExecutionResult(true, deploymentName,
                 "Scaled deployment " + deploymentName + " from " + currentReplicas + " to " + desiredReplicas);
@@ -224,6 +272,10 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
     // ── New actions ───────────────────────────────────────────────────────────
 
     private RemediationExecutionResult scaleDown(String namespace, String deploymentName) throws ApiException, IOException {
+        return scaleDown(namespace, deploymentName, false);
+    }
+
+    private RemediationExecutionResult scaleDown(String namespace, String deploymentName, boolean dryRun) throws ApiException, IOException {
         ensureApis();
         V1Deployment deployment = appsV1Api.readNamespacedDeployment(deploymentName, namespace).execute();
         int currentReplicas = deployment.getSpec() != null && deployment.getSpec().getReplicas() != null
@@ -235,17 +287,23 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                     "Cannot scale down below 1 replica — " + deploymentName + " is already at " + currentReplicas);
         }
 
-        V1Scale scale = appsV1Api.readNamespacedDeploymentScale(deploymentName, namespace).execute();
-        if (scale.getSpec() != null) {
-            scale.getSpec().replicas(desiredReplicas);
+        if (!dryRun) {
+            V1Scale scale = appsV1Api.readNamespacedDeploymentScale(deploymentName, namespace).execute();
+            if (scale.getSpec() != null) {
+                scale.getSpec().replicas(desiredReplicas);
+            }
+            appsV1Api.replaceNamespacedDeploymentScale(deploymentName, namespace, scale).execute();
         }
-        appsV1Api.replaceNamespacedDeploymentScale(deploymentName, namespace, scale).execute();
 
         return new RemediationExecutionResult(true, deploymentName,
                 "Scaled down deployment " + deploymentName + " from " + currentReplicas + " to " + desiredReplicas);
     }
 
     private RemediationExecutionResult rollbackDeployment(String namespace, String deploymentName) throws ApiException, IOException {
+        return rollbackDeployment(namespace, deploymentName, false);
+    }
+
+    private RemediationExecutionResult rollbackDeployment(String namespace, String deploymentName, boolean dryRun) throws ApiException, IOException {
         ensureApis();
         V1Deployment deployment = appsV1Api.readNamespacedDeployment(deploymentName, namespace).execute();
 
@@ -297,7 +355,9 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                     .put("deployment.kubernetes.io/revision", String.valueOf(currentRevision + 1));
         }
 
-        appsV1Api.replaceNamespacedDeployment(deploymentName, namespace, deployment).execute();
+        if (!dryRun) {
+            appsV1Api.replaceNamespacedDeployment(deploymentName, namespace, deployment).execute();
+        }
 
         logger.info("Rolled back deployment {}/{} to revision {}", namespace, deploymentName, targetRevision);
         return new RemediationExecutionResult(true, deploymentName,
@@ -306,6 +366,10 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
     }
 
     private RemediationExecutionResult deleteCrashloopingPods(String namespace, String appLabel) throws ApiException, IOException {
+        return deleteCrashloopingPods(namespace, appLabel, false);
+    }
+
+    private RemediationExecutionResult deleteCrashloopingPods(String namespace, String appLabel, boolean dryRun) throws ApiException, IOException {
         ensureApis();
         List<V1Pod> pods = coreV1Api.listNamespacedPod(namespace)
                 .labelSelector("app=" + appLabel)
@@ -316,12 +380,14 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         for (V1Pod pod : pods) {
             if (isCrashLooping(pod) && pod.getMetadata() != null && pod.getMetadata().getName() != null) {
                 String podName = pod.getMetadata().getName();
-                coreV1Api.deleteNamespacedPod(podName, namespace)
-                        .gracePeriodSeconds(0)
-                        .propagationPolicy("Background")
-                        .body(new V1DeleteOptions())
-                        .execute();
-                logger.info("Deleted crash-looping pod {}/{}", namespace, podName);
+                if (!dryRun) {
+                    coreV1Api.deleteNamespacedPod(podName, namespace)
+                            .gracePeriodSeconds(0)
+                            .propagationPolicy("Background")
+                            .body(new V1DeleteOptions())
+                            .execute();
+                    logger.info("Deleted crash-looping pod {}/{}", namespace, podName);
+                }
                 deleted++;
             }
         }
@@ -335,39 +401,52 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
     }
 
     private RemediationExecutionResult forceRecreateDeployment(String namespace, String deploymentName) throws ApiException, IOException {
+        return forceRecreateDeployment(namespace, deploymentName, false);
+    }
+
+    private RemediationExecutionResult forceRecreateDeployment(String namespace, String deploymentName, boolean dryRun) throws ApiException, IOException {
         ensureApis();
-        // Trigger a rolling restart by patching the restart annotation (equivalent to kubectl rollout restart)
         String timestamp = Instant.now().toString();
         String body = String.format(
                 "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kubectl.kubernetes.io/restartedAt\":\"%s\"}}}}}",
                 timestamp
         );
-        appsV1Api.patchNamespacedDeployment(deploymentName, namespace, new V1Patch(body)).execute();
-
-        logger.info("Force-recreated deployment {}/{} at {}", namespace, deploymentName, timestamp);
+        if (!dryRun) {
+            appsV1Api.patchNamespacedDeployment(deploymentName, namespace, new V1Patch(body)).execute();
+            logger.info("Force-recreated deployment {}/{} at {}", namespace, deploymentName, timestamp);
+        }
         return new RemediationExecutionResult(true, deploymentName,
                 "Triggered rolling restart of all pods in deployment " + deploymentName);
     }
 
     private RemediationExecutionResult cordonNode(String nodeName) throws ApiException, IOException {
-        ensureApis();
-        String body = "{\"spec\":{\"unschedulable\":true}}";
-        coreV1Api.patchNode(nodeName, new V1Patch(body)).execute();
+        return cordonNode(nodeName, false);
+    }
 
-        logger.info("Cordoned node {}", nodeName);
+    private RemediationExecutionResult cordonNode(String nodeName, boolean dryRun) throws ApiException, IOException {
+        ensureApis();
+        if (!dryRun) {
+            String body = "{\"spec\":{\"unschedulable\":true}}";
+            coreV1Api.patchNode(nodeName, new V1Patch(body)).execute();
+            logger.info("Cordoned node {}", nodeName);
+        }
         return new RemediationExecutionResult(true, nodeName,
                 "Node " + nodeName + " cordoned — no new pods will be scheduled on it");
     }
 
     private RemediationExecutionResult drainNode(String namespace, String nodeName) throws ApiException, IOException {
+        return drainNode(namespace, nodeName, false);
+    }
+
+    private RemediationExecutionResult drainNode(String namespace, String nodeName, boolean dryRun) throws ApiException, IOException {
         ensureApis();
 
-        // Step 1: cordon the node
-        String cordonBody = "{\"spec\":{\"unschedulable\":true}}";
-        coreV1Api.patchNode(nodeName, new V1Patch(cordonBody)).execute();
-        logger.info("Cordoned node {} before drain", nodeName);
+        if (!dryRun) {
+            String cordonBody = "{\"spec\":{\"unschedulable\":true}}";
+            coreV1Api.patchNode(nodeName, new V1Patch(cordonBody)).execute();
+            logger.info("Cordoned node {} before drain", nodeName);
+        }
 
-        // Step 2: delete all evictable pods on this node (excluding DaemonSet and static pods)
         List<V1Pod> allPods = coreV1Api.listPodForAllNamespaces()
                 .fieldSelector("spec.nodeName=" + nodeName)
                 .execute()
@@ -383,17 +462,19 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
             if (podNamespace == null || podName == null) {
                 continue;
             }
-            try {
-                coreV1Api.deleteNamespacedPod(podName, podNamespace)
-                        .gracePeriodSeconds(30)
-                        .propagationPolicy("Background")
-                        .body(new V1DeleteOptions())
-                        .execute();
-                logger.info("Evicted pod {}/{} from node {}", podNamespace, podName, nodeName);
-                evicted++;
-            } catch (ApiException ex) {
-                logger.warn("Could not evict pod {}/{}: {}", podNamespace, podName, ex.getMessage());
+            if (!dryRun) {
+                try {
+                    coreV1Api.deleteNamespacedPod(podName, podNamespace)
+                            .gracePeriodSeconds(30)
+                            .propagationPolicy("Background")
+                            .body(new V1DeleteOptions())
+                            .execute();
+                    logger.info("Evicted pod {}/{} from node {}", podNamespace, podName, nodeName);
+                } catch (ApiException ex) {
+                    logger.warn("Could not evict pod {}/{}: {}", podNamespace, podName, ex.getMessage());
+                }
             }
+            evicted++;
         }
 
         return new RemediationExecutionResult(true, nodeName,

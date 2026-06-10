@@ -6,6 +6,7 @@ import com.orange.pfe.backend.dto.AIPredictResponse;
 import com.orange.pfe.backend.exception.AIOpsIntegrationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -40,10 +41,17 @@ public class AIOpsClientService {
 
     public AIOpsClientService(
             RestClient.Builder builder,
-            @Value("${aiops.service.base-url}") String baseUrl
+            @Value("${aiops.service.base-url}") String baseUrl,
+            @Value("${aiops.service.api-key:}") String apiKey
     ) {
         this.restClient = builder
                 .baseUrl(baseUrl)
+                .requestInterceptor((req, body, execution) -> {
+                    String traceId = MDC.get("traceId");
+                    if (traceId != null) req.getHeaders().set("X-Request-ID", traceId);
+                    if (apiKey != null && !apiKey.isBlank()) req.getHeaders().set("X-API-Key", apiKey);
+                    return execution.execute(req, body);
+                })
                 .build();
     }
 

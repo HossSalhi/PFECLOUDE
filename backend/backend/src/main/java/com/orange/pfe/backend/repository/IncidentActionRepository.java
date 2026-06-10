@@ -62,4 +62,21 @@ public interface IncidentActionRepository extends JpaRepository<IncidentAction, 
             @Param("targetName") String targetName,
             @Param("cutoff") LocalDateTime cutoff
     );
+
+    /**
+     * Returns the incident type of the most recent action for a target (used for smart cooldown:
+     * if the new incident type differs from the last one, the cooldown is bypassed).
+     */
+    @Query("""
+            SELECT action.incident.incidentType
+            FROM IncidentAction action
+            WHERE action.targetNamespace = :namespace
+              AND action.targetName = :targetName
+            ORDER BY action.createdAt DESC
+            LIMIT 1
+            """)
+    String findLastIncidentTypeForTarget(
+            @Param("namespace") String namespace,
+            @Param("targetName") String targetName
+    );
 }

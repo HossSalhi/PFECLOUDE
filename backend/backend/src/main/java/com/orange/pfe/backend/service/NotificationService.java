@@ -30,8 +30,15 @@ public class NotificationService {
     @Value("${notification.webhook.url:}")
     private String webhookUrl;
 
+    @Value("${notification.webhook.pagerduty-routing-key:}")
+    private String pagerdutyRoutingKey;
+
     @Value("${notification.webhook.enabled:false}")
     private boolean enabled;
+
+    /** slack (default) | teams | pagerduty | generic */
+    @Value("${notification.webhook.type:slack}")
+    private String webhookType;
 
     @Value("${notification.min-severity:HIGH}")
     private String minSeverity;
@@ -59,7 +66,7 @@ public class NotificationService {
                 "description", incident.getDescription() != null ? incident.getDescription() : ""
         ));
         if (!shouldNotify(incident.getSeverity())) return;
-        sendWebhook(buildWebhookPayload(incident, "🚨 Nouvel incident détecté"));
+        sendWebhook(buildTypedWebhookPayload(incident, "🚨 Nouvel incident détecté"));
         emailService.ifPresent(e -> e.sendIncidentDetected(incident));
     }
 
@@ -77,7 +84,7 @@ public class NotificationService {
                 "id",    incident.getId(),
                 "title", incident.getTitle()
         ));
-        sendWebhook(buildWebhookPayload(incident, "⚠️ Escalade — approbation humaine requise"));
+        sendWebhook(buildTypedWebhookPayload(incident, "⚠️ Escalade — approbation humaine requise"));
         emailService.ifPresent(e -> e.sendApprovalRequired(incident));
     }
 
@@ -87,7 +94,7 @@ public class NotificationService {
                 "title",  incident.getTitle(),
                 "status", "RESOLVED"
         ));
-        sendWebhook(buildWebhookPayload(incident, "✅ Incident résolu"));
+        sendWebhook(buildTypedWebhookPayload(incident, "✅ Incident résolu"));
         emailService.ifPresent(e -> e.sendIncidentResolved(incident));
     }
 
@@ -97,7 +104,7 @@ public class NotificationService {
                 "title",  incident.getTitle(),
                 "reason", reason != null ? reason : "unknown"
         ));
-        sendWebhook(buildWebhookPayload(incident, "❌ Remédiation échouée — " + reason));
+        sendWebhook(buildTypedWebhookPayload(incident, "❌ Remédiation échouée — " + reason));
         emailService.ifPresent(e -> e.sendRemediationFailed(incident, reason));
     }
 
@@ -109,7 +116,7 @@ public class NotificationService {
                 "incidentId", incident.getId(),
                 "severity",  incident.getSeverity() != null ? incident.getSeverity().name() : "UNKNOWN"
         ));
-        sendWebhook(buildWebhookPayload(incident, "⏳ Tâche humaine en attente — " + task.getTaskName()));
+        sendWebhook(buildTypedWebhookPayload(incident, "⏳ Tâche humaine en attente — " + task.getTaskName()));
         emailService.ifPresent(e -> e.sendHumanTaskCreated(task));
     }
 
@@ -165,6 +172,71 @@ public class NotificationService {
                         )
                 )
         ));
+    }
+
+    private Map<String, Object> buildTypedWebhookPayload(Incident incident, String header) {
+        return switch (webhookType == null ? "slack" : webhookType.toLowerCase()) {
+            case "teams"     -> buildTeamsPayload(incident, header);
+            case "pagerduty" -> buildPagerDutyPayload(incident, header);
+            case "generic"   -> buildGenericPayload(incident, header);
+            default          -> buildWebhookPayload(incident, header);
+        };
+    }
+
+    /** Microsoft Teams Incoming Webhook — MessageCard format */
+    private Map<String, Object> buildTeamsPayload(Incident incident, String header) {
+        String color = incident.getSeverity() == IncidentSeverity.CRITICAL ? "FF0000" : "FFA500";
+        return Map.of(
+                "@type", "MessageCard",
+                "@context", "http://schema.org/extensions",
+                "summary", header,
+                "themeColor", color,
+                "title", "HELIOS — " + header,
+                "text", incident.getDescription() != null ? incident.getDescription() : "",
+                "sections", List.of(Map.of("facts", List.of(
+                        Map.of("name", "Incident ID",  "value", String.valueOf(incident.getId())),
+                        Map.of("name", "Sévérité",     "value", incident.getSeverity() != null ? incident.getSeverity().name() : "N/A"),
+                        Map.of("name", "Statut",       "value", incident.getStatus()   != null ? incident.getStatus().name()   : "N/A"),
+                        Map.of("name", "Namespace",    "value", incident.getNamespace() != null ? incident.getNamespace()      : "N/A"),
+                        Map.of("name", "App",          "value", incident.getApp()       != null ? incident.getApp()            : "N/A")
+                )))
+        );
+    }
+
+    /** PagerDuty Events API v2 — trigger event */
+    private Map<String, Object> buildPagerDutyPayload(Incident incident, String header) {
+        String pdSeverity = incident.getSeverity() == IncidentSeverity.CRITICAL ? "critical"
+                : incident.getSeverity() == IncidentSeverity.HIGH ? "error" : "warning";
+        return Map.of(
+                "routing_key", pagerdutyRoutingKey != null ? pagerdutyRoutingKey : "",
+                "event_action", "trigger",
+                "payload", Map.of(
+                        "summary", header + " — " + incident.getTitle(),
+                        "severity", pdSeverity,
+                        "source", "HELIOS/K8s",
+                        "custom_details", Map.of(
+                                "incidentId", incident.getId(),
+                                "namespace",  incident.getNamespace() != null ? incident.getNamespace() : "",
+                                "app",        incident.getApp()       != null ? incident.getApp()       : "",
+                                "status",     incident.getStatus()    != null ? incident.getStatus().name() : ""
+                        )
+                )
+        );
+    }
+
+    /** Generic flat JSON — works with any webhook consumer */
+    private Map<String, Object> buildGenericPayload(Incident incident, String header) {
+        return Map.of(
+                "source",      "HELIOS",
+                "header",      header,
+                "incidentId",  incident.getId(),
+                "title",       incident.getTitle(),
+                "description", incident.getDescription() != null ? incident.getDescription() : "",
+                "severity",    incident.getSeverity()  != null ? incident.getSeverity().name()  : "N/A",
+                "status",      incident.getStatus()    != null ? incident.getStatus().name()    : "N/A",
+                "namespace",   incident.getNamespace() != null ? incident.getNamespace()        : "",
+                "app",         incident.getApp()       != null ? incident.getApp()              : ""
+        );
     }
 
     private void sendWebhook(Map<String, Object> payload) {

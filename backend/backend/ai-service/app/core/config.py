@@ -45,10 +45,12 @@ class Settings(BaseSettings):
     drift_history_path: str = "model_artifacts/drift_history.json"
     model_registry_file: str = "model_artifacts/model_registry.json"
     model_registry_dir: str = "model_artifacts/registry"
-    retrain_trigger_incidents: int = 50
+    retrain_trigger_incidents: int = 25
     ab_test_sample_target: int = 100
     ab_test_auto_promote: bool = True
     dataset_path: str = "datasets/aiops_training_dataset.csv"
+    # Minimum resolved incidents required to trigger LLM fine-tuning
+    llm_retrain_min_incidents: int = 20
 
     # Autonomous monitor — iacamunda independently monitors the entire K8s cluster
     autonomous_monitor_enabled: bool = True
@@ -56,9 +58,19 @@ class Settings(BaseSettings):
     autonomous_monitor_cooldown_minutes: int = 15
     # Comma-separated namespaces to monitor (empty = all non-system namespaces)
     autonomous_monitor_namespaces: str = ""
-    # Comma-separated container/app names to NEVER auto-monitor — HELIOS's own stack,
-    # so the platform doesn't raise incidents against itself (unprofessional + false positives).
-    autonomous_monitor_exclude_apps: str = "backend,frontend,chromadb,postgres,prometheus-incluster,grafana,loki,prometheus,ollama,camunda,ai-service,alertmanager,node-exporter,kube-state-metrics"
+    # Comma-separated container/app names to NEVER auto-monitor.
+    # Infra/monitoring components (grafana, loki, prometheus, …) are excluded to avoid
+    # false positives from HELIOS's own stack; backend/frontend ARE intentionally monitored
+    # so HELIOS can detect incidents in its own K8s deployments.
+    autonomous_monitor_exclude_apps: str = "chromadb,postgres,prometheus-incluster,prometheus,ollama,camunda,ai-service,alertmanager,node-exporter,kube-state-metrics"
+
+    # When True the monitor loop skips analysis and does not create incidents.
+    # Toggle at runtime via POST /monitor/maintenance without restarting the service.
+    maintenance_mode: bool = False
+
+    # Service-to-service API key (set AIOPS_API_KEY env var).
+    # When non-empty every request must carry X-API-Key: <value>.
+    api_key: str = ""
     # Comma-separated K8s worker/master IPs for NodePort access to the backend
     autonomous_monitor_backend_ips: str = "192.168.148.158,192.168.148.153,192.168.148.155"
     autonomous_monitor_username: str = "admin"
