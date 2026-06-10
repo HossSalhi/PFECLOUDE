@@ -92,19 +92,23 @@ def predict(request: PredictRequest) -> PredictResponse:
 def learn(request: LearnRequest) -> LearnResponse:
     """Store a resolved incident outcome in ChromaDB for future in-context learning."""
     predictor = get_predictor_service()
-    stored = predictor.learn(
-        features=request.features,
-        incident_type=request.incident_type,
-        severity=request.severity,
-        action=request.action,
-        executable=request.executable,
-        success=request.success,
-        minutes_to_resolve=request.minutes_to_resolve,
-        app=request.app,
-        namespace=request.namespace,
-        confidence=request.confidence,
-    )
-    return LearnResponse(stored=stored, memory_count=predictor.memory_count())
+    try:
+        stored = predictor.learn(
+            features=request.features,
+            incident_type=request.incident_type,
+            severity=request.severity,
+            action=request.action,
+            executable=request.executable,
+            success=request.success,
+            minutes_to_resolve=request.minutes_to_resolve,
+            app=request.app,
+            namespace=request.namespace,
+            confidence=request.confidence,
+        )
+        return LearnResponse(stored=stored, memory_count=predictor.memory_count())
+    except Exception as exc:
+        logger.exception("Learn failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal learn error — see service logs") from exc
 
 
 @router.get("/memory/stats")

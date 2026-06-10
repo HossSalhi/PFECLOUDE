@@ -142,8 +142,10 @@ class AutonomousMonitor:
                 for (ns, app), expires in self._cooldowns.items()
                 if expires > now_mono
             }
-            with open(self._cooldown_file, "w") as f:
+            tmp = self._cooldown_file + ".tmp"
+            with open(tmp, "w") as f:
                 json.dump(serialisable, f)
+            os.replace(tmp, self._cooldown_file)
         except Exception as exc:
             logger.warning("Could not save cooldown state: %s", exc)
 
@@ -476,7 +478,7 @@ class AutonomousMonitor:
             base = f"http://{ip}:30880"
             try:
                 async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get(f"{base}/api/incidents?page=0&size=500", headers=headers)
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=2000", headers=headers)
                     if resp.status_code == 401:
                         # JWT expired server-side before our estimate — clear cache
                         self._jwt_token = None
@@ -565,7 +567,7 @@ class AutonomousMonitor:
             base = f"http://{ip}:30880"
             try:
                 async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get(f"{base}/api/incidents?page=0&size=500", headers=headers)
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=2000", headers=headers)
                     if resp.status_code == 401:
                         self._jwt_token = None
                         self._jwt_expires_at = 0.0

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,7 @@ class AutoTrainer:
         self._last_harvest_ts: float = 0.0
         self._new_incidents: int = 0
         self._is_training: bool = False
+        self._train_lock = threading.Lock()
         self._last_retrain: dict[str, Any] | None = self._load_last_retrain()
 
     @property
@@ -105,9 +107,8 @@ class AutoTrainer:
         Full retraining pipeline (blocking).
         Returns result dict with status, metrics, and version info.
         """
-        if self._is_training:
+        if not self._train_lock.acquire(blocking=False):
             return {"status": "already_training", "skipped": True}
-
         self._is_training = True
         started_at = time.time()
         result: dict[str, Any] = {"started_at": started_at, "trigger": trigger}
@@ -199,6 +200,7 @@ class AutoTrainer:
             result.update({"status": "failed", "error": str(exc)})
         finally:
             self._is_training = False
+            self._train_lock.release()
 
         return result
 
@@ -242,7 +244,15 @@ class AutoTrainer:
             def _drain(p: subprocess.Popen) -> None:
                 for line in p.stdout:
                     logger.info("[llm-finetune] %s", line.rstrip())
-                p.wait()
+                try:
+                    p.wait(timeout=3600)
+                except subprocess.TimeoutExpired:
+                    logger.error(
+                        "LLM fine-tuning subprocess timed out after 1 hour — killing it"
+                    )
+                    p.kill()
+                    p.wait()
+                    return
                 if p.returncode == 0:
                     logger.info("LLM fine-tuning subprocess completed successfully")
                 else:
@@ -354,7 +364,7 @@ class AutoTrainer:
 
         # Incident (binary)
         clf_i = xgb.XGBClassifier(**params, eval_metric="logloss")
-        scores_i = cross_val_score(clf_i, X, y_incident, cv=5, scoring="f1_macro")
+        scores_i = cross_val_score(clf_i, X, y_incident, cv=5, scoring="f1_macro", n_jobs=-1)
         clf_i.fit(X, y_incident)
         models["incident"] = clf_i
         metrics["f1_incident"] = round(float(scores_i.mean()), 4)
@@ -367,7 +377,7 @@ class AutoTrainer:
             objective="multi:softmax",
             num_class=len(le_sev.classes_),
         )
-        scores_s = cross_val_score(clf_s, X, y_sev_enc, cv=5, scoring="f1_macro")
+        scores_s = cross_val_score(clf_s, X, y_sev_enc, cv=5, scoring="f1_macro", n_jobs=-1)
         clf_s.fit(X, y_sev_enc)
         models["severity"] = clf_s
         metrics["f1_severity"] = round(float(scores_s.mean()), 4)
@@ -380,7 +390,7 @@ class AutoTrainer:
             objective="multi:softmax",
             num_class=len(le_act.classes_),
         )
-        scores_a = cross_val_score(clf_a, X, y_act_enc, cv=5, scoring="f1_macro")
+        scores_a = cross_val_score(clf_a, X, y_act_enc, cv=5, scoring="f1_macro", n_jobs=-1)
         clf_a.fit(X, y_act_enc)
         models["action"] = clf_a
         metrics["f1_action"] = round(float(scores_a.mean()), 4)

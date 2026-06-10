@@ -50,6 +50,40 @@ class PlanOption:
 
 
 class InferenceEngine:
+    # Class-level constants — built once at class definition time, never per-call.
+    _SPECIALIST_TYPES = [
+        "NO_INCIDENT", "POD_CRASH_LOOP", "POD_OOM_KILLED", "POD_IMAGE_PULL_BACKOFF",
+        "POD_PENDING_INSUFFICIENT_RESOURCES", "POD_STUCK_TERMINATING", "POD_LIVENESS_FAILURE",
+        "POD_READINESS_FAILURE", "POD_INIT_CONTAINER_FAILURE", "NODE_NOT_READY", "NODE_DISK_FULL",
+        "NODE_HIGH_CPU", "NODE_HIGH_MEMORY", "NODE_KUBELET_DOWN", "NODE_HARDWARE_FAILURE",
+        "NODE_CLOCK_SKEW", "NODE_DISK_IO_SATURATION", "DB_CONNECTION_REFUSED", "DB_DEADLOCK",
+        "DB_REPLICATION_LAG", "DB_SLOW_QUERIES", "DB_DISK_FULL", "DB_HIGH_WRITE_LOAD",
+        "DB_CONNECTION_POOL_EXHAUSTION", "NETWORK_DNS_FAILURE", "NETWORK_PARTITION",
+        "NETWORK_PACKET_LOSS", "NETWORK_LATENCY_BETWEEN_NODES", "INGRESS_BACKEND_DOWN",
+        "SERVICE_DISCOVERY_FAILURE", "AUTH_TOKEN_EXPIRED", "AUTH_BRUTE_FORCE_ATTEMPT",
+        "UNAUTHORIZED_API_ACCESS_SPIKE", "TLS_CERTIFICATE_EXPIRY", "SECRET_ROTATION_FAILURE",
+        "PVC_PENDING", "PVC_USAGE_HIGH", "PV_FILESYSTEM_CORRUPTION", "HIGH_LATENCY_P95",
+        "HIGH_LATENCY_P99", "ERROR_RATE_4XX_SPIKE", "ERROR_RATE_5XX_SPIKE", "REQUEST_RATE_DROP",
+        "CIRCUIT_BREAKER_OPEN", "THREAD_POOL_EXHAUSTION", "MEMORY_LEAK", "CPU_SATURATION",
+        "EXTERNAL_API_DEPENDENCY_DOWN", "METRICS_SCRAPE_FAILURE", "PROMETHEUS_OUT_OF_MEMORY",
+        "LOKI_INGESTION_LAG", "UNKNOWN_ANOMALY",
+    ]
+    _SPECIALIST_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "incident_type": {"type": "string", "enum": _SPECIALIST_TYPES},
+            "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+            "recommended_action": {"type": "string"},
+            "explanation": {"type": "string"},
+        },
+        "required": ["incident_type", "severity", "recommended_action"],
+    }
+    _SPECIALIST_SYS = (
+        "You are an SRE incident classifier. Given a trace, output the single best "
+        "incident_type from the allowed list, its severity, a recommended_action, "
+        "and a one-line explanation. JSON only."
+    )
+
     def __init__(self, model_bundle: ModelBundle, settings=None) -> None:
         self.model_bundle = model_bundle
         # LLM model names — read from settings so they can be changed without code edits.
@@ -810,46 +844,13 @@ class InferenceEngine:
         Returns a small dict recorded in decision_context, or None on hard failure."""
         try:
             import httpx as _httpx, json as _json, re as _re
-            # Grammar-constrained decoding: the model is FORCED to emit valid JSON whose
-            # incident_type is one of the 52 taxonomy classes (no hallucinated types, no broken
-            # schema). Few-shot examples teach the format + the exact action vocabulary.
-            _TYPES = [
-                "NO_INCIDENT", "POD_CRASH_LOOP", "POD_OOM_KILLED", "POD_IMAGE_PULL_BACKOFF",
-                "POD_PENDING_INSUFFICIENT_RESOURCES", "POD_STUCK_TERMINATING", "POD_LIVENESS_FAILURE",
-                "POD_READINESS_FAILURE", "POD_INIT_CONTAINER_FAILURE", "NODE_NOT_READY", "NODE_DISK_FULL",
-                "NODE_HIGH_CPU", "NODE_HIGH_MEMORY", "NODE_KUBELET_DOWN", "NODE_HARDWARE_FAILURE",
-                "NODE_CLOCK_SKEW", "NODE_DISK_IO_SATURATION", "DB_CONNECTION_REFUSED", "DB_DEADLOCK",
-                "DB_REPLICATION_LAG", "DB_SLOW_QUERIES", "DB_DISK_FULL", "DB_HIGH_WRITE_LOAD",
-                "DB_CONNECTION_POOL_EXHAUSTION", "NETWORK_DNS_FAILURE", "NETWORK_PARTITION",
-                "NETWORK_PACKET_LOSS", "NETWORK_LATENCY_BETWEEN_NODES", "INGRESS_BACKEND_DOWN",
-                "SERVICE_DISCOVERY_FAILURE", "AUTH_TOKEN_EXPIRED", "AUTH_BRUTE_FORCE_ATTEMPT",
-                "UNAUTHORIZED_API_ACCESS_SPIKE", "TLS_CERTIFICATE_EXPIRY", "SECRET_ROTATION_FAILURE",
-                "PVC_PENDING", "PVC_USAGE_HIGH", "PV_FILESYSTEM_CORRUPTION", "HIGH_LATENCY_P95",
-                "HIGH_LATENCY_P99", "ERROR_RATE_4XX_SPIKE", "ERROR_RATE_5XX_SPIKE", "REQUEST_RATE_DROP",
-                "CIRCUIT_BREAKER_OPEN", "THREAD_POOL_EXHAUSTION", "MEMORY_LEAK", "CPU_SATURATION",
-                "EXTERNAL_API_DEPENDENCY_DOWN", "METRICS_SCRAPE_FAILURE", "PROMETHEUS_OUT_OF_MEMORY",
-                "LOKI_INGESTION_LAG", "UNKNOWN_ANOMALY",
-            ]
-            _schema = {
-                "type": "object",
-                "properties": {
-                    "incident_type": {"type": "string", "enum": _TYPES},
-                    "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-                    "recommended_action": {"type": "string"},
-                    "explanation": {"type": "string"},
-                },
-                "required": ["incident_type", "severity", "recommended_action"],
-            }
-            _sys = ("You are an SRE incident classifier. Given a trace, output the single best "
-                    "incident_type from the allowed list, its severity, a recommended_action, "
-                    "and a one-line explanation. JSON only.")
             with _httpx.Client(timeout=self._llm_timeout) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
                         "model": self._llm_specialist_model,
                         "messages": [
-                            {"role": "system", "content": _sys},
+                            {"role": "system", "content": self._SPECIALIST_SYS},
                             {"role": "user", "content": "Trace shows: 7 restarts in window; container waiting CrashLoopBackOff; last termination Error. Pick the best type and action."},
                             {"role": "assistant", "content": '{"incident_type":"POD_CRASH_LOOP","severity":"HIGH","recommended_action":"DELETE_CRASHLOOPING_PODS","explanation":"Container restarts in a loop; delete the pods for a clean restart."}'},
                             {"role": "user", "content": "Trace shows: last termination OOMKilled; memory at the limit. Pick the best type and action."},
@@ -859,7 +860,7 @@ class InferenceEngine:
                             {"role": "user", "content": f"Trace shows: {evidence}. Pick the best type and action."},
                         ],
                         "stream": False,
-                        "format": _schema,  # forces a valid type from the 52 (grammar-constrained)
+                        "format": self._SPECIALIST_SCHEMA,  # forces a valid type from the 52 (grammar-constrained)
                         "options": {"temperature": 0.0, "repeat_penalty": 1.2, "num_predict": 200},
                     },
                 )
