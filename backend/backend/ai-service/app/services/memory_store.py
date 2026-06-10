@@ -158,8 +158,10 @@ class ChromaMemoryStore:
         if not self._available:
             return
         try:
+            # Use microsecond precision to avoid doc_id collisions between incidents
+            # that share the same type/action but occur within the same second.
             doc_id = hashlib.sha256(
-                f"{memory.incident_type}:{memory.action}:{memory.timestamp:.0f}".encode()
+                f"{memory.incident_type}:{memory.action}:{memory.timestamp:.6f}".encode()
             ).hexdigest()[:16]
             vector = _build_vector(features)
             metadata = {

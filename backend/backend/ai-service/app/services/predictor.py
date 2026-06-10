@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import math
 import re
@@ -284,14 +285,28 @@ class PredictorService:
         return self.memory_store.count()
 
     def _collect_root_cause(self, namespace: str, app: str) -> str | None:
-        """Query kube-state-metrics 'reason' series for the REAL Kubernetes root cause of an
-        incident (ImagePullBackOff, ErrImagePull, CrashLoopBackOff, CreateContainerConfigError,
-        OOMKilled, Evicted, ...). Returns a short human string or None. Best-effort and durable
-        for any app/incident: it reads standard KSM metrics, not app-specific signals."""
+        """Query kube-state-metrics for the REAL Kubernetes root cause of an incident.
+        Bounded by an overall timeout (2× prometheus_timeout_seconds) to prevent
+        thread starvation when Prometheus is slow."""
         if not self.settings.enable_upstream_queries:
             return None
         if not (_SAFE_LABEL.match(namespace or "") and _SAFE_LABEL.match(app or "")):
             return None
+
+        overall_timeout = self.settings.prometheus_timeout_seconds * 2.0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._collect_root_cause_impl, namespace, app)
+            try:
+                return future.result(timeout=overall_timeout)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "root-cause collection timed out after %.0fs for %s/%s",
+                    overall_timeout, namespace, app,
+                )
+                return None
+
+    def _collect_root_cause_impl(self, namespace: str, app: str) -> str | None:
+        """Inner implementation — called inside a bounded ThreadPoolExecutor by _collect_root_cause."""
         pod_re = f"{app}-.*"
         ignore = {"ContainerCreating", "PodInitializing", "Completed", ""}
         parts: list[str] = []
@@ -316,11 +331,8 @@ class PredictorService:
             pod_reason = _reasons("kube_pod_status_reason")
             if pod_reason:
                 parts.append("pod status: " + ", ".join(pod_reason))
-            # Node-level fallback (covers NODE_NOT_READY / a VM going down): name the
-            # NotReady node(s) and the underlying pressure condition when present.
+            # Node-level fallback: detect VM/node power-off
             if not parts:
-                # A node that is powered off / unreachable reports Ready=Unknown (not False);
-                # a node whose kubelet is up but unhealthy reports Ready=False. Catch both.
                 notready = self.prometheus_client.query_raw(
                     'kube_node_status_condition{condition="Ready",status=~"false|unknown"} == 1'
                 )

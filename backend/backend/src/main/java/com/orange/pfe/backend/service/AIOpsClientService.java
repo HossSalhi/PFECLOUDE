@@ -94,9 +94,9 @@ public class AIOpsClientService {
         Instant opened = openedAt.get();
         if (opened == null) return false;
         if (Instant.now().isAfter(opened.plusMillis(circuitBreakerOpenMs))) {
-            // half-open: allow one probe through
-            openedAt.set(null);
-            return false;
+            // half-open: exactly ONE thread wins the probe slot via CAS.
+            // If CAS fails, another thread already claimed the probe — stay "open" for this caller.
+            return !openedAt.compareAndSet(opened, null);
         }
         return true;
     }

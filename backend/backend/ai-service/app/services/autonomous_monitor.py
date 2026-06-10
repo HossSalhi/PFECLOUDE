@@ -8,12 +8,13 @@ and triggers backend incident creation when anomalies are detected.
 Cycle:
   1. Query Prometheus for all active (namespace, container) pairs
   2. For each app: ProactiveService.predict_proactive()
-  3. Multi-signal correlation: if 2+ metrics breach threshold simultaneously
+  3. Debounce: anomaly must persist for autonomous_monitor_anomaly_streak consecutive cycles
+  4. Multi-signal correlation: if 2+ apps in the same namespace are anomalous
      → emit single MULTI_SIGNAL_DEGRADATION instead of N separate incidents
-  4. If severity HIGH/CRITICAL predicted: POST /api/ai/predict to backend
-  5. Backend creates incident → triggers Camunda workflow → SSE notification
-  6. Prometheus watchdog: if Prometheus itself is unreachable → VM_DOWN incident
-  7. Orphan cleanup: close IN_PROGRESS incidents whose app no longer exists in Prometheus
+  5. If severity HIGH/CRITICAL predicted: POST /api/ai/predict to backend (all IPs in parallel)
+  6. Backend creates incident → triggers Camunda workflow → SSE notification
+  7. Prometheus watchdog: if Prometheus itself is unreachable → VM_DOWN incident
+  8. Orphan cleanup: close IN_PROGRESS incidents whose app no longer exists in Prometheus
 """
 
 import asyncio
@@ -38,6 +39,11 @@ _SYSTEM_NAMESPACES = frozenset({
     "monitoring", "cert-manager", "ingress-nginx",
     "local-path-storage", "metallb-system", "cnpg-system",
 })
+
+# Proactive JWT refresh: re-acquire 5 minutes before the local cache expires.
+# The backend JWT is 24 h; we refresh every 50 min so the token is never stale.
+_JWT_CACHE_SECONDS = 50 * 60
+_JWT_REFRESH_EARLY_SECS = 5 * 60
 
 
 @dataclass
@@ -88,10 +94,13 @@ class AutonomousMonitor:
         )
         self._cooldowns: dict[tuple[str, str], float] = self._load_cooldowns()
 
+        # Debounce: track how many consecutive cycles each app has shown an anomaly.
+        # An incident is created only when streak >= settings.autonomous_monitor_anomaly_streak.
+        self._anomaly_streak: dict[tuple[str, str], int] = {}
+
         # Prometheus liveness — tracks consecutive failures to detect .160 outage
         self._prometheus_consecutive_failures: int = 0
         self._prometheus_down_incident_created: bool = False
-        _PROMETHEUS_FAILURE_THRESHOLD = 3  # 3 consecutive misses → incident
 
     # ------------------------------------------------------------------
     # Cooldown persistence
@@ -146,9 +155,10 @@ class AutonomousMonitor:
         self._running = True
         self._task = asyncio.create_task(self._loop(), name="autonomous-monitor")
         logger.info(
-            "Autonomous monitor started — interval=%ds cooldown=%dm",
+            "Autonomous monitor started — interval=%ds cooldown=%dm streak=%d",
             self._settings.autonomous_monitor_interval_seconds,
             self._settings.autonomous_monitor_cooldown_minutes,
+            self._settings.autonomous_monitor_anomaly_streak,
         )
 
     async def stop(self) -> None:
@@ -233,14 +243,17 @@ class AutonomousMonitor:
         await self._cleanup_orphan_incidents(known_apps)
 
         anomalies = 0
+        streak_needed = self._settings.autonomous_monitor_anomaly_streak
 
-        # --- Multi-signal correlation window ---
-        # Collect per-app proactive results first, then look for correlated patterns
-        # before deciding how many incidents to create.
+        # --- Per-app analysis with debounce ---
+        # An anomaly must persist for `streak_needed` consecutive cycles before
+        # creating an incident. This prevents false positives from transient spikes.
         app_results: list[tuple[str, str, str]] = []  # (namespace, app, explanation)
         for namespace, app in apps:
             if self._in_cooldown(namespace, app):
                 logger.debug("Cooldown active for %s/%s, skipping", namespace, app)
+                # Reset streak during cooldown so it re-accumulates after cooldown expires
+                self._anomaly_streak.pop((namespace, app), None)
                 continue
 
             _timeout = self._settings.autonomous_monitor_interval_seconds * 0.8
@@ -255,11 +268,24 @@ class AutonomousMonitor:
                     _timeout, namespace, app,
                 )
                 explanation = None
-            if explanation:
-                app_results.append((namespace, app, explanation))
 
-        # Group by namespace: if 2+ apps in the same namespace are anomalous
-        # within the same cycle, treat as correlated (shared infra cause).
+            if explanation:
+                streak = self._anomaly_streak.get((namespace, app), 0) + 1
+                self._anomaly_streak[(namespace, app)] = streak
+                if streak >= streak_needed:
+                    app_results.append((namespace, app, explanation))
+                else:
+                    logger.debug(
+                        "Anomaly debounce for %s/%s (streak=%d/%d) — waiting for confirmation",
+                        namespace, app, streak, streak_needed,
+                    )
+            else:
+                # No anomaly this cycle: reset the streak counter
+                self._anomaly_streak.pop((namespace, app), None)
+
+        # --- Multi-signal correlation window ---
+        # Group by namespace: if 2+ apps are anomalous in the same namespace
+        # within the same cycle → correlated infra cause.
         ns_groups: dict[str, list[tuple[str, str, str]]] = {}
         for ns, app, expl in app_results:
             ns_groups.setdefault(ns, []).append((ns, app, expl))
@@ -272,7 +298,6 @@ class AutonomousMonitor:
                     "MULTI-SIGNAL CORRELATION in %s: %d apps affected simultaneously: %s",
                     ns, len(affected), affected,
                 )
-                # Trigger on the first app but annotate all in explanation
                 _, first_app, _ = group[0]
                 if not self._in_cooldown(ns, f"__correlated_{ns}"):
                     triggered = await self._trigger_backend(
@@ -289,6 +314,7 @@ class AutonomousMonitor:
                         self._cooldowns[(ns, f"__correlated_{ns}")] = time.monotonic() + secs
                         for _, app, _ in group:
                             self._cooldowns[(ns, app)] = time.monotonic() + secs
+                            self._anomaly_streak.pop((ns, app), None)
             else:
                 # Isolated anomaly — normal single-app incident
                 ns_val, app, explanation = group[0]
@@ -299,6 +325,7 @@ class AutonomousMonitor:
                     self._incidents_triggered += 1
                     cooldown_secs = self._settings.autonomous_monitor_cooldown_minutes * 60
                     self._cooldowns[(ns_val, app)] = time.monotonic() + cooldown_secs
+                    self._anomaly_streak.pop((ns_val, app), None)
                     logger.info(
                         "Incident triggered for %s/%s — cooldown %dm",
                         ns_val, app, self._settings.autonomous_monitor_cooldown_minutes,
@@ -364,16 +391,16 @@ class AutonomousMonitor:
         return apps
 
     # ------------------------------------------------------------------
-    # Prometheus watchdog (L7 — without Alertmanager)
+    # Prometheus watchdog (without Alertmanager)
     # ------------------------------------------------------------------
 
     async def _check_prometheus_health(self, loop) -> None:
         """
         Detect Prometheus (.160) outage purely from the AI side — no Alertmanager.
-        After _PROMETHEUS_FAILURE_THRESHOLD consecutive query failures, create a
+        After prometheus_failure_threshold consecutive query failures, create a
         MONITORING_DOWN incident. Clears the flag when Prometheus recovers.
         """
-        _THRESHOLD = 3
+        _threshold = self._settings.prometheus_failure_threshold
         try:
             result = await loop.run_in_executor(
                 None,
@@ -388,14 +415,17 @@ class AutonomousMonitor:
             self._prometheus_consecutive_failures += 1
             logger.warning(
                 "Prometheus unreachable (%d/%d): %s",
-                self._prometheus_consecutive_failures, _THRESHOLD, exc,
+                self._prometheus_consecutive_failures, _threshold, exc,
             )
             if (
-                self._prometheus_consecutive_failures >= _THRESHOLD
+                self._prometheus_consecutive_failures >= _threshold
                 and not self._prometheus_down_incident_created
                 and not self._in_cooldown("infra", "monitoring-vm")
             ):
-                logger.error("Prometheus down for %d consecutive cycles — creating MONITORING_DOWN incident", _THRESHOLD)
+                logger.error(
+                    "Prometheus down for %d consecutive cycles — creating MONITORING_DOWN incident",
+                    _threshold,
+                )
                 triggered = await self._trigger_backend(
                     "infra", "monitoring-vm",
                     extra_context={"incidentType": "MONITORING_DOWN"},
@@ -408,7 +438,7 @@ class AutonomousMonitor:
                     self._save_cooldowns()
 
     # ------------------------------------------------------------------
-    # Orphan incident cleanup (L24)
+    # Orphan incident cleanup
     # ------------------------------------------------------------------
 
     async def _cleanup_orphan_incidents(self, active_apps: set) -> None:
@@ -429,6 +459,12 @@ class AutonomousMonitor:
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    if resp.status_code == 401:
+                        # JWT expired server-side before our estimate — clear cache
+                        self._jwt_token = None
+                        self._jwt_expires_at = 0.0
+                        logger.debug("JWT rejected (401) in orphan cleanup — token cleared")
+                        return
                     if resp.status_code != 200:
                         continue
                     data = resp.json()
@@ -453,6 +489,11 @@ class AutonomousMonitor:
                                 logger.info(
                                     "Auto-resolved orphan incident id=%s app=%s (app absent from cluster)",
                                     iid, app,
+                                )
+                            else:
+                                logger.warning(
+                                    "Failed to close orphan incident id=%s app=%s: backend returned %d",
+                                    iid, app, r.status_code,
                                 )
                 return
             except Exception as exc:
@@ -507,6 +548,11 @@ class AutonomousMonitor:
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    if resp.status_code == 401:
+                        self._jwt_token = None
+                        self._jwt_expires_at = 0.0
+                        logger.debug("JWT rejected (401) in node-resolve — token cleared")
+                        return
                     if resp.status_code != 200:
                         continue
                     data = resp.json()
@@ -522,6 +568,11 @@ class AutonomousMonitor:
                             if r.status_code in (200, 201, 204):
                                 self._cooldowns.pop(("cluster", node), None)
                                 logger.info("Auto-resolved NODE_NOT_READY incident id=%s — node %s recovered", iid, node)
+                            else:
+                                logger.warning(
+                                    "Failed to close NODE_NOT_READY incident id=%s node=%s: %d",
+                                    iid, node, r.status_code,
+                                )
                 return  # handled via the first reachable backend
             except Exception as exc:
                 logger.debug("Node auto-resolve via %s failed: %s", ip, exc)
@@ -545,7 +596,7 @@ class AutonomousMonitor:
         return time.monotonic() < expires
 
     # ------------------------------------------------------------------
-    # Backend notification
+    # Backend notification — all IPs tried concurrently (FIRST_COMPLETED)
     # ------------------------------------------------------------------
 
     async def _trigger_backend(
@@ -557,8 +608,10 @@ class AutonomousMonitor:
         """
         Call backend POST /api/ai/predict so the backend creates the incident,
         triggers the Camunda workflow, and pushes an SSE notification to the UI.
-        extra_context is merged into the payload for enriched incident creation
-        (e.g. correlatedApps, correlationType, incidentType override).
+
+        All configured backend IPs are tried concurrently; we return True on the
+        first successful response and cancel the remaining tasks to avoid duplicate
+        incident creation.  A 401 clears the JWT cache so the next cycle re-authenticates.
         """
         token = await self._get_jwt()
         if not token:
@@ -575,19 +628,27 @@ class AutonomousMonitor:
             payload.update(extra_context)
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-        for ip in self._settings.autonomous_monitor_backend_ips.split(","):
-            ip = ip.strip()
-            if not ip:
-                continue
+        ips = [
+            ip.strip()
+            for ip in self._settings.autonomous_monitor_backend_ips.split(",")
+            if ip.strip()
+        ]
+
+        async def _try(ip: str) -> bool:
             url = f"http://{ip}:30880/api/ai/predict"
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code == 401:
+                    self._jwt_token = None
+                    self._jwt_expires_at = 0.0
+                    logger.debug("JWT rejected (401) by %s — token cache cleared", ip)
+                    return False
                 if resp.status_code in (200, 201):
                     data = resp.json()
                     logger.info(
-                        "Backend ACK for %s/%s: incidentCreated=%s id=%s",
-                        namespace, app,
+                        "Backend ACK for %s/%s via %s: incidentCreated=%s id=%s",
+                        namespace, app, ip,
                         data.get("incidentCreated"),
                         data.get("incidentId"),
                     )
@@ -595,12 +656,37 @@ class AutonomousMonitor:
                 logger.debug("Backend %s returned %d", ip, resp.status_code)
             except Exception as exc:
                 logger.debug("Backend %s unreachable: %s", ip, exc)
+            return False
+
+        # Launch all IPs concurrently; return on first success and cancel the rest
+        # to avoid duplicate incident creation from multiple backend replicas.
+        tasks = [asyncio.create_task(_try(ip)) for ip in ips]
+        pending = set(tasks)
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    if not task.exception() and task.result() is True:
+                        for t in pending:
+                            t.cancel()
+                        return True
+        except Exception as exc:
+            logger.debug("Parallel backend trigger error: %s", exc)
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
         logger.warning("All backend IPs unreachable for %s/%s", namespace, app)
         return False
 
+    # ------------------------------------------------------------------
+    # JWT management
+    # ------------------------------------------------------------------
+
     async def _get_jwt(self) -> Optional[str]:
-        if self._jwt_token and time.monotonic() < self._jwt_expires_at:
+        # Proactively refresh 5 minutes before expiry to avoid mid-operation 401s
+        if self._jwt_token and time.monotonic() < (self._jwt_expires_at - _JWT_REFRESH_EARLY_SECS):
             return self._jwt_token
 
         for ip in self._settings.autonomous_monitor_backend_ips.split(","):
@@ -620,8 +706,8 @@ class AutonomousMonitor:
                 if resp.status_code == 200:
                     data = resp.json()
                     self._jwt_token = data.get("accessToken")
-                    self._jwt_expires_at = time.monotonic() + 55 * 60  # refresh before 1h expiry
-                    logger.debug("JWT acquired from %s", ip)
+                    self._jwt_expires_at = time.monotonic() + _JWT_CACHE_SECONDS
+                    logger.debug("JWT acquired from %s (valid ~%dm)", ip, _JWT_CACHE_SECONDS // 60)
                     return self._jwt_token
                 logger.debug("Auth at %s returned %d", ip, resp.status_code)
             except Exception as exc:

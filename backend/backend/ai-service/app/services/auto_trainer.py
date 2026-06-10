@@ -294,10 +294,27 @@ class AutoTrainer:
             df = pd.read_csv(str(path))
             logger.info("AutoTrainer: loaded %d rows from %s", len(df), path)
 
+            if df.empty:
+                logger.error("AutoTrainer: dataset at %s is empty — aborting", path)
+                return None
+
+            for required_col in ("incident", "severity", "recommended_action"):
+                if required_col not in df.columns:
+                    logger.error("AutoTrainer: required column '%s' missing from dataset", required_col)
+                    return None
+
+            if len(df) < 5:
+                logger.error("AutoTrainer: dataset has only %d row(s) — too small to cross-validate", len(df))
+                return None
+
             label_cols = {"incident", "severity", "recommended_action"}
             feature_cols = [c for c in df.columns if c not in label_cols]
 
             X = df[feature_cols].fillna(0).values.astype(np.float32)
+
+            if X.shape[0] == 0 or X.shape[1] == 0:
+                logger.error("AutoTrainer: feature matrix is empty after processing — aborting")
+                return None
             y_incident = df["incident"].values if "incident" in df.columns else np.zeros(len(df), dtype=int)
             y_severity = df["severity"].values if "severity" in df.columns else np.zeros(len(df), dtype=int)
             y_action = df["recommended_action"].values if "recommended_action" in df.columns else np.zeros(len(df), dtype=int)

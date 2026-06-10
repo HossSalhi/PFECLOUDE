@@ -230,6 +230,12 @@ class InferenceEngine:
         _ml_type, _ml_conf = self._predict_scenario_ml(safe_features)
         if _ml_type == "UNKNOWN_ANOMALY" and rule_score >= 0.15:
             # Unknown pattern with non-trivial risk score → escalate to human
+            logger.warning(
+                "UNKNOWN_ANOMALY: scenario classifier could not match any known class "
+                "(ml_conf=%.2f, rule_score=%.2f) — escalating to INVESTIGATE. "
+                "Rising frequency of UNKNOWN_ANOMALY indicates model drift; consider retraining.",
+                _ml_conf, rule_score,
+            )
             incident_type = "UNKNOWN_ANOMALY"
             if not incident:
                 incident = True

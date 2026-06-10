@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     autonomous_monitor_enabled: bool = True
     autonomous_monitor_interval_seconds: int = 120
     autonomous_monitor_cooldown_minutes: int = 15
+    # Debounce: require this many consecutive anomaly detections before creating an incident.
+    # 1 = no debounce (immediate, current behavior); 2 = confirm over 2 cycles (~4 min default).
+    autonomous_monitor_anomaly_streak: int = 2
+    # Prometheus watchdog: consecutive failures before emitting MONITORING_DOWN incident.
+    prometheus_failure_threshold: int = 3
     # Comma-separated namespaces to monitor (empty = all non-system namespaces)
     autonomous_monitor_namespaces: str = ""
     # Comma-separated container/app names to NEVER auto-monitor.
