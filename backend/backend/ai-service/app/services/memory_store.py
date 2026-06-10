@@ -222,7 +222,9 @@ class ChromaMemoryStore:
                 })
             return memories
         except Exception as exc:
-            logger.warning("ChromaDB query failed: %s", exc)
+            logger.warning(
+                "ChromaDB query failed (semantic memory degraded — returning empty context): %s", exc
+            )
             return []
 
     def count(self) -> int:

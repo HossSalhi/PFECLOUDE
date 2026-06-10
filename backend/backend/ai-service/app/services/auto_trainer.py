@@ -241,7 +241,13 @@ class AutoTrainer:
                 for line in p.stdout:
                     logger.info("[llm-finetune] %s", line.rstrip())
                 p.wait()
-                logger.info("LLM fine-tuning subprocess exited with code %d", p.returncode)
+                if p.returncode == 0:
+                    logger.info("LLM fine-tuning subprocess completed successfully")
+                else:
+                    logger.error(
+                        "LLM fine-tuning subprocess FAILED with exit code %d — "
+                        "check script at %s for errors", p.returncode, script,
+                    )
             threading.Thread(target=_drain, args=(proc,), daemon=True).start()
         except Exception as exc:
             logger.error("Failed to launch LLM fine-tuning subprocess: %s", exc)

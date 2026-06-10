@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -84,13 +85,15 @@ class AutonomousMonitor:
         self._last_run_utc: Optional[str] = None
         self._last_apps_analyzed = 0
         self._last_anomalies_found = 0
-        self._recent_errors: list[str] = []
+        # Bounded deque — never grows beyond 100 entries (OOM protection)
+        self._recent_errors: deque[str] = deque(maxlen=100)
 
         # (namespace, app) → monotonic timestamp when cooldown expires.
         # Persisted to disk so cooldowns survive service restarts and prevent
         # incident storms immediately after an unplanned restart.
+        # Default is /data (persistent volume on .161) — NOT /tmp which is ephemeral.
         self._cooldown_file = os.environ.get(
-            "AIOPS_COOLDOWN_STATE_FILE", "/tmp/helios_cooldowns.json"
+            "AIOPS_COOLDOWN_STATE_FILE", "/data/helios_cooldowns.json"
         )
         self._cooldowns: dict[tuple[str, str], float] = self._load_cooldowns()
 
@@ -152,6 +155,12 @@ class AutonomousMonitor:
         if not self._settings.autonomous_monitor_enabled:
             logger.info("Autonomous monitor disabled (AIOPS_AUTONOMOUS_MONITOR_ENABLED=false)")
             return
+        # Warn loudly if default credentials are in use — must be overridden in production
+        if self._settings.autonomous_monitor_password in ("admin-change-me", "admin", ""):
+            logger.warning(
+                "SECURITY: autonomous_monitor_password is set to a default/weak value. "
+                "Set AIOPS_AUTONOMOUS_MONITOR_PASSWORD env var to a strong secret before deploying."
+            )
         self._running = True
         self._task = asyncio.create_task(self._loop(), name="autonomous-monitor")
         logger.info(
@@ -457,7 +466,7 @@ class AutonomousMonitor:
                 continue
             base = f"http://{ip}:30880"
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
                     if resp.status_code == 401:
                         # JWT expired server-side before our estimate — clear cache
@@ -546,7 +555,7 @@ class AutonomousMonitor:
                 continue
             base = f"http://{ip}:30880"
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=8.0) as client:
                     resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
                     if resp.status_code == 401:
                         self._jwt_token = None

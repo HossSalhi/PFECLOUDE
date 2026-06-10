@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     llm_second_fallback_model: str = "qwen2:0.5b"
     # Fine-tuned 0.5B specialist used by InferenceEngine as the LoRA opinion gate
     llm_specialist_model: str = "aiops-sre-ft-v2"
+    # Per-request httpx timeout for all Ollama calls (AIOPS_LLM_TIMEOUT_SECONDS).
+    # Increase for larger models or GPU-saturated environments.
+    llm_timeout_seconds: float = 13.0
 
     default_window_minutes: int = 5
     model_path: str = "model_artifacts/model.joblib"

@@ -57,10 +57,12 @@ class InferenceEngine:
             self._llm_specialist_model = getattr(settings, "llm_specialist_model", "aiops-sre-ft-v2")
             self._llm_explainer_model = getattr(settings, "llm_model", "aiops-sre-q4")
             self._llm_fallback_model = getattr(settings, "llm_fallback_model", "qwen2.5:3b")
+            self._llm_timeout = getattr(settings, "llm_timeout_seconds", 13.0)
         else:
             self._llm_specialist_model = "aiops-sre-ft-v2"
             self._llm_explainer_model = "aiops-sre-q4"
             self._llm_fallback_model = "qwen2.5:3b"
+            self._llm_timeout = 13.0
 
     @property
     def model_loaded(self) -> bool:
@@ -740,7 +742,7 @@ class InferenceEngine:
                 f"Measured evidence: {evidence}. "
                 f"Recommended action: {action}. Why is this action the right response?"
             )
-            with _httpx.Client(timeout=5.0) as _http:
+            with _httpx.Client(timeout=self._llm_timeout) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
@@ -839,7 +841,7 @@ class InferenceEngine:
             _sys = ("You are an SRE incident classifier. Given a trace, output the single best "
                     "incident_type from the allowed list, its severity, a recommended_action, "
                     "and a one-line explanation. JSON only.")
-            with _httpx.Client(timeout=13.0) as _http:
+            with _httpx.Client(timeout=self._llm_timeout) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
@@ -1003,7 +1005,7 @@ class InferenceEngine:
                 "auto_execute=true only if confidence>=0.70 AND severity in (MEDIUM, HIGH)."
             )
 
-            with _httpx.Client(timeout=5.0) as _http:
+            with _httpx.Client(timeout=self._llm_timeout) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={

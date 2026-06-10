@@ -39,13 +39,16 @@ spec:
                     operator: In
                     values: [worker]
         podAntiAffinity:
-          # REQUIRED (not preferred): guarantees the 2 replicas land on different workers,
-          # so losing one worker always leaves a frontend serving the UI (no outage).
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  app: frontend
+          # PREFERRED (not required): strongly prefers different workers, but if only one
+          # worker is available (the other is NotReady) the replica is still schedulable,
+          # avoiding a full UI outage during single-worker failures.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: frontend
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone

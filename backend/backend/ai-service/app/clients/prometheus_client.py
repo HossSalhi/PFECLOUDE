@@ -1,11 +1,10 @@
+import json
 import logging
 import math
 from datetime import datetime
 from typing import Any
 
 import httpx
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,16 @@ class PrometheusClient:
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.get(url, params=params)
                 response.raise_for_status()
-                payload = response.json()
+                try:
+                    payload = response.json()
+                except json.JSONDecodeError as exc:
+                    logger.warning(
+                        "Prometheus query returned non-JSON response (status=%d, url=%s): %s",
+                        response.status_code, url, exc,
+                    )
+                    return None
+        except json.JSONDecodeError:
+            return None
         except Exception as exc:
             logger.warning("Prometheus query failed: %s", exc)
             return None
@@ -73,7 +81,16 @@ class PrometheusClient:
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.get(url, params=params)
                 response.raise_for_status()
-                payload = response.json()
+                try:
+                    payload = response.json()
+                except json.JSONDecodeError as exc:
+                    logger.warning(
+                        "Prometheus query_raw returned non-JSON (status=%d): %s",
+                        response.status_code, exc,
+                    )
+                    return []
+        except json.JSONDecodeError:
+            return []
         except Exception as exc:
             logger.warning("Prometheus query_raw failed: %s", exc)
             return []
@@ -107,7 +124,16 @@ class PrometheusClient:
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 response = client.get(url, params=params)
                 response.raise_for_status()
-                payload = response.json()
+                try:
+                    payload = response.json()
+                except json.JSONDecodeError as exc:
+                    logger.warning(
+                        "Prometheus query_range returned non-JSON (status=%d): %s",
+                        response.status_code, exc,
+                    )
+                    return []
+        except json.JSONDecodeError:
+            return []
         except Exception as exc:
             logger.warning("Prometheus query_range failed: %s", exc)
             return []
