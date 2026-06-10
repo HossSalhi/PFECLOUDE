@@ -284,7 +284,9 @@ class AutoTrainer:
             if before <= MAX_DATASET_ROWS:
                 return 0
             df = df.tail(MAX_DATASET_ROWS).reset_index(drop=True)
-            df.to_csv(str(path), index=False)
+            tmp_path = path.with_suffix(".tmp")
+            df.to_csv(str(tmp_path), index=False)
+            os.replace(str(tmp_path), str(path))
             return before - len(df)
         except Exception as exc:
             logger.warning("AutoTrainer: dataset pruning failed (non-critical): %s", exc)

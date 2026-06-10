@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import math
 from dataclasses import dataclass, field
@@ -93,10 +94,20 @@ class ProactiveService:
             ),
         }
 
-        for metric_name, (query, thresholds) in metric_queries.items():
-            trend = self._analyze_trend(metric_name, query, thresholds, now, window_minutes)
-            if trend is not None:
-                trends.append(trend)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(metric_queries)) as executor:
+            futures = {
+                metric_name: executor.submit(
+                    self._analyze_trend, metric_name, query, thresholds, now, window_minutes
+                )
+                for metric_name, (query, thresholds) in metric_queries.items()
+            }
+        for metric_name, future in futures.items():
+            try:
+                trend = future.result()
+                if trend is not None:
+                    trends.append(trend)
+            except Exception as exc:
+                logger.debug("Proactive trend analysis failed for %s: %s", metric_name, exc)
 
         if not trends:
             return ProactiveResult(

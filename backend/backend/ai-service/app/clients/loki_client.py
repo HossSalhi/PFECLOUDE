@@ -15,6 +15,8 @@ class LokiClient:
     def __init__(self, base_url: str, timeout_seconds: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        # Persistent client — one TCP connection pool, no per-call handshake.
+        self._client = httpx.Client(timeout=timeout_seconds)
 
     def query_range(
         self,
@@ -33,10 +35,9 @@ class LokiClient:
         }
 
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.get(url, params=params)
-                response.raise_for_status()
-                payload = response.json()
+            response = self._client.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
         except Exception as exc:
             logger.warning("Loki query failed: %s", exc)
             return []

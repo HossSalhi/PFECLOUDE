@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import math
 from dataclasses import dataclass, field
@@ -64,11 +65,18 @@ class CorrelationService:
                 explanation=f"No Prometheus metrics found for namespace={namespace}"
             )
 
-        # 2. Collect signals for each app
+        # 2. Collect signals for each app in parallel
         signals: list[AppSignal] = []
-        for app in apps:
-            signal = self._collect_signal(namespace, app, window_end)
-            signals.append(signal)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(apps), 8)) as executor:
+            futures = {
+                app: executor.submit(self._collect_signal, namespace, app, window_end)
+                for app in apps
+            }
+        for app, future in futures.items():
+            try:
+                signals.append(future.result())
+            except Exception as exc:
+                logger.warning("Signal collection failed for %s: %s", app, exc)
 
         # 3. Find anomalous apps
         anomalous = [s for s in signals if s.is_anomalous]

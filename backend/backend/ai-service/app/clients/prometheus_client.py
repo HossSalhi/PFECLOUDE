@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import logging
 import math
@@ -13,6 +14,8 @@ class PrometheusClient:
     def __init__(self, base_url: str, timeout_seconds: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        # Persistent client — one TCP connection pool shared across all queries.
+        self._client = httpx.Client(timeout=timeout_seconds)
 
     def query(self, expression: str, at_time: datetime | None = None) -> float | None:
         url = f"{self.base_url}/api/v1/query"
@@ -21,17 +24,16 @@ class PrometheusClient:
             params["time"] = str(at_time.timestamp())
 
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.get(url, params=params)
-                response.raise_for_status()
-                try:
-                    payload = response.json()
-                except json.JSONDecodeError as exc:
-                    logger.warning(
-                        "Prometheus query returned non-JSON response (status=%d, url=%s): %s",
-                        response.status_code, url, exc,
-                    )
-                    return None
+            response = self._client.get(url, params=params)
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Prometheus query returned non-JSON response (status=%d, url=%s): %s",
+                    response.status_code, url, exc,
+                )
+                return None
         except json.JSONDecodeError:
             return None
         except Exception as exc:
@@ -63,11 +65,22 @@ class PrometheusClient:
         expressions: dict[str, str],
         at_time: datetime | None = None,
     ) -> dict[str, float]:
+        if not expressions:
+            return {}
+        # Run all queries in parallel — eliminates N×round-trip serial latency.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(expressions), 8)) as executor:
+            futures = {
+                name: executor.submit(self.query, expr, at_time)
+                for name, expr in expressions.items()
+            }
         results: dict[str, float] = {}
-        for feature_name, expr in expressions.items():
-            value = self.query(expr, at_time=at_time)
-            if value is not None:
-                results[feature_name] = value
+        for name, future in futures.items():
+            try:
+                value = future.result()
+                if value is not None:
+                    results[name] = value
+            except Exception:
+                pass
         return results
 
     def query_raw(self, expression: str, at_time: datetime | None = None) -> list[dict[str, Any]]:
@@ -78,17 +91,16 @@ class PrometheusClient:
             params["time"] = str(at_time.timestamp())
 
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.get(url, params=params)
-                response.raise_for_status()
-                try:
-                    payload = response.json()
-                except json.JSONDecodeError as exc:
-                    logger.warning(
-                        "Prometheus query_raw returned non-JSON (status=%d): %s",
-                        response.status_code, exc,
-                    )
-                    return []
+            response = self._client.get(url, params=params)
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Prometheus query_raw returned non-JSON (status=%d): %s",
+                    response.status_code, exc,
+                )
+                return []
         except json.JSONDecodeError:
             return []
         except Exception as exc:
@@ -121,17 +133,16 @@ class PrometheusClient:
         }
 
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
-                response = client.get(url, params=params)
-                response.raise_for_status()
-                try:
-                    payload = response.json()
-                except json.JSONDecodeError as exc:
-                    logger.warning(
-                        "Prometheus query_range returned non-JSON (status=%d): %s",
-                        response.status_code, exc,
-                    )
-                    return []
+            response = self._client.get(url, params=params)
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Prometheus query_range returned non-JSON (status=%d): %s",
+                    response.status_code, exc,
+                )
+                return []
         except json.JSONDecodeError:
             return []
         except Exception as exc:

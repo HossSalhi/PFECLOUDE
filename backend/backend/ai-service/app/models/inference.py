@@ -99,6 +99,40 @@ class InferenceEngine:
         "RESTART_POD_AND_INVESTIGATE",
         "NO_ACTION",
     })
+    _LLM_SYSTEM_MSG = (
+        "You are a Kubernetes SRE JSON API. "
+        "You receive pre-classified signals (NORMAL/ELEVATED/HIGH/CRITICAL) and output ONLY a JSON object. "
+        "No explanation outside the JSON."
+    )
+    _LLM_TAXONOMY = (
+        "TAXONOMY_51_CLASSES (pick the BEST match):\n"
+        "POD: POD_CRASH_LOOP(restarts>5), POD_OOM_KILLED(OOMKilled+mem high), "
+        "POD_IMAGE_PULL_BACKOFF(image registry), POD_PENDING_INSUFFICIENT_RESOURCES(cluster ressources), "
+        "POD_STUCK_TERMINATING(deletion stuck), POD_LIVENESS_FAILURE(probe KO), "
+        "POD_READINESS_FAILURE(not ready no crash), POD_INIT_CONTAINER_FAILURE(init failed); "
+        "APP: HIGH_LATENCY_P95(p95>1s), HIGH_LATENCY_P99(tail>3s), "
+        "ERROR_RATE_5XX_SPIKE(5xx ratio), ERROR_RATE_4XX_SPIKE(4xx ratio), "
+        "REQUEST_RATE_DROP(traffic drop), MEMORY_LEAK(mem growing linear), "
+        "CPU_SATURATION(cpu>90%), THREAD_POOL_EXHAUSTION(java threads blocked), "
+        "DB_CONNECTION_POOL_EXHAUSTION(hikari pending>5), CIRCUIT_BREAKER_OPEN(CB tripped); "
+        "DB: DB_SLOW_QUERIES, DB_DEADLOCK, DB_REPLICATION_LAG, DB_DISK_FULL, "
+        "DB_CONNECTION_REFUSED(up=0), DB_HIGH_WRITE_LOAD; "
+        "NET: NETWORK_DNS_FAILURE(SERVFAIL spike), NETWORK_PACKET_LOSS, "
+        "NETWORK_LATENCY_BETWEEN_NODES, INGRESS_BACKEND_DOWN(502 spike), "
+        "SERVICE_DISCOVERY_FAILURE, TLS_CERTIFICATE_EXPIRY, NETWORK_PARTITION, "
+        "EXTERNAL_API_DEPENDENCY_DOWN; "
+        "NODE: NODE_NOT_READY, NODE_HIGH_CPU(VM cpu>90%), NODE_HIGH_MEMORY, "
+        "NODE_DISK_FULL, NODE_DISK_IO_SATURATION, NODE_KUBELET_DOWN, "
+        "NODE_CLOCK_SKEW, NODE_HARDWARE_FAILURE; "
+        "SEC: AUTH_TOKEN_EXPIRED(401 spike on auth/me), AUTH_BRUTE_FORCE_ATTEMPT, "
+        "UNAUTHORIZED_API_ACCESS_SPIKE(403 spike), SECRET_ROTATION_FAILURE; "
+        "STORAGE: PVC_PENDING, PV_FILESYSTEM_CORRUPTION, PVC_USAGE_HIGH; "
+        "OBS: PROMETHEUS_OUT_OF_MEMORY, LOKI_INGESTION_LAG, METRICS_SCRAPE_FAILURE; "
+        "OTHER: GENERAL_DEGRADATION, UNKNOWN_ANOMALY, NO_INCIDENT.\n"
+        "ACTIONS (pick one): RESTART_POD, SCALE_DEPLOYMENT, ROLLBACK_DEPLOYMENT, "
+        "DELETE_CRASHLOOPING_PODS, FORCE_RECREATE_DEPLOYMENT, SCALE_DOWN, "
+        "ESCALATION, NO_ACTION."
+    )
 
     def __init__(self, model_bundle: ModelBundle, settings=None) -> None:
         self.model_bundle = model_bundle
@@ -977,40 +1011,8 @@ class InferenceEngine:
 
             signal_summary = ", ".join(f"{k}={v}" for k, v in elevated.items())
 
-            system_msg = (
-                "You are a Kubernetes SRE JSON API. "
-                "You receive pre-classified signals (NORMAL/ELEVATED/HIGH/CRITICAL) and output ONLY a JSON object. "
-                "No explanation outside the JSON."
-            )
-            taxonomy = (
-                "TAXONOMY_51_CLASSES (pick the BEST match):\n"
-                "POD: POD_CRASH_LOOP(restarts>5), POD_OOM_KILLED(OOMKilled+mem high), "
-                "POD_IMAGE_PULL_BACKOFF(image registry), POD_PENDING_INSUFFICIENT_RESOURCES(cluster ressources), "
-                "POD_STUCK_TERMINATING(deletion stuck), POD_LIVENESS_FAILURE(probe KO), "
-                "POD_READINESS_FAILURE(not ready no crash), POD_INIT_CONTAINER_FAILURE(init failed); "
-                "APP: HIGH_LATENCY_P95(p95>1s), HIGH_LATENCY_P99(tail>3s), "
-                "ERROR_RATE_5XX_SPIKE(5xx ratio), ERROR_RATE_4XX_SPIKE(4xx ratio), "
-                "REQUEST_RATE_DROP(traffic drop), MEMORY_LEAK(mem growing linear), "
-                "CPU_SATURATION(cpu>90%), THREAD_POOL_EXHAUSTION(java threads blocked), "
-                "DB_CONNECTION_POOL_EXHAUSTION(hikari pending>5), CIRCUIT_BREAKER_OPEN(CB tripped); "
-                "DB: DB_SLOW_QUERIES, DB_DEADLOCK, DB_REPLICATION_LAG, DB_DISK_FULL, "
-                "DB_CONNECTION_REFUSED(up=0), DB_HIGH_WRITE_LOAD; "
-                "NET: NETWORK_DNS_FAILURE(SERVFAIL spike), NETWORK_PACKET_LOSS, "
-                "NETWORK_LATENCY_BETWEEN_NODES, INGRESS_BACKEND_DOWN(502 spike), "
-                "SERVICE_DISCOVERY_FAILURE, TLS_CERTIFICATE_EXPIRY, NETWORK_PARTITION, "
-                "EXTERNAL_API_DEPENDENCY_DOWN; "
-                "NODE: NODE_NOT_READY, NODE_HIGH_CPU(VM cpu>90%), NODE_HIGH_MEMORY, "
-                "NODE_DISK_FULL, NODE_DISK_IO_SATURATION, NODE_KUBELET_DOWN, "
-                "NODE_CLOCK_SKEW, NODE_HARDWARE_FAILURE; "
-                "SEC: AUTH_TOKEN_EXPIRED(401 spike on auth/me), AUTH_BRUTE_FORCE_ATTEMPT, "
-                "UNAUTHORIZED_API_ACCESS_SPIKE(403 spike), SECRET_ROTATION_FAILURE; "
-                "STORAGE: PVC_PENDING, PV_FILESYSTEM_CORRUPTION, PVC_USAGE_HIGH; "
-                "OBS: PROMETHEUS_OUT_OF_MEMORY, LOKI_INGESTION_LAG, METRICS_SCRAPE_FAILURE; "
-                "OTHER: GENERAL_DEGRADATION, UNKNOWN_ANOMALY, NO_INCIDENT.\n"
-                "ACTIONS (pick one): RESTART_POD, SCALE_DEPLOYMENT, ROLLBACK_DEPLOYMENT, "
-                "DELETE_CRASHLOOPING_PODS, FORCE_RECREATE_DEPLOYMENT, SCALE_DOWN, "
-                "ESCALATION, NO_ACTION."
-            )
+            system_msg = self._LLM_SYSTEM_MSG
+            taxonomy = self._LLM_TAXONOMY
 
             user_msg = (
                 f"Elevated signals detected: {signal_summary}\n"
