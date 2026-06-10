@@ -784,7 +784,7 @@ class InferenceEngine:
             _sys = ("You are an SRE incident classifier. Given a trace, output the single best "
                     "incident_type from the allowed list, its severity, a recommended_action, "
                     "and a one-line explanation. JSON only.")
-            with _httpx.Client(timeout=4.0) as _http:
+            with _httpx.Client(timeout=13.0) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={

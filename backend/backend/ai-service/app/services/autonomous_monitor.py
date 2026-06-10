@@ -252,7 +252,7 @@ class AutonomousMonitor:
         return nodes
 
     async def _check_and_trigger_nodes(self, loop) -> None:
-        """Create a NODE_NOT_READY incident for each NotReady node (cooldown-guarded)."""
+        """Create NODE_NOT_READY incidents for down nodes, and auto-resolve them when nodes recover."""
         try:
             nodes = await loop.run_in_executor(None, self._discover_not_ready_nodes)
         except Exception as exc:
@@ -266,6 +266,41 @@ class AutonomousMonitor:
                 self._incidents_triggered += 1
                 secs = self._settings.autonomous_monitor_cooldown_minutes * 60
                 self._cooldowns[("cluster", node)] = time.monotonic() + secs
+        # Mirror: auto-resolve NODE_NOT_READY incidents whose node is Ready again.
+        await self._resolve_recovered_node_incidents(set(nodes))
+
+    async def _resolve_recovered_node_incidents(self, not_ready: set) -> None:
+        """Close open NODE_NOT_READY incidents for nodes that are no longer NotReady."""
+        token = await self._get_jwt()
+        if not token:
+            return
+        headers = {"Authorization": f"Bearer {token}"}
+        for ip in self._settings.autonomous_monitor_backend_ips.split(","):
+            ip = ip.strip()
+            if not ip:
+                continue
+            base = f"http://{ip}:30880"
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{base}/api/incidents?page=0&size=100", headers=headers)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    items = data.get("content", data) if isinstance(data, dict) else data
+                    for inc in (items or []):
+                        node = inc.get("app")
+                        status = inc.get("status")
+                        if (inc.get("incidentType") == "NODE_NOT_READY"
+                                and status not in ("RESOLVED", "CLOSED", "AUTO_RESOLVED")
+                                and node and node not in not_ready):
+                            iid = inc.get("id")
+                            r = await client.put(f"{base}/api/incidents/{iid}/status/RESOLVED", headers=headers)
+                            if r.status_code in (200, 201, 204):
+                                self._cooldowns.pop(("cluster", node), None)
+                                logger.info("Auto-resolved NODE_NOT_READY incident id=%s — node %s recovered", iid, node)
+                return  # handled via the first reachable backend
+            except Exception as exc:
+                logger.debug("Node auto-resolve via %s failed: %s", ip, exc)
 
     # ------------------------------------------------------------------
     # Analysis
@@ -313,7 +348,7 @@ class AutonomousMonitor:
                 continue
             url = f"http://{ip}:30880/api/ai/predict"
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code in (200, 201):
                     data = resp.json()
