@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -18,9 +20,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 RETRAIN_TRIGGER_INCIDENTS = 25
-MIN_IMPROVEMENT = 0.005   # Promote new model only if avg_F1 improves by ≥ 0.5%
+MIN_IMPROVEMENT = 0.005    # Promote new model only if avg_F1 improves by ≥ 0.5%
+MIN_TRAINING_SIZE = 200    # Refuse promotion when the dataset is too small for reliable CV scores
 LAST_RETRAIN_FILE = "model_artifacts/last_retrain.json"
-MAX_DATASET_ROWS = 2000   # Keep only the most recent N rows to prevent quality degradation
+MAX_DATASET_ROWS = 2000    # Keep only the most recent N rows to prevent quality degradation
+
+# When set, auto_trainer will launch the LLM fine-tuning script after XGBoost retraining
+# if enough new incidents are available (llm_retrain_min_incidents).
+_LLM_FINETUNE_SCRIPT = os.environ.get(
+    "AIOPS_LLM_FINETUNE_SCRIPT", "scripts/llm_continuous_learning.py"
+)
 
 # Features stored in ChromaDB incident metadata — subset of full feature set.
 # Used to harvest real production data into the training CSV.
@@ -48,11 +57,15 @@ class AutoTrainer:
         drift_detector,
         dataset_path: str = "datasets/aiops_training_dataset.csv",
         retrain_trigger_count: int = RETRAIN_TRIGGER_INCIDENTS,
+        llm_auto_retrain: bool = False,
+        llm_retrain_min_incidents: int = 20,
     ) -> None:
         self._registry = model_registry
         self._drift = drift_detector
         self._dataset_path = Path(dataset_path)
         self._trigger_count = retrain_trigger_count
+        self._llm_auto_retrain = llm_auto_retrain
+        self._llm_retrain_min_incidents = llm_retrain_min_incidents
         self._new_incidents: int = 0
         self._is_training: bool = False
         self._last_retrain: dict[str, Any] | None = self._load_last_retrain()
@@ -127,7 +140,17 @@ class AutoTrainer:
             promote = True
             promote_reason = "first_model"
 
-            if active:
+            # Guard: refuse promotion when the dataset is too small — cross-validation
+            # F1 scores on < MIN_TRAINING_SIZE rows are unreliable and may promote a worse model.
+            if len(X) < MIN_TRAINING_SIZE:
+                promote = False
+                promote_reason = f"dataset_too_small_{len(X)}_lt_{MIN_TRAINING_SIZE}_rows"
+                logger.warning(
+                    "AutoTrainer: dataset has only %d rows (min=%d) — skipping promotion, "
+                    "setting as shadow for A/B evaluation only.",
+                    len(X), MIN_TRAINING_SIZE,
+                )
+            elif active:
                 new_avg = (metrics["f1_incident"] + metrics["f1_action"] + metrics["f1_severity"]) / 3
                 delta = new_avg - active.avg_f1
                 if delta >= MIN_IMPROVEMENT:
@@ -164,6 +187,12 @@ class AutoTrainer:
             self._save_last_retrain(result)
             logger.info("AutoTrainer: pipeline completed — %s", result)
 
+            # Optionally trigger LLM fine-tuning right after XGBoost retraining.
+            # Disabled by default (requires GPU time on .161).
+            # Enable via AIOPS_LLM_AUTO_RETRAIN=true + AIOPS_LLM_RETRAIN_MIN_INCIDENTS=20.
+            if self._llm_auto_retrain and len(X) >= self._llm_retrain_min_incidents:
+                self._maybe_finetune_llm(result)
+
         except Exception as exc:
             logger.exception("AutoTrainer: pipeline failed: %s", exc)
             result.update({"status": "failed", "error": str(exc)})
@@ -178,7 +207,44 @@ class AutoTrainer:
             "new_incidents_since_last_train": self._new_incidents,
             "trigger_threshold": self._trigger_count,
             "last_retrain": self._last_retrain,
+            "llm_auto_retrain": self._llm_auto_retrain,
+            "llm_retrain_min_incidents": self._llm_retrain_min_incidents,
         }
+
+    def _maybe_finetune_llm(self, xgb_result: dict[str, Any]) -> None:
+        """
+        Launch the LLM fine-tuning script as a non-blocking subprocess.
+        Only called when llm_auto_retrain=True AND the dataset is large enough.
+        The subprocess is fire-and-forget; stdout/stderr go to the service log.
+        """
+        script = Path(_LLM_FINETUNE_SCRIPT)
+        if not script.exists():
+            logger.warning(
+                "LLM fine-tune script not found at %s — skipping auto LLM retrain. "
+                "Set AIOPS_LLM_FINETUNE_SCRIPT to the correct path.", script
+            )
+            return
+        logger.info(
+            "AutoTrainer: launching LLM fine-tuning (training_size=%d, script=%s)",
+            xgb_result.get("training_size", "?"), script,
+        )
+        try:
+            proc = subprocess.Popen(
+                ["python", str(script)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            # Read output in a daemon thread so it appears in the service log
+            import threading
+            def _drain(p: subprocess.Popen) -> None:
+                for line in p.stdout:
+                    logger.info("[llm-finetune] %s", line.rstrip())
+                p.wait()
+                logger.info("LLM fine-tuning subprocess exited with code %d", p.returncode)
+            threading.Thread(target=_drain, args=(proc,), daemon=True).start()
+        except Exception as exc:
+            logger.error("Failed to launch LLM fine-tuning subprocess: %s", exc)
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #

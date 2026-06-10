@@ -37,7 +37,7 @@ class PredictorService:
             timeout_seconds=settings.prometheus_timeout_seconds,
         )
         model_bundle = load_model_bundle(settings.model_path)
-        self.inference_engine = InferenceEngine(model_bundle=model_bundle)
+        self.inference_engine = InferenceEngine(model_bundle=model_bundle, settings=settings)
         self.log_embedding_encoder = LogEmbeddingEncoder(
             model_name=settings.log_embedding_model_name,
             fallback_dim=settings.log_embedding_fallback_dim,
@@ -70,6 +70,8 @@ class PredictorService:
                 drift_detector=self.drift_detector,
                 dataset_path=settings.dataset_path,
                 retrain_trigger_count=settings.retrain_trigger_incidents,
+                llm_auto_retrain=settings.llm_auto_retrain,
+                llm_retrain_min_incidents=settings.llm_retrain_min_incidents,
             )
             self.ab_tester = ABTester(
                 model_registry=self.model_registry,

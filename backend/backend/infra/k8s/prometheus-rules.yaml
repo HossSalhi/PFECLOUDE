@@ -1,0 +1,133 @@
+---
+# PrometheusRule — HELIOS critical alerts scraped by Prometheus on VM .160
+# Apply with: kubectl apply -f prometheus-rules.yaml -n monitoring
+#
+# These rules fire when HELIOS components are unreachable so the team is
+# alerted even if the AI service itself (on .161) is the one that is down
+# (in that case, the AI cannot self-report the outage).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: helios-critical-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus       # matches kube-prometheus-stack selector
+    app: helios-aiops
+spec:
+  groups:
+
+    # ── AI service availability (VM .161) ─────────────────────────────────
+    - name: helios.ai-service
+      interval: 30s
+      rules:
+        - alert: HeliosAIServiceDown
+          expr: |
+            absent(up{job="ai-service"} == 1)
+            or
+            up{job="ai-service"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: ai-service
+            zone: iacamunda
+          annotations:
+            summary: "HELIOS AI service unreachable (VM .161)"
+            description: >
+              The AI service on 192.168.148.161:8000 (job=ai-service) has been
+              unreachable for > 5 minutes. Autonomous incident detection is STOPPED.
+              Check: ssh root@192.168.148.161 'systemctl status helios-ai' or
+              'docker ps | grep ai-service'.
+
+        - alert: HeliosAIServiceHighErrorRate
+          expr: |
+            rate(http_server_requests_seconds_count{job="ai-service", status=~"5.."}[5m])
+            /
+            rate(http_server_requests_seconds_count{job="ai-service"}[5m]) > 0.10
+          for: 3m
+          labels:
+            severity: warning
+            component: ai-service
+          annotations:
+            summary: "HELIOS AI service error rate > 10%"
+            description: >
+              The AI service is returning > 10% HTTP 5xx responses.
+              Incident detection quality may be degraded.
+
+    # ── Backend availability (K8s) ────────────────────────────────────────
+    - name: helios.backend
+      interval: 30s
+      rules:
+        - alert: HeliosBackendDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="pfe", deployment="backend"} == 0
+          for: 3m
+          labels:
+            severity: critical
+            component: backend
+          annotations:
+            summary: "HELIOS backend has 0 available replicas"
+            description: >
+              The backend deployment in namespace pfe has no available replicas for > 3 min.
+              Incident creation, Camunda workflows, and operator UI are all unavailable.
+
+        - alert: HeliosBackendLowReplicas
+          expr: |
+            kube_deployment_status_replicas_available{namespace="pfe", deployment="backend"} < 2
+          for: 5m
+          labels:
+            severity: warning
+            component: backend
+          annotations:
+            summary: "HELIOS backend running with < 2 replicas (HA broken)"
+            description: >
+              backend has fewer than 2 available replicas — HPA target is 2.
+              A single-replica backend has no HA; a second pod failure causes full outage.
+
+    # ── Monitoring VM Prometheus (.160) ───────────────────────────────────
+    - name: helios.monitoring-vm
+      interval: 60s
+      rules:
+        - alert: HeliosPrometheusStorageNearFull
+          expr: |
+            prometheus_tsdb_storage_blocks_bytes / (1024 * 1024 * 1024) > 18
+          for: 10m
+          labels:
+            severity: warning
+            component: prometheus
+            zone: monitoring
+          annotations:
+            summary: "Prometheus TSDB storage > 18 GB on VM .160"
+            description: >
+              Prometheus data directory is growing toward disk capacity.
+              Consider reducing retention (configure-loki-retention.sh sets Loki;
+              set --storage.tsdb.retention.time=15d on Prometheus).
+
+    # ── CNPG PostgreSQL ───────────────────────────────────────────────────
+    - name: helios.postgres
+      interval: 30s
+      rules:
+        - alert: HeliosPostgresReplicationLag
+          expr: |
+            cnpg_pg_replication_lag > 30
+          for: 5m
+          labels:
+            severity: warning
+            component: postgres
+          annotations:
+            summary: "CNPG replica replication lag > 30s"
+            description: >
+              The CNPG standby is lagging more than 30 seconds behind the primary.
+              Check: kubectl get clusters -n pfe  and  kubectl describe cluster postgres-cluster -n pfe.
+
+        - alert: HeliosPostgresPrimaryDown
+          expr: |
+            cnpg_collector_up{role="primary"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: postgres
+          annotations:
+            summary: "CNPG primary instance is down"
+            description: >
+              The primary PostgreSQL pod is not reporting metrics. A failover may be in progress.
+              Check: kubectl get pods -n pfe -l cnpg.io/cluster=postgres-cluster.

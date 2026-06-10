@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     llm_model: str = "aiops-sre-q4"
     llm_fallback_model: str = "qwen2.5:3b"
     llm_second_fallback_model: str = "qwen2:0.5b"
+    # Fine-tuned 0.5B specialist used by InferenceEngine as the LoRA opinion gate
+    llm_specialist_model: str = "aiops-sre-ft-v2"
 
     default_window_minutes: int = 5
     model_path: str = "model_artifacts/model.joblib"
@@ -51,6 +53,10 @@ class Settings(BaseSettings):
     dataset_path: str = "datasets/aiops_training_dataset.csv"
     # Minimum resolved incidents required to trigger LLM fine-tuning
     llm_retrain_min_incidents: int = 20
+    # When True, auto_trainer launches the LLM fine-tuning script automatically after XGBoost
+    # retraining if the dataset has >= llm_retrain_min_incidents rows.
+    # Disabled by default — fine-tuning is GPU-intensive; enable with AIOPS_LLM_AUTO_RETRAIN=true.
+    llm_auto_retrain: bool = False
 
     # Autonomous monitor — iacamunda independently monitors the entire K8s cluster
     autonomous_monitor_enabled: bool = True

@@ -9,10 +9,17 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+import java.net.HttpURLConnection;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -42,17 +49,45 @@ public class AIOpsClientService {
     public AIOpsClientService(
             RestClient.Builder builder,
             @Value("${aiops.service.base-url}") String baseUrl,
-            @Value("${aiops.service.api-key:}") String apiKey
+            @Value("${aiops.service.api-key:}") String apiKey,
+            @Value("${aiops.service.tls-skip-verify:false}") boolean tlsSkipVerify
     ) {
-        this.restClient = builder
+        RestClient.Builder b = builder
                 .baseUrl(baseUrl)
                 .requestInterceptor((req, body, execution) -> {
                     String traceId = MDC.get("traceId");
                     if (traceId != null) req.getHeaders().set("X-Request-ID", traceId);
                     if (apiKey != null && !apiKey.isBlank()) req.getHeaders().set("X-API-Key", apiKey);
                     return execution.execute(req, body);
-                })
-                .build();
+                });
+
+        // For dev/lab use only: skip TLS certificate verification when the AI service
+        // is fronted by a self-signed nginx cert and no CA import has been done.
+        if (tlsSkipVerify) {
+            log.warn("aiops.service.tls-skip-verify=true — TLS certificate validation DISABLED (dev/lab only)");
+            b = b.requestFactory(() -> {
+                try {
+                    SSLContext ctx = SSLContext.getInstance("TLS");
+                    ctx.init(null, new TrustManager[]{new X509TrustManager() {
+                        public void checkClientTrusted(X509Certificate[] c, String a) {}
+                        public void checkServerTrusted(X509Certificate[] c, String a) {}
+                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    }}, new SecureRandom());
+                    return new SimpleClientHttpRequestFactory() {
+                        @Override protected void prepareConnection(HttpURLConnection conn, String method) throws java.io.IOException {
+                            if (conn instanceof javax.net.ssl.HttpsURLConnection h) {
+                                h.setSSLSocketFactory(ctx.getSocketFactory());
+                                h.setHostnameVerifier((host, session) -> true);
+                            }
+                            super.prepareConnection(conn, method);
+                        }
+                    };
+                } catch (Exception e) {
+                    throw new IllegalStateException("Failed to build skip-verify SSL context", e);
+                }
+            });
+        }
+        this.restClient = b.build();
     }
 
     private boolean isCircuitOpen() {

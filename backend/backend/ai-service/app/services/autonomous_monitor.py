@@ -17,7 +17,9 @@ Cycle:
 """
 
 import asyncio
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -78,13 +80,60 @@ class AutonomousMonitor:
         self._last_anomalies_found = 0
         self._recent_errors: list[str] = []
 
-        # (namespace, app) → monotonic timestamp when cooldown expires
-        self._cooldowns: dict[tuple[str, str], float] = {}
+        # (namespace, app) → monotonic timestamp when cooldown expires.
+        # Persisted to disk so cooldowns survive service restarts and prevent
+        # incident storms immediately after an unplanned restart.
+        self._cooldown_file = os.environ.get(
+            "AIOPS_COOLDOWN_STATE_FILE", "/tmp/helios_cooldowns.json"
+        )
+        self._cooldowns: dict[tuple[str, str], float] = self._load_cooldowns()
 
         # Prometheus liveness — tracks consecutive failures to detect .160 outage
         self._prometheus_consecutive_failures: int = 0
         self._prometheus_down_incident_created: bool = False
         _PROMETHEUS_FAILURE_THRESHOLD = 3  # 3 consecutive misses → incident
+
+    # ------------------------------------------------------------------
+    # Cooldown persistence
+    # ------------------------------------------------------------------
+
+    def _load_cooldowns(self) -> dict[tuple[str, str], float]:
+        """Restore unexpired cooldowns from the state file on startup."""
+        try:
+            if not os.path.exists(self._cooldown_file):
+                return {}
+            with open(self._cooldown_file) as f:
+                raw: dict[str, float] = json.load(f)
+            now = time.monotonic()
+            # The file stores wall-clock expiry (epoch seconds) so the values
+            # remain valid across restarts (monotonic resets on reboot).
+            wall_now = time.time()
+            result: dict[tuple[str, str], float] = {}
+            for key, wall_expiry in raw.items():
+                remaining = wall_expiry - wall_now
+                if remaining > 0:
+                    ns, app = key.split("/", 1)
+                    result[(ns, app)] = now + remaining
+            logger.info("Restored %d active cooldown(s) from %s", len(result), self._cooldown_file)
+            return result
+        except Exception as exc:
+            logger.warning("Could not load cooldown state (%s) — starting fresh", exc)
+            return {}
+
+    def _save_cooldowns(self) -> None:
+        """Persist active cooldowns as wall-clock expiry times so they survive restarts."""
+        try:
+            now_mono = time.monotonic()
+            wall_now = time.time()
+            serialisable: dict[str, float] = {
+                f"{ns}/{app}": wall_now + (expires - now_mono)
+                for (ns, app), expires in self._cooldowns.items()
+                if expires > now_mono
+            }
+            with open(self._cooldown_file, "w") as f:
+                json.dump(serialisable, f)
+        except Exception as exc:
+            logger.warning("Could not save cooldown state: %s", exc)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -194,9 +243,18 @@ class AutonomousMonitor:
                 logger.debug("Cooldown active for %s/%s, skipping", namespace, app)
                 continue
 
-            explanation = await loop.run_in_executor(
-                None, self._check_app, namespace, app
-            )
+            _timeout = self._settings.autonomous_monitor_interval_seconds * 0.8
+            try:
+                explanation = await asyncio.wait_for(
+                    loop.run_in_executor(None, self._check_app, namespace, app),
+                    timeout=_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "check_app timeout (%.0fs) for %s/%s — skipping cycle",
+                    _timeout, namespace, app,
+                )
+                explanation = None
             if explanation:
                 app_results.append((namespace, app, explanation))
 
@@ -247,6 +305,8 @@ class AutonomousMonitor:
                     )
 
         self._last_anomalies_found = anomalies
+        if anomalies > 0:
+            self._save_cooldowns()
         logger.info(
             "Monitor cycle %d done — %d app(s), %d anomaly(s), %d total incidents",
             self._total_cycles, len(apps), anomalies, self._incidents_triggered,
@@ -345,6 +405,7 @@ class AutonomousMonitor:
                     self._incidents_triggered += 1
                     secs = self._settings.autonomous_monitor_cooldown_minutes * 60 * 2
                     self._cooldowns[("infra", "monitoring-vm")] = time.monotonic() + secs
+                    self._save_cooldowns()
 
     # ------------------------------------------------------------------
     # Orphan incident cleanup (L24)
@@ -428,6 +489,7 @@ class AutonomousMonitor:
                 self._incidents_triggered += 1
                 secs = self._settings.autonomous_monitor_cooldown_minutes * 60
                 self._cooldowns[("cluster", node)] = time.monotonic() + secs
+                self._save_cooldowns()
         # Mirror: auto-resolve NODE_NOT_READY incidents whose node is Ready again.
         await self._resolve_recovered_node_incidents(set(nodes))
 

@@ -49,8 +49,18 @@ class PlanOption:
 
 
 class InferenceEngine:
-    def __init__(self, model_bundle: ModelBundle) -> None:
+    def __init__(self, model_bundle: ModelBundle, settings=None) -> None:
         self.model_bundle = model_bundle
+        # LLM model names — read from settings so they can be changed without code edits.
+        # Defaults match the currently deployed Ollama models on .161.
+        if settings is not None:
+            self._llm_specialist_model = getattr(settings, "llm_specialist_model", "aiops-sre-ft-v2")
+            self._llm_explainer_model = getattr(settings, "llm_model", "aiops-sre-q4")
+            self._llm_fallback_model = getattr(settings, "llm_fallback_model", "qwen2.5:3b")
+        else:
+            self._llm_specialist_model = "aiops-sre-ft-v2"
+            self._llm_explainer_model = "aiops-sre-q4"
+            self._llm_fallback_model = "qwen2.5:3b"
 
     @property
     def model_loaded(self) -> bool:
@@ -71,9 +81,11 @@ class InferenceEngine:
         model_score = self._predict_incident_score(safe_features)
 
         if model_score is None:
+            # No trained model — fall back to heuristic rules only
             confidence = rule_score
         else:
-            confidence = (0.6 * rule_score) + (0.4 * model_score)
+            # ML is the primary signal (70 %); heuristic rules are the safety net (30 %).
+            confidence = (0.3 * rule_score) + (0.7 * model_score)
 
         confidence = max(0.0, min(1.0, self._finite(confidence)))
         memory_bytes = self._finite(safe_features.get("memory_working_set_bytes", 0.0))
@@ -726,7 +738,7 @@ class InferenceEngine:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": "aiops-sre-q4-backup",
+                        "model": self._llm_fallback_model,
                         "messages": [
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": ex1_u},
@@ -825,7 +837,7 @@ class InferenceEngine:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": "aiops-sre-ft-v2",  # retrained 0.5B: 86.8% vs 26.4% (v1) on held-out test
+                        "model": self._llm_specialist_model,
                         "messages": [
                             {"role": "system", "content": _sys},
                             {"role": "user", "content": "Trace shows: 7 restarts in window; container waiting CrashLoopBackOff; last termination Error. Pick the best type and action."},
@@ -842,15 +854,15 @@ class InferenceEngine:
                     },
                 )
             if resp.status_code != 200:
-                return {"model": "aiops-sre-ft-v2", "status": "unavailable", "consensus_with_ml": False}
+                return {"model": self._llm_specialist_model, "status": "unavailable", "consensus_with_ml": False}
             raw = (resp.json().get("message", {}).get("content", "") or "").strip()
             m = _re.search(r"\{.*\}", raw, _re.DOTALL)
             if not m:
-                return {"model": "aiops-sre-ft-v2", "status": "rejected_no_json", "consensus_with_ml": False}
+                return {"model": self._llm_specialist_model, "status": "rejected_no_json", "consensus_with_ml": False}
             try:
                 obj = _json.loads(m.group(0))
             except Exception:
-                return {"model": "aiops-sre-ft-v2", "status": "rejected_bad_json", "consensus_with_ml": False}
+                return {"model": self._llm_specialist_model, "status": "rejected_bad_json", "consensus_with_ml": False}
             # The small model is inconsistent about the field name (incident_type / type / eventType)
             # and the action key (recommended_action / action) — accept the common variants.
             s_type = str(obj.get("incident_type") or obj.get("type") or obj.get("eventType") or "").strip().upper()
@@ -863,10 +875,10 @@ class InferenceEngine:
                 and len(s_act) >= 2  # action is free-form/advisory — don't reject the opinion over it
             )
             if not valid:
-                return {"model": "aiops-sre-ft-v2", "status": "rejected_invalid_output",
+                return {"model": self._llm_specialist_model, "status": "rejected_invalid_output",
                         "consensus_with_ml": False, "raw_type": s_type[:40]}
             return {
-                "model": "aiops-sre-ft-v2",
+                "model": self._llm_specialist_model,
                 "status": "ok",
                 "incident_type": s_type,
                 "severity": s_sev,
@@ -989,7 +1001,7 @@ class InferenceEngine:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": "aiops-sre-q4",
+                        "model": self._llm_explainer_model,
                         "messages": [
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": user_msg},

@@ -40,10 +40,12 @@ class ProactiveService:
     """
 
     THRESHOLDS = {
-        "error_rate":   (0.05,  0.20,  0.40),   # warn, high, critical
-        "cpu_usage":    (0.70,  0.85,  0.95),
-        "memory_usage": (0.75,  0.88,  0.95),
-        "p95_latency":  (0.500, 1.0,   2.0),    # seconds
+        "error_rate":        (0.05,  0.20,  0.40),   # warn, high, critical
+        "cpu_usage":         (0.70,  0.85,  0.95),
+        "memory_usage":      (0.75,  0.88,  0.95),
+        "p95_latency":       (0.500, 1.0,   2.0),    # seconds
+        "db_pool_usage":     (0.60,  0.80,  0.95),   # DB connection pool utilisation ratio
+        "pod_restarts_rate": (0.02,  0.10,  0.30),   # restarts/min over the window
     }
 
     PREDICTION_HORIZON_MINUTES = 15  # predict up to 15 min in the future
@@ -77,6 +79,17 @@ class ProactiveService:
             "p95_latency": (
                 f'histogram_quantile(0.95, sum by(le)(rate(http_server_requests_seconds_bucket{{namespace="{namespace}",application="{app}"}}[2m])))',
                 self.THRESHOLDS["p95_latency"]
+            ),
+            # DB connection pool exhaustion — catches HikariCP / pgBouncer saturation early
+            "db_pool_usage": (
+                f'avg(hikaricp_connections_active{{namespace="{namespace}",application="{app}"}}) / '
+                f'avg(hikaricp_connections_max{{namespace="{namespace}",application="{app}"}})',
+                self.THRESHOLDS["db_pool_usage"]
+            ),
+            # Pod crash loop trend — rising restart rate predicts CrashLoopBackOff
+            "pod_restarts_rate": (
+                f'sum(rate(kube_pod_container_status_restarts_total{{namespace="{namespace}",container="{app}"}}[5m]))',
+                self.THRESHOLDS["pod_restarts_rate"]
             ),
         }
 
@@ -281,6 +294,10 @@ class ProactiveService:
             return "PREDICTED_OOM"
         if "p95_latency" in names:
             return "PREDICTED_LATENCY_DEGRADATION"
+        if "db_pool_usage" in names:
+            return "PREDICTED_DB_POOL_EXHAUSTION"
+        if "pod_restarts_rate" in names:
+            return "PREDICTED_CRASH_LOOP"
         return "PREDICTED_DEGRADATION"
 
     def _recommend_action(self, bad_trends: list[MetricTrend]) -> str:
@@ -290,6 +307,10 @@ class ProactiveService:
             return "SCALE_DEPLOYMENT"
         if "cpu_usage" in critical:
             return "SCALE_DEPLOYMENT"
+        if "db_pool_usage" in critical:
+            return "SCALE_DEPLOYMENT"
+        if "pod_restarts_rate" in critical:
+            return "RESTART_POD"
         if "error_rate" in critical:
             return "RESTART_POD"
         return "INVESTIGATE"

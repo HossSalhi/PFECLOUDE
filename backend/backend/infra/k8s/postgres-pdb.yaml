@@ -1,0 +1,19 @@
+---
+# PodDisruptionBudget for CNPG PostgreSQL cluster.
+#
+# CNPG manages its own HA (primary + standby, maxSyncReplicas=1), but without a PDB
+# Kubernetes can drain both pods simultaneously during a node maintenance,
+# causing a full database outage.
+#
+# minAvailable: 1 ensures at least one postgres pod (primary or standby) is always
+# running, so in-flight transactions can failover even during kubectl drain.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: pfe
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      cnpg.io/cluster: postgres
