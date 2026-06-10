@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -170,6 +171,8 @@ class DriftDetector:
         return report
 
     def should_retrain_for_drift(self) -> bool:
+        if self._reference_locked and not self._last_report:
+            self.compute_drift()
         return self._last_report.get("retrain_recommended", False)
 
     def reset_reference(self) -> None:
@@ -188,7 +191,9 @@ class DriftDetector:
                 "reference_locked": self._reference_locked,
                 "prediction_count": self._prediction_count,
             }
-            self._path.write_text(json.dumps(state))
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state))
+            os.replace(str(tmp), str(self._path))
         except Exception as exc:
             logger.warning("DriftDetector save failed: %s", exc)
 

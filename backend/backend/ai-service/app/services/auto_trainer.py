@@ -66,6 +66,7 @@ class AutoTrainer:
         self._trigger_count = retrain_trigger_count
         self._llm_auto_retrain = llm_auto_retrain
         self._llm_retrain_min_incidents = llm_retrain_min_incidents
+        self._last_harvest_ts: float = 0.0
         self._new_incidents: int = 0
         self._is_training: bool = False
         self._last_retrain: dict[str, Any] | None = self._load_last_retrain()
@@ -437,8 +438,12 @@ class AutoTrainer:
                 return 0
 
             new_rows = []
+            max_ts = self._last_harvest_ts
             for meta in metadatas:
                 if not meta or not meta.get("incident_type"):
+                    continue
+                ts = float(meta.get("timestamp", 0.0))
+                if ts <= self._last_harvest_ts:
                     continue
                 row: dict = {
                     "incident": 1 if meta.get("resolved", True) else 0,
@@ -448,6 +453,8 @@ class AutoTrainer:
                 for feat in _CHROMA_FEATURES:
                     row[feat] = float(meta.get(feat, 0.0))
                 new_rows.append(row)
+                if ts > max_ts:
+                    max_ts = ts
 
             if not new_rows:
                 return 0
@@ -465,10 +472,11 @@ class AutoTrainer:
             incoming = incoming[[c for c in existing.columns if c in incoming.columns]]
             combined = pd.concat([existing, incoming], ignore_index=True)
             combined.to_csv(str(csv_path), index=False)
+            self._last_harvest_ts = max_ts
             return len(new_rows)
 
         except Exception as exc:
-            logger.debug("AutoTrainer: ChromaDB harvest skipped (%s)", exc)
+            logger.warning("AutoTrainer: ChromaDB harvest skipped (%s)", exc)
             return 0
 
     def _save_last_retrain(self, result: dict) -> None:

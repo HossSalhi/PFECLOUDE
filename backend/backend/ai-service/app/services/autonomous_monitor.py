@@ -229,7 +229,7 @@ class AutonomousMonitor:
 
         self._total_cycles += 1
         self._last_run_utc = datetime.now(timezone.utc).isoformat()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Prometheus watchdog: detect .160 outage without Alertmanager
         await self._check_prometheus_health(loop)

@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 from typing import Optional
 
@@ -23,6 +24,7 @@ from app.services.correlation_service import CorrelationService
 from app.services.proactive_service import ProactiveService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Set by main.py lifespan after monitor is created
 _monitor = None
@@ -82,7 +84,8 @@ def predict(request: PredictRequest) -> PredictResponse:
         return response
     except Exception as exc:
         PREDICT_REQUESTS_TOTAL.labels(outcome="failure").inc()
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
+        logger.exception("Prediction failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal prediction error — see service logs") from exc
 
 
 @router.post("/learn", response_model=LearnResponse)
@@ -130,7 +133,8 @@ def correlate(request: CorrelateRequest) -> CorrelateResponse:
             explanation=result.explanation
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Correlation failed: {exc}") from exc
+        logger.exception("Correlation failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal correlation error — see service logs") from exc
 
 
 @router.get("/monitor/status")
@@ -173,7 +177,8 @@ def predict_proactive(request: ProactiveRequest) -> ProactiveResponse:
             recommended_action=result.recommended_action
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Proactive prediction failed: {exc}") from exc
+        logger.exception("Proactive prediction failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal proactive prediction error — see service logs") from exc
 
 
 @router.get("/monitor/maintenance")

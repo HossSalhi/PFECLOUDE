@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import concurrent.futures
 import math
 
 import numpy as np
@@ -63,6 +64,9 @@ class InferenceEngine:
             self._llm_explainer_model = "aiops-sre-q4"
             self._llm_fallback_model = "qwen2.5:3b"
             self._llm_timeout = 13.0
+        self._llm_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="llm-parallel"
+        )
 
     @property
     def model_loaded(self) -> bool:
@@ -378,22 +382,20 @@ class InferenceEngine:
                 if not skip_llm:
                     # Run explainer + specialist in parallel threads so total LLM
                     # latency = max(explainer, specialist) instead of sum.
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    with ThreadPoolExecutor(max_workers=2) as _pool:
-                        _fut_why = _pool.submit(
-                            self._explain_why, incident_type, severity, confidence, ev, action
-                        )
-                        _fut_spec = _pool.submit(
-                            self._specialist_opinion, incident_type, severity, action, ev
-                        )
-                        try:
-                            _llm_why = _fut_why.result(timeout=self._llm_timeout)
-                        except Exception:
-                            _llm_why = None
-                        try:
-                            specialist = _fut_spec.result(timeout=self._llm_timeout)
-                        except Exception:
-                            specialist = None
+                    _fut_why = self._llm_executor.submit(
+                        self._explain_why, incident_type, severity, confidence, ev, action
+                    )
+                    _fut_spec = self._llm_executor.submit(
+                        self._specialist_opinion, incident_type, severity, action, ev
+                    )
+                    try:
+                        _llm_why = _fut_why.result(timeout=self._llm_timeout)
+                    except Exception:
+                        _llm_why = None
+                    try:
+                        specialist = _fut_spec.result(timeout=self._llm_timeout)
+                    except Exception:
+                        specialist = None
                     if _llm_why and self._llm_ok(_llm_why, _rc):
                         why = _llm_why
                 decision_explanation = (
