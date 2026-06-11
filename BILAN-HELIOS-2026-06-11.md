@@ -87,7 +87,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L5 | F1=1.0 trompeur | 🔴 VRAI | Corollaire L1. |
 | L6 | Alerting Prometheus | 🟢 FAIT | `prometheus-rules.yaml` (7 règles). |
 | L7 | .160 SPOF | 🟠 | `incluster-prometheus.yaml` existe (fédération). Déploiement à confirmer. |
-| L8 | node-exporters down | 🟠 INFRA | `systemctl enable --now node_exporter` sur .160/.161. |
+| L8 | node-exporters down | 🟢 **FAIT 11/06** | 3 nœuds K8s (.153/.155/.158) étaient down ; node_exporter installé+démarré → **5/5 UP** dans Prometheus (vérifié). |
 | L9 | Logs = keyword | 🟢 FAIT | `log_features.py` regex compilées + patterns Java. |
 | L10 | Corrélation multi-signaux | 🟢 FAIT | `autonomous_monitor.py:306` MULTI_SIGNAL_DEGRADATION. |
 | L11 | RESTART_VM | 🟠 INFRA | Code client présent (`KubernetesRemediationExecutor:145`) ; watchdog à déployer sur VMs. |

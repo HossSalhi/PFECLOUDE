@@ -11,9 +11,12 @@ Installé et vérifié sur le **master (192.168.148.153)** :
 
 Réinstaller : `scp etcd-backup.sh kube@192.168.148.153:/tmp/ && ssh ... 'sudo install -m755 /tmp/etcd-backup.sh /usr/local/bin/'`
 
-## L8 — node_exporter ✅ (vérifié OK sur .161)
-`.161` exporte déjà sur `:9100` (port en écoute). `.160` non joignable en SSH `kube`
-(clé/user différent) — à vérifier avec le compte d'admin de la VM monitoring.
+## L8 — node_exporter ✅ DÉPLOYÉ (5/5 UP, vérifié 2026-06-11)
+Avant : `job=vm-node-exporters` → .160/.161 UP mais **.153/.155/.158 (nœuds K8s) DOWN**.
+Action : `install-node-exporter.sh` (binaire + `node_exporter.service` DynamicUser) sur les
+3 nœuds. Après : **5/5 UP** dans Prometheus → métriques OS des nœuds visibles dans Grafana.
+- `.160` atteignable via **rebond** `ssh kube@.153 'ssh kube@.160 …'` (clé du master autorisée
+  sur .160 ; la clé locale ne l'est pas). `.160`/`.161` exportaient déjà sur :9100.
 
 ## L20 — Registry Docker local ⏸️ script fourni, NON exécuté (risque à chaud)
 Reconfigurer containerd (`insecure registry`) sur les 3 nœuds + restart containerd
