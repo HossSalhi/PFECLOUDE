@@ -6,6 +6,40 @@
 
 ---
 
+## 0. TESTS RÉELS EXÉCUTÉS (2026-06-11, cluster vivant)
+
+Tests **réels, non injectés** — arrêt physique des VMs via `vmrun` (VMware Workstation),
+vérifs via `kubectl` + API HELIOS. Cluster : master(.153), worker1(.158), worker2(.155).
+
+### Test 1 — Arrêt physique worker1 (09:20)
+| Vérif | Résultat réel |
+|-------|---------------|
+| Node | `k8s-worker1` → **NotReady** (~45s) |
+| HA service | backend **HTTP 200** via worker2, 1/2 réplicas servent |
+| CNPG | primary `postgres-1` intact |
+| IA .161 | intacte (hors cluster) ✓ |
+| **Détection IA** | cycle 96 : `incidents_triggered` **0 → 1** → détectée par l'IA (pas d'Alertmanager) |
+| Recovery | Ready en ~35s, backend **2/2** rétabli |
+
+### Test 2 — Arrêt physique worker2 (09:24) — *avec failover DB*
+| Vérif | Résultat réel |
+|-------|---------------|
+| Node | `k8s-worker2` → **NotReady** (~37s) |
+| HA service | backend **HTTP 200** via worker1, 1/2 réplicas servent |
+| **Failover CNPG** | primary **`postgres-1` → `postgres-2`** automatiquement ✓✓ |
+| Recovery | Ready en ~35s, backend **2/2**, CNPG sain |
+
+✅ **HA validée pour les deux workers** : service joignable (HTTP 200) à chaque arrêt,
+base basculée seule, node-down détecté par l'IA, cluster entièrement récupéré.
+**HELIOS resté opérationnel** (101 cycles, 0 erreur). Un worker à la fois.
+
+**pytest réel** : `test_metric_features` ✓ ; **1 vrai bug corrigé** (constructeur
+`ModelBundle` périmé 6→8 args bloquant `test_inference_rules`). Reste = drift d'assertions
+8-classes vs classifieur 52-classes (à réconcilier par l'équipe).
+Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
+
+---
+
 ## 1. L'IA est-elle réelle / intelligente / durable ?
 
 **Ingénierie réelle et durable ; intelligence bridée par les données d'entraînement.**
