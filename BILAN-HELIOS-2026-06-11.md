@@ -98,7 +98,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L16 | Notif externe / email | 🟢 FAIT | `EmailNotificationService` + `notifyEscalation`. Besoin : config SMTP (voir EMAIL-SETUP.md). |
 | L17 | .161 SPOF orchestration | 🔴 VRAI | Fallback direct non implémenté. |
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
-| L19 | Backup etcd | 🟠 INFRA | PG: `postgres-scheduled-backup.yaml` ✔ ; etcd cron à ajouter sur master. |
+| L19 | Backup etcd | 🟢 **FAIT 11/06** | Cron 6h déployé+vérifié sur master (`/usr/local/bin/etcd-backup.sh`, 1er snapshot 23 MB). PG déjà via `postgres-scheduled-backup.yaml`. |
 | L20 | Registry local | 🟠 INFRA | Registry v2 sur .160 à déployer. |
 | L21 | NetworkPolicies | 🟢 FAIT | `network-policy.yaml` complet (default-deny + egress scopé + fix label CNPG). |
 | L22 | ChromaDB/RAG | 🟢 FAIT | `memory_store.py` actif, mode persistant .161. |
