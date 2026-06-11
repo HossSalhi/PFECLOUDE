@@ -107,7 +107,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
 | L19 | Backup etcd | 🟢 **FAIT 11/06** | Cron 6h déployé+vérifié sur master (`/usr/local/bin/etcd-backup.sh`, 1er snapshot 23 MB). PG déjà via `postgres-scheduled-backup.yaml`. |
 | L20 | Registry local | 🟠 INFRA | Registry v2 sur .160 à déployer. |
-| L21 | NetworkPolicies | 🟠 **CORRIGÉ, à appliquer en maintenance** | `network-policy.yaml` complété (sonde kubelet CNPG :8000 + email :2525) et **validé** `kubectl apply --dry-run=server` OK. Non appliqué live (default-deny à chaud) → fenêtre de maintenance avec vérif connectivité + rollback `kubectl delete`. |
+| L21 | NetworkPolicies | 🟢 **LIVE 11/06** | 11 policies APPLIQUÉES + vérifiées (sonde CNPG :8000, email :2525, podinfo :9898). 0 restart, backend HTTP 200, scrape Prometheus up=1, détection IA OK. Rollback = `kubectl delete -f network-policy.yaml`. |
 | L22 | ChromaDB/RAG | 🟢 FAIT | `memory_store.py` actif, mode persistant .161. |
 | L23 | Tests / CI | 🟢 FAIT | `.github/workflows/` (ai-ci pytest, backend, frontend, model-train) + `tests/` (4 fichiers). |
 | L24 | Incidents orphelins | 🟢 FAIT | `autonomous_monitor.py:464` cleanup. |

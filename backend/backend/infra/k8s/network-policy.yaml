@@ -110,6 +110,27 @@ spec:
         - protocol: TCP
           port: 9187
 ---
+# Autoriser l'accès à podinfo (app de démo, port 9898) depuis le sous-réseau interne
+# (sondes kubelet + accès interne) — sinon default-deny le coupe.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-podinfo-ingress
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      app: podinfo
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.148.0/24
+      ports:
+        - protocol: TCP
+          port: 9898
+---
 # Allow external Prometheus (monitoring VM .160, scrape direct) to scrape postgres metrics exporter
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
