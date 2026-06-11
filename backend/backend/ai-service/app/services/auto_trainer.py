@@ -71,6 +71,10 @@ class AutoTrainer:
         self._new_incidents: int = 0
         self._is_training: bool = False
         self._train_lock = threading.Lock()
+        # Guards the spawn decision so concurrent learn() calls don't each start a
+        # background retrain thread that immediately dies on the train_lock.
+        self._trigger_lock = threading.Lock()
+        self._retrain_pending: bool = False
         self._last_retrain: dict[str, Any] | None = self._load_last_retrain()
 
     @property
@@ -96,7 +100,12 @@ class AutoTrainer:
         should, reason = self.should_retrain()
         if not should:
             return False
-        import threading
+        # Atomically claim the right to spawn — prevents duplicate threads when several
+        # learn() calls race here before retrain() has flipped _is_training.
+        with self._trigger_lock:
+            if self._is_training or self._retrain_pending:
+                return False
+            self._retrain_pending = True
         t = threading.Thread(target=self.retrain, kwargs={"trigger": reason}, daemon=True)
         t.start()
         logger.info("AutoTrainer: retraining started in background (reason: %s)", reason)
@@ -108,8 +117,10 @@ class AutoTrainer:
         Returns result dict with status, metrics, and version info.
         """
         if not self._train_lock.acquire(blocking=False):
+            self._retrain_pending = False
             return {"status": "already_training", "skipped": True}
         self._is_training = True
+        self._retrain_pending = False
         started_at = time.time()
         result: dict[str, Any] = {"started_at": started_at, "trigger": trigger}
 

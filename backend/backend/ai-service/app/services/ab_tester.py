@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -189,7 +190,9 @@ class ABTester:
     def _save(self) -> None:
         try:
             Path(AB_HISTORY_FILE).parent.mkdir(parents=True, exist_ok=True)
-            Path(AB_HISTORY_FILE).write_text(json.dumps({"history": self._history}, indent=2))
+            tmp = AB_HISTORY_FILE + ".tmp"
+            Path(tmp).write_text(json.dumps({"history": self._history}, indent=2))
+            os.replace(tmp, AB_HISTORY_FILE)
         except Exception as exc:
             logger.warning("ABTester: save failed: %s", exc)
 

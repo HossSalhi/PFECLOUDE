@@ -110,6 +110,8 @@ class ChromaMemoryStore:
     ) -> None:
         self._available = False
         self._collection = None
+        # Local count cache — avoids a ChromaDB round-trip on every query_similar().
+        self._count_cache = 0
         try:
             import chromadb
             from chromadb.config import Settings as ChromaSettings
@@ -139,9 +141,10 @@ class ChromaMemoryStore:
                 metadata={"hnsw:space": "cosine"},
             )
             self._available = True
+            self._count_cache = self._collection.count()
             logger.info(
                 "ChromaDB memory store ready (mode=%s, count=%d)",
-                mode, self._collection.count(),
+                mode, self._count_cache,
             )
         except ImportError:
             logger.warning(
@@ -176,12 +179,16 @@ class ChromaMemoryStore:
                 "confidence": round(memory.confidence, 4),
                 "timestamp": memory.timestamp,
             }
+            existing = self._collection.get(ids=[doc_id]).get("ids") or []
             self._collection.upsert(
                 ids=[doc_id],
                 embeddings=[vector],
                 metadatas=[metadata],
                 documents=[json.dumps(metadata)],
             )
+            # Keep the local count in sync — only a brand-new id grows the collection.
+            if doc_id not in existing:
+                self._count_cache += 1
         except Exception as exc:
             logger.warning("ChromaDB store failed: %s", exc)
 
@@ -194,7 +201,7 @@ class ChromaMemoryStore:
         if not self._available:
             return []
         try:
-            count = self._collection.count()
+            count = self._count_cache
             if count == 0:
                 return []
             k = min(n_results or self.MAX_RESULTS, count)

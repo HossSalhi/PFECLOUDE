@@ -34,6 +34,11 @@ class PredictorService:
         self._root_cause_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="root-cause"
         )
+        # Shared executor for fetching the two independent upstreams (Loki + Prometheus)
+        # in parallel on every predict — total latency becomes max() instead of sum().
+        self._upstream_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="upstream"
+        )
         self.loki_client = LokiClient(
             base_url=settings.loki_base_url,
             timeout_seconds=settings.loki_timeout_seconds,
@@ -104,19 +109,6 @@ class PredictorService:
             pod_pattern = f"{app}-.*"
             log_query = f'{{namespace="{namespace}",pod=~"{pod_pattern}"}}'
 
-            try:
-                lines = self.loki_client.query_range(
-                    query=log_query,
-                    start=window_start,
-                    end=window_end,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Loki query failed for %s/%s, using empty log window: %s",
-                    request.namespace, request.app, exc,
-                )
-                lines = []
-
             metric_queries = build_metric_queries(
                 namespace=request.namespace,
                 app=request.app,
@@ -126,16 +118,36 @@ class PredictorService:
                 monitoring_prometheus_port=self.settings.monitoring_prometheus_port,
                 ai_service_port=self.settings.ai_service_port,
             )
+
+            def _fetch_logs() -> list[str]:
+                try:
+                    return self.loki_client.query_range(
+                        query=log_query, start=window_start, end=window_end,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Loki query failed for %s/%s, using empty log window: %s",
+                        request.namespace, request.app, exc,
+                    )
+                    return []
+
+            def _fetch_metrics() -> dict[str, float]:
+                try:
+                    return self.prometheus_client.batch_query(metric_queries, at_time=window_end)
+                except Exception as exc:
+                    logger.warning(
+                        "Prometheus query failed for %s/%s, using default metric features: %s",
+                        request.namespace, request.app, exc,
+                    )
+                    return {}
+
+            # Loki and Prometheus are independent upstreams — fetch concurrently so the
+            # predict latency is max(T_loki, T_prometheus) rather than the sum.
+            logs_future = self._upstream_executor.submit(_fetch_logs)
+            metrics_future = self._upstream_executor.submit(_fetch_metrics)
+            lines = logs_future.result()
             metric_features = default_metric_features()
-            try:
-                metric_features.update(
-                    self.prometheus_client.batch_query(metric_queries, at_time=window_end)
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Prometheus query failed for %s/%s, using default metric features: %s",
-                    request.namespace, request.app, exc,
-                )
+            metric_features.update(metrics_future.result())
 
             if request.feature_overrides:
                 metric_features.update(
@@ -326,13 +338,18 @@ class PredictorService:
                         seen.append(reason)
                 return seen
 
-            waiting = _reasons("kube_pod_container_status_waiting_reason")
+            # The three reason queries are independent — run them in parallel.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+                f_waiting = ex.submit(_reasons, "kube_pod_container_status_waiting_reason")
+                f_terminated = ex.submit(_reasons, "kube_pod_container_status_last_terminated_reason")
+                f_pod_reason = ex.submit(_reasons, "kube_pod_status_reason")
+                waiting = f_waiting.result()
+                terminated = f_terminated.result()
+                pod_reason = f_pod_reason.result()
             if waiting:
                 parts.append("container waiting: " + ", ".join(waiting))
-            terminated = _reasons("kube_pod_container_status_last_terminated_reason")
             if terminated:
                 parts.append("last termination: " + ", ".join(terminated))
-            pod_reason = _reasons("kube_pod_status_reason")
             if pod_reason:
                 parts.append("pod status: " + ", ".join(pod_reason))
             # Node-level fallback: detect VM/node power-off

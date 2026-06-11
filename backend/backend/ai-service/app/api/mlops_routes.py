@@ -15,17 +15,50 @@ POST /mlops/ab-test/promote           manually promote shadow to active
 """
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 mlops_router = APIRouter(prefix="/mlops", tags=["mlops"])
 
+# Cache the drift report for /mlops/status — compute_drift() recomputes per-feature PSI
+# over the whole window, which is wasteful under Grafana polling (every ~15s).
+_DRIFT_CACHE_TTL = 30.0
+_drift_cache: dict[str, Any] = {"ts": 0.0, "report": None}
+
 
 def _svc():
-    """Return the singleton PredictorService (and its MLOps sub-services)."""
+    """Return the singleton PredictorService with its MLOps sub-services.
+
+    Raises 503 when MLOps is disabled (mlops_enabled=False) — otherwise the
+    sub-services are None and every endpoint would surface a raw AttributeError 500.
+    """
     from app.api.routes import get_predictor_service
-    return get_predictor_service()
+    svc = get_predictor_service()
+    if (
+        svc.drift_detector is None
+        or svc.model_registry is None
+        or svc.auto_trainer is None
+        or svc.ab_tester is None
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="MLOps subsystem disabled — set AIOPS_MLOPS_ENABLED=true to enable it",
+        )
+    return svc
+
+
+def _cached_drift(svc) -> dict:
+    """Return the drift report, recomputing at most once per _DRIFT_CACHE_TTL seconds."""
+    now = time.time()
+    if _drift_cache["report"] is not None and (now - _drift_cache["ts"]) < _DRIFT_CACHE_TTL:
+        return _drift_cache["report"]
+    report = svc.drift_detector.compute_drift()
+    _drift_cache["report"] = report
+    _drift_cache["ts"] = now
+    return report
 
 
 # ------------------------------------------------------------------ #
@@ -38,7 +71,7 @@ def mlops_status() -> dict:
     from app.core.config import get_settings
     svc = _svc()
     settings = get_settings()
-    drift_report = svc.drift_detector.compute_drift()
+    drift_report = _cached_drift(svc)
     active = svc.model_registry.get_active()
     shadow = svc.model_registry.get_shadow()
     trainer_st = svc.auto_trainer.get_status()
