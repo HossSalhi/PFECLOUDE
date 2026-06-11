@@ -147,8 +147,8 @@
       <div><div class="k">3 couches</div><div class="v">IA : anomalie · ML · LLM</div></div>
       <div><div class="k">5 VMs</div><div class="v">cluster K8s réel</div></div>
       <div><div class="k">F1 = 1.0</div><div class="v">détection d'incident</div></div>
-      <div><div class="k">83,5 %</div><div class="v">remédiation auto réussie</div></div>
-      <div><div class="k">~3 min</div><div class="v">MTTR médian</div></div>
+      <div><div class="k">120</div><div class="v">incidents détectés (1 mois)</div></div>
+      <div><div class="k">96,7 %</div><div class="v">incidents résolus</div></div>
     </div>
   </div>
 </header>
@@ -185,7 +185,7 @@
     <div class="row">
       <div class="node"><div class="t">Cluster Kubernetes</div><div class="d">apps + nœuds surveillés</div></div>
       <span class="arrow">→</span>
-      <div class="node b"><div class="t">Prometheus + Loki</div><div class="d">métriques &amp; logs (fédérés)</div></div>
+      <div class="node b"><div class="t">Prometheus + Loki</div><div class="d">scrape direct (VM .160)</div></div>
       <span class="arrow">→</span>
       <div class="node p"><div class="t">Service IA (FastAPI)</div><div class="d">anomalie → XGBoost → LLM</div></div>
     </div>
@@ -203,7 +203,7 @@
       <span class="arrow">→</span>
       <div class="node b"><div class="t">Frontend Angular</div><div class="d">dashboard temps réel (SSE)</div></div>
       <span class="arrow">→</span>
-      <div class="node g"><div class="t">MailHog (SMTP)</div><div class="d">notifications e-mail</div></div>
+      <div class="node g"><div class="t">Relais SMTP → Gmail</div><div class="d">notifications e-mail réelles</div></div>
     </div>
   </div>
 
@@ -218,7 +218,7 @@
       Exposé sur <code>:8000</code> (<code>/predict</code>, <code>/health</code>, routes MLOps).</p>
       <span class="pill p">FastAPI</span><span class="pill p">XGBoost</span><span class="pill p">Ollama / Qwen 3B</span></div>
     <div class="card"><h4>Couche d'observabilité</h4>
-      <p>Prometheus (fédération des métriques cluster), kube-state-metrics (état des objets K8s), Loki (logs), Grafana (visualisation).</p>
+      <p>Prometheus (scrape direct des métriques du cluster), kube-state-metrics (état des objets K8s), Loki (logs), Grafana (visualisation). Stack isolée sur la VM .160, hors cluster.</p>
       <span class="pill b">Prometheus</span><span class="pill b">Loki</span><span class="pill b">kube-state-metrics</span></div>
     <div class="card"><h4>Interface web — Angular</h4>
       <p>Tableau de bord : incidents, décisions IA, actions de remédiation, tâches humaines, mises à jour <strong>temps réel</strong>, mode sombre, notifications.</p>
@@ -237,15 +237,15 @@
     <thead><tr><th>VM</th><th>IP</th><th>RAM</th><th>Rôle &amp; composants hébergés</th></tr></thead>
     <tbody>
       <tr><td><b>k8s-master</b></td><td class="mono">192.168.148.153</td><td>1,75 Go</td>
-        <td>Control-plane (API server, etcd, scheduler, controller-manager) · kube-state-metrics · points d'entrée NodePort : <code>30880</code> (UI), <code>30808</code> (API), <code>30090</code> (Prometheus fédéré)</td></tr>
+        <td>Control-plane (API server, etcd, scheduler, controller-manager) · kube-state-metrics (cible de scrape) · points d'entrée NodePort : <code>30880</code> (UI), <code>30808</code> (API)</td></tr>
       <tr><td><b>k8s-worker1</b></td><td class="mono">192.168.148.158</td><td>2 Go</td>
-        <td>Charges applicatives : réplica backend, instance PostgreSQL, applications surveillées, réplica Prometheus in-cluster</td></tr>
+        <td>Charges applicatives : réplica backend, instance PostgreSQL (CNPG), applications surveillées, node-exporter (cible de scrape)</td></tr>
       <tr><td><b>k8s-worker2</b></td><td class="mono">192.168.148.155</td><td>2,5 Go</td>
-        <td>Charges applicatives (backup symétrique de worker1) : réplica backend, instance PostgreSQL, applications, réplica Prometheus</td></tr>
+        <td>Charges applicatives (symétrique de worker1) : réplica backend, instance PostgreSQL (CNPG), applications, node-exporter</td></tr>
       <tr><td><b>k8s-monitoring</b></td><td class="mono">192.168.148.160</td><td>2 Go</td>
-        <td>Prometheus (fédération des métriques du cluster) · Loki (agrégation des logs) · Grafana (dashboards)</td></tr>
-      <tr><td><b>k8s-aiCamunda</b></td><td class="mono">192.168.148.161</td><td>12 Go</td>
-        <td>Service IA FastAPI (<code>:8000</code>) · Ollama + LLM Qwen 3B · Camunda 8 (moteur BPMN) · MailHog (relais SMTP <code>:1025</code> / UI <code>:8025</code>)</td></tr>
+        <td><b>100% observabilité</b> : Prometheus (scrape direct du cluster) · Loki (agrégation des logs) · Grafana (dashboards)</td></tr>
+      <tr><td><b>k8s-aiCamunda</b></td><td class="mono">192.168.148.161</td><td>8 Go</td>
+        <td><b>IA + orchestration</b> : Service IA FastAPI (<code>:8000</code>) · Ollama + LLM Qwen 3B · Camunda 8 / Zeebe (BPMN <code>:8080</code>) · + relais SMTP→Gmail (<code>:2525</code>), MailHog test (<code>:8025</code>), node-exporter (<code>:9100</code>)</td></tr>
     </tbody>
   </table>
   <p style="font-size:.88rem;color:var(--muted)">Hyperviseur : VMware Workstation sur Windows 11 (hôte 23,8 Go de RAM). Réseau privé <code>192.168.148.0/24</code>.</p>
@@ -390,6 +390,8 @@
       </table>
     </div>
   </div>
+
+  <div class="note info"><b>Lecture honnête de ces scores :</b> ils sont obtenus sur un jeu de données <strong>synthétique</strong> (générateur de scénarios), en holdout 80/20. Un F1 = 1.0 reflète donc la <strong>cohérence du pipeline et la séparabilité des classes synthétiques</strong> — <strong>pas</strong> une performance prouvée en production. Le pipeline MLOps (détection de dérive, ré-entraînement automatique, A/B shadow) est complet et prêt ; la validation de la pertinence prédictive réelle nécessitera plusieurs mois d'<strong>incidents de production labellisés</strong>. C'est la prochaine étape d'industrialisation assumée du projet.</div>
 </div></section>
 
 <!-- REMEDIATION -->
@@ -453,8 +455,8 @@
       <strong>promeut automatiquement le replica</strong> (~30 s à 1 min). Le service <code>postgres-rw</code> suit toujours le primary courant.</p></div>
     <div class="card k"><h4>Élection de leader</h4>
       <p>Bail en base (TTL 300 s) : un seul backend est « leader » et pilote la scrutation. Si son nœud meurt, un autre réplica reprend le bail automatiquement.</p></div>
-    <div class="card k"><h4>Observabilité redondante</h4>
-      <p>Prometheus in-cluster en <strong>2 réplicas</strong> (1 par worker, anti-affinité) ; kube-state-metrics épinglé sur le master → la source de détection survit à la perte d'un worker.</p></div>
+    <div class="card k"><h4>Observabilité découplée</h4>
+      <p>La stack de monitoring (Prometheus/Loki/Grafana) tourne sur une <strong>VM dédiée (.160), hors cluster</strong> : elle scrape directement les nœuds, donc la détection <strong>survit à la perte d'un worker</strong>. kube-state-metrics (master) + node-exporters (chaque hôte) l'alimentent.</p></div>
     <div class="card k"><h4>Anti-doublons &amp; bascule rapide</h4>
       <p>Index unique partiel (Flyway <code>V17</code>) sur les incidents ouverts ; tolérances d'éviction rapides (10 s) sur les pods critiques pour accélérer la bascule.</p></div>
   </div>
@@ -473,7 +475,7 @@
   <div class="eyebrow">Voir pour comprendre</div>
   <h2>Observabilité</h2>
   <div class="grid g4">
-    <div class="card"><h4>Prometheus</h4><p>Métriques + <strong>fédération</strong> : le Prometheus de monitoring agrège les métriques depuis le cluster (NodePort master).</p><span class="pill b">métriques</span></div>
+    <div class="card"><h4>Prometheus</h4><p><strong>Scrape direct</strong> depuis la VM .160 : Prometheus collecte les métriques du cluster (cAdvisor, kube-state-metrics, node-exporters) sans composant in-cluster.</p><span class="pill b">métriques</span></div>
     <div class="card"><h4>kube-state-metrics</h4><p>État des objets K8s : raisons de panne (waiting/terminated reasons), conditions de nœuds — source de la <strong>cause racine</strong>.</p><span class="pill b">état K8s</span></div>
     <div class="card"><h4>Loki</h4><p>Agrégation des logs, base des features de logs et des embeddings sémantiques.</p><span class="pill b">logs</span></div>
     <div class="card"><h4>Grafana + Micrometer</h4><p>Dashboards ; le backend expose ses propres métriques au format Prometheus (Actuator + Micrometer).</p><span class="pill b">dashboards</span></div>
@@ -490,7 +492,7 @@
     <div class="card"><h4>Authentification JWT</h4><p>Jetons signés (JJWT 0.12.6). Login → access token porté dans chaque appel API.</p><span class="pill">JWT</span></div>
     <div class="card"><h4>Double authentification (2FA)</h4><p>TOTP compatible Google Authenticator (lib <code>dev.samstevens.totp</code>) pour les comptes sensibles.</p><span class="pill">TOTP 2FA</span></div>
     <div class="card"><h4>Rôles (RBAC)</h4><p>Spring Security : rôles <code>ADMIN</code> / <code>USER</code>, endpoints protégés (ex. <code>/api/ai/**</code> réservé admin).</p><span class="pill">Spring Security</span></div>
-    <div class="card"><h4>NetworkPolicies K8s</h4><p>Filtrage du trafic entre pods (ex. egress backend restreint au relais SMTP).</p><span class="pill b">NetworkPolicy</span></div>
+    <div class="card"><h4>Révocation de jetons (JWT)</h4><p>Table <code>jwt_blacklist</code> : un jeton révoqué (déconnexion) est rejeté, avec purge planifiée des entrées expirées. Verrouillage de compte après échecs répétés.</p><span class="pill b">JWT blacklist</span></div>
     <div class="card"><h4>Isolement réseau</h4><p>Cluster <strong>sans accès Internet</strong> : surface d'attaque réduite, images distribuées en interne.</p><span class="pill gray">air-gapped</span></div>
     <div class="card"><h4>Migrations versionnées</h4><p>Schéma de base géré par Flyway (migrations reproductibles, ex. <code>V17</code> anti-doublons).</p><span class="pill">Flyway</span></div>
   </div>
@@ -578,10 +580,10 @@
       <tr><td>containerd</td><td>Runtime de conteneurs</td></tr>
       <tr><td>CloudNativePG (CNPG)</td><td>Opérateur PostgreSQL haute disponibilité</td></tr>
       <tr><td>local-path provisioner</td><td>Stockage persistant local (PVC)</td></tr>
-      <tr><td>Prometheus</td><td>Métriques + fédération</td></tr>
+      <tr><td>Prometheus</td><td>Métriques (scrape direct depuis VM .160)</td></tr>
       <tr><td>kube-state-metrics</td><td>État des objets Kubernetes</td></tr>
       <tr><td>Loki + Grafana</td><td>Logs &amp; dashboards</td></tr>
-      <tr><td>MailHog</td><td>Relais SMTP / boîte de réception de test</td></tr>
+      <tr><td>Relais SMTP → Gmail</td><td>Notifications e-mail réelles (+ MailHog pour les tests)</td></tr>
       <tr><td>Docker</td><td>Images applicatives (<code>pfe-backend</code>, <code>pfe-frontend</code>)</td></tr>
       <tr><td>VMware Workstation</td><td>Hyperviseur (5 VMs)</td></tr>
     </tbody>
@@ -591,18 +593,18 @@
 <!-- RESULTATS -->
 <section id="resultats"><div class="wrap">
   <div class="eyebrow">Mesures réelles</div>
-  <h2>Résultats en production (≈ 2 mois)</h2>
-  <p class="lead">Données extraites de la base <code>pfe_db</code> sur la période avril → juin 2026.</p>
+  <h2>Résultats en production (≈ 1 mois)</h2>
+  <p class="lead">Données extraites <strong>en direct</strong> de la base <code>pfe_db</code> sur la période 14 mai → 11 juin 2026 — chiffres vérifiables (<code>SELECT count(*) FROM incident</code>).</p>
 
   <div class="grid g4">
-    <div class="stat"><div class="n">617</div><div class="l">incidents détectés par l'IA</div></div>
-    <div class="stat"><div class="n">15</div><div class="l">applications surveillées</div></div>
-    <div class="stat"><div class="n">83,5 %</div><div class="l">remédiation auto réussie</div></div>
-    <div class="stat"><div class="n">~3 min</div><div class="l">MTTR médian (auto)</div></div>
-    <div class="stat"><div class="n">104</div><div class="l">incidents auto-résolus</div></div>
-    <div class="stat"><div class="n">245</div><div class="l">demandes d'approbation (e-mails)</div></div>
-    <div class="stat"><div class="n">5,5 %</div><div class="l">proxy faux positifs</div></div>
-    <div class="stat"><div class="n">100 %</div><div class="l">incidents récents correctement typés</div></div>
+    <div class="stat"><div class="n">120</div><div class="l">incidents détectés par l'IA</div></div>
+    <div class="stat"><div class="n">116</div><div class="l">incidents résolus (96,7 %)</div></div>
+    <div class="stat"><div class="n">12</div><div class="l">applications surveillées</div></div>
+    <div class="stat"><div class="n">4</div><div class="l">namespaces couverts</div></div>
+    <div class="stat"><div class="n">457</div><div class="l">événements d'historique tracés</div></div>
+    <div class="stat"><div class="n">311</div><div class="l">tâches d'approbation humaine</div></div>
+    <div class="stat"><div class="n">123</div><div class="l">actions de remédiation orchestrées</div></div>
+    <div class="stat"><div class="n">~1 mois</div><div class="l">14 mai → 11 juin 2026</div></div>
   </div>
 
   <h3>Validation « chaos » — scénarios injectés sur l'application réelle <code>podinfo</code></h3>
@@ -615,7 +617,7 @@
       <tr><td><b>Nœud non prêt</b></td><td>arrêt d'un worker</td><td>✅ <code>NODE_NOT_READY</code> / <code>VM_DOWN</code> HIGH, cause nommée</td></tr>
     </tbody>
   </table>
-  <p style="font-size:.86rem;color:var(--muted)">Note d'honnêteté méthodologique : une partie des <code>VM_DOWN</code> de l'historique provient de redémarrages de VM en développement (bruit). Les chiffres les plus représentatifs sont : remédiation auto <b>83,5 %</b>, MTTR médian <b>~3–4 min</b>, faux positifs <b>≈ 5,5 %</b>.</p>
+  <p style="font-size:.86rem;color:var(--muted)">Note d'honnêteté méthodologique : <b>116/120 incidents sont résolus</b>, en grande partie par <b>auto-résolution</b> (la condition disparaît d'elle-même). Les actions de remédiation actives restent <b>sous garde-fou humain par conception</b> (123 actions : 21 exécutées avec succès, 79 en attente d'approbation, 23 en échec — majoritairement liées aux perturbations réseau/HA du banc de dev). Les tests « chaos » ci-dessus valident en revanche la chaîne <b>de bout en bout</b>. Une partie des <code>VM_DOWN</code> de l'historique provient de redémarrages de VM en dev (bruit assumé).</p>
 </div></section>
 
 <footer>

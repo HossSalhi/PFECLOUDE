@@ -11,7 +11,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ConfigurationPropertiesScan
 @EnableScheduling
 @EnableAsync
-@EnableSpringDataWebSupport(pageSerializationMode = EnableSpringDataWebSupport.PageSerializationMode.VIA_DTO)
+// DIRECT = pagination "plate" (totalElements/totalPages à la racine) attendue par le frontend Angular.
+// VIA_DTO (défaut SB4) imbrique sous "page" et casse le compteur côté frontend → ne pas remettre.
+@EnableSpringDataWebSupport(pageSerializationMode = EnableSpringDataWebSupport.PageSerializationMode.DIRECT)
 public class BackendApplication {
 
 	public static void main(String[] args) {

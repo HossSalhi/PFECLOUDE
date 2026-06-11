@@ -28,7 +28,8 @@ log "1) Build image $IMAGE (Jib exploded, sans Docker ; devtools exclu via scope
 # On le met de côté le temps du build (Jib pulle alors en anonyme).
 DOCKERCFG="$HOME/.docker/config.json"; MOVED=0
 [ -f "$DOCKERCFG" ] && grep -q credsStore "$DOCKERCFG" 2>/dev/null && { mv "$DOCKERCFG" "$DOCKERCFG.helios.bak"; MOVED=1; }
-( cd "$BACKEND_DIR" && MAVEN_OPTS="-Xmx1100m" ./mvnw -q -DskipTests compile jib:buildTar -Djib.to.image="$IMAGE" )
+# MAVEN_HEAP réglable : sur hôte saturé (L18) baisser à -Xmx512m pour tenir dans la RAM libre.
+( cd "$BACKEND_DIR" && MAVEN_OPTS="${MAVEN_HEAP:--Xmx1100m}" ./mvnw -q -DskipTests compile jib:buildTar -Djib.to.image="$IMAGE" )
 rc=$?
 [ "$MOVED" = "1" ] && mv "$DOCKERCFG.helios.bak" "$DOCKERCFG"
 [ $rc -eq 0 ] || { log "build KO"; exit 1; }
@@ -57,8 +58,12 @@ for i in $(seq 1 24); do
   sleep 10
 done
 
-if [ $ok -eq 0 ] && [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://$HEALTH_IP:30880/actuator/health)" = "200" ]; then
-  log "✅ Déploiement $IMAGE OK (2/2, HTTP 200)"
+# NB: /actuator/health renvoie 403 en externe (endpoint sécurisé) mais l'appli est vivante.
+# readyReplicas==2 (sondes readiness passées) est la vraie garantie ; on accepte 200|403
+# (servi) et on rejette seulement 000/502/503/504 (mort/timeout).
+HC=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://$HEALTH_IP:30880/actuator/health)
+if [ $ok -eq 0 ] && { [ "$HC" = "200" ] || [ "$HC" = "403" ]; }; then
+  log "✅ Déploiement $IMAGE OK (2/2, HTTP $HC = servi)"
 else
   log "❌ Échec -> ROLLBACK vers $PREV"
   kubectl set image deployment/backend backend="$PREV" -n "$NS"
