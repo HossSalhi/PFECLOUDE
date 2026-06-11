@@ -90,7 +90,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L1 | Données synthétiques | 🔴 VRAI | `generate_synthetic_dataset.py`. **Faille de fond.** |
 | L2 | Apprentissage continu | 🟢 PARTIEL | `auto_trainer.py` harvest ChromaDB + retrain + drift triggers. |
 | L3 | Taxonomie fermée / UNKNOWN | 🟢 FAIT | `inference.py:314-340` UNKNOWN_ANOMALY → INVESTIGATE + approbation humaine. |
-| L4 | LLM 0.5B marginal | 🔴 VRAI | Par design (gaté). |
+| L4 | LLM 0.5B marginal | 🟢 **OK** | Tourne EN PARALLÈLE de l'explicateur (`_llm_executor`), borné par le même timeout → n'allonge pas `/predict`. Reste gaté par design (ML décide). |
 | L5 | F1=1.0 trompeur | 🔴 VRAI | Corollaire L1. |
 | L6 | Alerting Prometheus | 🟢 FAIT | `prometheus-rules.yaml` (7 règles). |
 | L7 | .160 SPOF | 🟠 | `incluster-prometheus.yaml` existe (fédération). Déploiement à confirmer. |
@@ -99,7 +99,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L10 | Corrélation multi-signaux | 🟢 FAIT | `autonomous_monitor.py:306` MULTI_SIGNAL_DEGRADATION. |
 | L11 | RESTART_VM | 🟠 INFRA | Code client présent (`KubernetesRemediationExecutor:145`) ; watchdog à déployer sur VMs. |
 | L12 | Rollback/drain manuels | 🔴 VRAI* | *Choix de sécurité.* `execution_mode` AUTO/RECOMMEND existe ; pas de seuil auto haute-confiance. |
-| L13 | Cooldown répétés | 🔴 VRAI | Cooldown par (ns,app), pas par cause. Fix complet = contrat inter-services. |
+| L13 | Cooldown répétés | 🟢 **FAIT 11/06** | Cooldown PAR CAUSE : `_check_app` renvoie la cause, `_cooldown_cause` ré-autorise un incident si la cause K8s change. Déployé+vérifié .161 (cycle propre). |
 | L14 | Dry-run | 🟢 FAIT | `KubernetesRemediationExecutor:69` `execute(plan, dryRun)` → `[DRY-RUN]`. |
 | L15 | 1 seul BPMN | 🔴 VRAI | Choix d'archi. |
 | L16 | Notif externe / email | 🟢 **FAIT+VÉRIFIÉ 11/06** | Backend activé (relais SMTP .161:2525), **email réel délivré** ("Email sent to houssamsalhi972@gmail.com"). Config durable dans `backend-configmap.yaml`. |

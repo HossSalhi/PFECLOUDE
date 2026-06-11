@@ -96,6 +96,11 @@ class AutonomousMonitor:
             "AIOPS_COOLDOWN_STATE_FILE", "/data/helios_cooldowns.json"
         )
         self._cooldowns: dict[tuple[str, str], float] = self._load_cooldowns()
+        # L13: cause K8s qui a posé le cooldown (mémoire seule, non persisté).
+        # Si une NOUVELLE cause apparaît pour la même app pendant le cooldown,
+        # on ré-autorise un incident (ex. OOM après un CrashLoop). Failure mode sûr :
+        # au pire un incident en trop, jamais un incident manqué.
+        self._cooldown_cause: dict[tuple[str, str], str] = {}
 
         # Debounce: track how many consecutive cycles each app has shown an anomaly.
         # An incident is created only when streak >= settings.autonomous_monitor_anomaly_streak.
@@ -268,17 +273,11 @@ class AutonomousMonitor:
         # --- Per-app analysis with debounce ---
         # An anomaly must persist for `streak_needed` consecutive cycles before
         # creating an incident. This prevents false positives from transient spikes.
-        app_results: list[tuple[str, str, str]] = []  # (namespace, app, explanation)
+        app_results: list[tuple[str, str, str, str]] = []  # (namespace, app, explanation, cause)
         for namespace, app in apps:
-            if self._in_cooldown(namespace, app):
-                logger.debug("Cooldown active for %s/%s, skipping", namespace, app)
-                # Reset streak during cooldown so it re-accumulates after cooldown expires
-                self._anomaly_streak.pop((namespace, app), None)
-                continue
-
             _timeout = self._settings.autonomous_monitor_interval_seconds * 0.8
             try:
-                explanation = await asyncio.wait_for(
+                checked = await asyncio.wait_for(
                     loop.run_in_executor(None, self._check_app, namespace, app),
                     timeout=_timeout,
                 )
@@ -287,13 +286,20 @@ class AutonomousMonitor:
                     "check_app timeout (%.0fs) for %s/%s — skipping cycle",
                     _timeout, namespace, app,
                 )
-                explanation = None
+                checked = None
 
-            if explanation:
+            if checked:
+                explanation, cause = checked
+                # L13: cooldown PAR CAUSE — la même cause reste en sourdine, mais une
+                # nouvelle cause K8s (ex. OOM après un CrashLoop) ré-autorise un incident.
+                if self._in_cooldown(namespace, app, cause):
+                    logger.debug("Cooldown actif %s/%s (cause=%s), skip", namespace, app, cause)
+                    self._anomaly_streak.pop((namespace, app), None)
+                    continue
                 streak = self._anomaly_streak.get((namespace, app), 0) + 1
                 self._anomaly_streak[(namespace, app)] = streak
                 if streak >= streak_needed:
-                    app_results.append((namespace, app, explanation))
+                    app_results.append((namespace, app, explanation, cause))
                 else:
                     logger.debug(
                         "Anomaly debounce for %s/%s (streak=%d/%d) — waiting for confirmation",
@@ -306,19 +312,19 @@ class AutonomousMonitor:
         # --- Multi-signal correlation window ---
         # Group by namespace: if 2+ apps are anomalous in the same namespace
         # within the same cycle → correlated infra cause.
-        ns_groups: dict[str, list[tuple[str, str, str]]] = {}
-        for ns, app, expl in app_results:
-            ns_groups.setdefault(ns, []).append((ns, app, expl))
+        ns_groups: dict[str, list[tuple[str, str, str, str]]] = {}
+        for ns, app, expl, cause in app_results:
+            ns_groups.setdefault(ns, []).append((ns, app, expl, cause))
 
         for ns, group in ns_groups.items():
             if len(group) >= 2:
                 # Correlated: create one MULTI_SIGNAL_DEGRADATION per namespace
-                affected = [app for _, app, _ in group]
+                affected = [app for _, app, _, _ in group]
                 logger.warning(
                     "MULTI-SIGNAL CORRELATION in %s: %d apps affected simultaneously: %s",
                     ns, len(affected), affected,
                 )
-                _, first_app, _ = group[0]
+                _, first_app, _, _ = group[0]
                 if not self._in_cooldown(ns, f"__correlated_{ns}"):
                     triggered = await self._trigger_backend(
                         ns, first_app,
@@ -332,12 +338,14 @@ class AutonomousMonitor:
                         self._incidents_triggered += 1
                         secs = self._settings.autonomous_monitor_cooldown_minutes * 60
                         self._cooldowns[(ns, f"__correlated_{ns}")] = time.monotonic() + secs
-                        for _, app, _ in group:
+                        self._cooldown_cause[(ns, f"__correlated_{ns}")] = "MULTI_SIGNAL_DEGRADATION"
+                        for _, app, _, cause in group:
                             self._cooldowns[(ns, app)] = time.monotonic() + secs
+                            self._cooldown_cause[(ns, app)] = cause  # L13
                             self._anomaly_streak.pop((ns, app), None)
             else:
                 # Isolated anomaly — normal single-app incident
-                ns_val, app, explanation = group[0]
+                ns_val, app, explanation, cause = group[0]
                 anomalies += 1
                 logger.warning("ANOMALY %s/%s: %s", ns_val, app, explanation)
                 triggered = await self._trigger_backend(ns_val, app)
@@ -345,10 +353,11 @@ class AutonomousMonitor:
                     self._incidents_triggered += 1
                     cooldown_secs = self._settings.autonomous_monitor_cooldown_minutes * 60
                     self._cooldowns[(ns_val, app)] = time.monotonic() + cooldown_secs
+                    self._cooldown_cause[(ns_val, app)] = cause  # L13
                     self._anomaly_streak.pop((ns_val, app), None)
                     logger.info(
-                        "Incident triggered for %s/%s — cooldown %dm",
-                        ns_val, app, self._settings.autonomous_monitor_cooldown_minutes,
+                        "Incident triggered for %s/%s (cause=%s) — cooldown %dm",
+                        ns_val, app, cause, self._settings.autonomous_monitor_cooldown_minutes,
                     )
 
         self._last_anomalies_found = anomalies
@@ -602,19 +611,29 @@ class AutonomousMonitor:
     # Analysis
     # ------------------------------------------------------------------
 
-    def _check_app(self, namespace: str, app: str) -> Optional[str]:
-        """Return anomaly explanation if HIGH/CRITICAL predicted, else None."""
+    def _check_app(self, namespace: str, app: str) -> Optional[tuple[str, str]]:
+        """Return (explanation, cause) if HIGH/CRITICAL predicted, else None.
+        `cause` = the proactive incident_type, used for per-cause cooldown (L13)."""
         try:
             result = self._proactive.predict_proactive(namespace, app, window_minutes=10)
             if result.predicted_incident and result.severity in ("HIGH", "CRITICAL"):
-                return result.explanation
+                return result.explanation, (result.incident_type or "UNKNOWN")
         except Exception as exc:
             logger.debug("Analysis failed for %s/%s: %s", namespace, app, exc)
         return None
 
-    def _in_cooldown(self, namespace: str, app: str) -> bool:
+    def _in_cooldown(self, namespace: str, app: str, cause: Optional[str] = None) -> bool:
+        """True if (namespace, app) is cooling down. When `cause` is given and DIFFERS
+        from the cause that set the cooldown, returns False so a new K8s cause
+        (e.g. OOM after a CrashLoop) is not suppressed (L13)."""
         expires = self._cooldowns.get((namespace, app), 0.0)
-        return time.monotonic() < expires
+        if time.monotonic() >= expires:
+            return False
+        if cause is not None:
+            stored = self._cooldown_cause.get((namespace, app))
+            if stored is not None and cause != stored:
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Backend notification — all IPs tried concurrently (FIRST_COMPLETED)
