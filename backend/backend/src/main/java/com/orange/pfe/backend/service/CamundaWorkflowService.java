@@ -25,6 +25,9 @@ public class CamundaWorkflowService {
 
     public static final String APPROVAL_MESSAGE_NAME = "incident-approval-decision";
     public static final String BPMN_RESOURCE_PATH = "camunda/incident-remediation.bpmn";
+    // L15 — workflow spécialisé nœud (drain/cordon/escalade VM = toujours approbation humaine)
+    public static final String NODE_BPMN_RESOURCE_PATH = "camunda/node-remediation.bpmn";
+    public static final String NODE_PROCESS_ID = "node-remediation";
 
     private static final Logger logger = LoggerFactory.getLogger(CamundaWorkflowService.class);
 
@@ -61,12 +64,29 @@ public class CamundaWorkflowService {
             requireClient()
                     .newDeployResourceCommand()
                     .addResourceFromClasspath(BPMN_RESOURCE_PATH)
+                    .addResourceFromClasspath(NODE_BPMN_RESOURCE_PATH)
                     .send()
                     .join();
-            logger.info("Camunda BPMN deployed from {}", BPMN_RESOURCE_PATH);
+            logger.info("Camunda BPMN deployed: {}, {}", BPMN_RESOURCE_PATH, NODE_BPMN_RESOURCE_PATH);
         } catch (Exception ex) {
-            logger.error("Unable to deploy Camunda BPMN resource {}", BPMN_RESOURCE_PATH, ex);
+            logger.error("Unable to deploy Camunda BPMN resources", ex);
         }
+    }
+
+    /**
+     * L15 — Dispatch by incident type. Node/VM-level incidents use the specialized
+     * node-remediation process (which forces human approval before drain/cordon/escalate).
+     * Everything else uses the default app remediation process.
+     */
+    private String resolveProcessId(String incidentType) {
+        if (incidentType == null) {
+            return camundaProperties.getProcessId();
+        }
+        String t = incidentType.toUpperCase();
+        if (t.startsWith("NODE_") || t.contains("NODE") || t.equals("MONITORING_DOWN") || t.equals("AI_SERVICE_DOWN")) {
+            return NODE_PROCESS_ID;
+        }
+        return camundaProperties.getProcessId();
     }
 
     public void startWorkflow(
@@ -85,9 +105,10 @@ public class CamundaWorkflowService {
         }
 
         try {
+            String processId = resolveProcessId(prediction.getIncidentType());
             ProcessInstanceEvent processInstanceEvent = requireClient()
                     .newCreateInstanceCommand()
-                    .bpmnProcessId(camundaProperties.getProcessId())
+                    .bpmnProcessId(processId)
                     .latestVersion()
                     .variables(buildVariables(workflow, action, plan, prediction))
                     .send()

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_NodeRemediation"
+                  targetNamespace="http://orange.pfe/backend/camunda">
+  <!--
+    L15 — Workflow spécialisé NŒUD (NODE_NOT_READY, node down, drain/cordon).
+    Différence avec incident-remediation : les actions au niveau nœud sont
+    DANGEREUSES (drain/cordon/escalade VM) -> on FORCE toujours l'approbation
+    humaine (pas de bypass auto-exec). Réutilise les mêmes job workers.
+  -->
+  <bpmn:message id="Message_ApprovalDecision_Node" name="incident-approval-decision">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="= workflowCorrelationKey" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+
+  <bpmn:process id="node-remediation" name="Node remediation" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_NodeIncident" name="Node incident">
+      <bpmn:outgoing>Flow_Start_To_Merge</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_MergeToApproval" name="Merge to approval wait">
+      <bpmn:incoming>Flow_Start_To_Merge</bpmn:incoming>
+      <bpmn:incoming>Flow_ExecutionFailed_To_Approval</bpmn:incoming>
+      <bpmn:incoming>Flow_VerificationFailed_To_Approval</bpmn:incoming>
+      <bpmn:outgoing>Flow_Merge_To_EBG</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:eventBasedGateway id="Gateway_WaitApprovalOrTimeout" name="Wait: approval or timeout">
+      <bpmn:incoming>Flow_Merge_To_EBG</bpmn:incoming>
+      <bpmn:outgoing>Flow_EBG_To_ApprovalWait</bpmn:outgoing>
+      <bpmn:outgoing>Flow_EBG_To_Timeout</bpmn:outgoing>
+    </bpmn:eventBasedGateway>
+
+    <bpmn:intermediateCatchEvent id="Event_WaitForApproval" name="Wait for approval">
+      <bpmn:incoming>Flow_EBG_To_ApprovalWait</bpmn:incoming>
+      <bpmn:outgoing>Flow_Approval_To_Decision</bpmn:outgoing>
+      <bpmn:messageEventDefinition messageRef="Message_ApprovalDecision_Node" />
+    </bpmn:intermediateCatchEvent>
+
+    <bpmn:intermediateCatchEvent id="Timer_ApprovalTimeout" name="Approval timeout">
+      <bpmn:incoming>Flow_EBG_To_Timeout</bpmn:incoming>
+      <bpmn:outgoing>Flow_Timeout_To_AutoEscalate</bpmn:outgoing>
+      <bpmn:timerEventDefinition>
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">= duration(approvalTimeoutIso)</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+
+    <bpmn:serviceTask id="Task_AutoEscalate" name="Auto-escalate (timeout)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="auto-escalate-incident" retries="1" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Timeout_To_AutoEscalate</bpmn:incoming>
+      <bpmn:outgoing>Flow_AutoEscalate_To_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_ApprovalDecision" name="Approval outcome">
+      <bpmn:incoming>Flow_Approval_To_Decision</bpmn:incoming>
+      <bpmn:outgoing>Flow_ApprovalApproved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ApprovalRejected</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ApprovalEscalated</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_ExecuteRemediation" name="Execute node remediation">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="execute-remediation" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ApprovalApproved</bpmn:incoming>
+      <bpmn:outgoing>Flow_Execute_To_ExecutionDecision</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_ExecutionResult" name="Execution succeeded?">
+      <bpmn:incoming>Flow_Execute_To_ExecutionDecision</bpmn:incoming>
+      <bpmn:outgoing>Flow_ExecutionSucceeded</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ExecutionFailed_To_Approval</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:intermediateCatchEvent id="Event_VerificationDelay" name="Wait verification delay">
+      <bpmn:incoming>Flow_ExecutionSucceeded</bpmn:incoming>
+      <bpmn:outgoing>Flow_Delay_To_Verify</bpmn:outgoing>
+      <bpmn:timerEventDefinition>
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">= duration(verificationDelayIso)</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+
+    <bpmn:serviceTask id="Task_VerifyRecovery" name="Verify recovery">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="verify-remediation" retries="3" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Delay_To_Verify</bpmn:incoming>
+      <bpmn:outgoing>Flow_Verify_To_RecoveryDecision</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_RecoveryResult" name="Recovered?">
+      <bpmn:incoming>Flow_Verify_To_RecoveryDecision</bpmn:incoming>
+      <bpmn:outgoing>Flow_RecoveryResolved</bpmn:outgoing>
+      <bpmn:outgoing>Flow_VerificationFailed_To_Approval</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:endEvent id="EndEvent_Resolved" name="Resolved">
+      <bpmn:incoming>Flow_RecoveryResolved</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:serviceTask id="Task_HandleRejection" name="Record rejection feedback">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="handle-incident-rejection" retries="1" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ApprovalRejected</bpmn:incoming>
+      <bpmn:outgoing>Flow_Rejection_To_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_Rejected" name="Rejected">
+      <bpmn:incoming>Flow_Rejection_To_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="EndEvent_Escalated" name="Escalated">
+      <bpmn:incoming>Flow_ApprovalEscalated</bpmn:incoming>
+      <bpmn:incoming>Flow_AutoEscalate_To_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- ── Sequence flows ─────────────────────────────────────────────────── -->
+    <bpmn:sequenceFlow id="Flow_Start_To_Merge" sourceRef="StartEvent_NodeIncident" targetRef="Gateway_MergeToApproval" />
+    <bpmn:sequenceFlow id="Flow_Merge_To_EBG" sourceRef="Gateway_MergeToApproval" targetRef="Gateway_WaitApprovalOrTimeout" />
+    <bpmn:sequenceFlow id="Flow_EBG_To_ApprovalWait" sourceRef="Gateway_WaitApprovalOrTimeout" targetRef="Event_WaitForApproval" />
+    <bpmn:sequenceFlow id="Flow_EBG_To_Timeout" sourceRef="Gateway_WaitApprovalOrTimeout" targetRef="Timer_ApprovalTimeout" />
+    <bpmn:sequenceFlow id="Flow_Timeout_To_AutoEscalate" sourceRef="Timer_ApprovalTimeout" targetRef="Task_AutoEscalate" />
+    <bpmn:sequenceFlow id="Flow_AutoEscalate_To_End" sourceRef="Task_AutoEscalate" targetRef="EndEvent_Escalated" />
+    <bpmn:sequenceFlow id="Flow_Approval_To_Decision" sourceRef="Event_WaitForApproval" targetRef="Gateway_ApprovalDecision" />
+    <bpmn:sequenceFlow id="Flow_ApprovalApproved" sourceRef="Gateway_ApprovalDecision" targetRef="Task_ExecuteRemediation">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= approvalDecision = "APPROVED"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ApprovalRejected" sourceRef="Gateway_ApprovalDecision" targetRef="Task_HandleRejection">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= approvalDecision = "REJECTED"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Rejection_To_End" sourceRef="Task_HandleRejection" targetRef="EndEvent_Rejected" />
+    <bpmn:sequenceFlow id="Flow_ApprovalEscalated" sourceRef="Gateway_ApprovalDecision" targetRef="EndEvent_Escalated">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= approvalDecision = "ESCALATED"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Execute_To_ExecutionDecision" sourceRef="Task_ExecuteRemediation" targetRef="Gateway_ExecutionResult" />
+    <bpmn:sequenceFlow id="Flow_ExecutionSucceeded" sourceRef="Gateway_ExecutionResult" targetRef="Event_VerificationDelay">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= executionSucceeded</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_ExecutionFailed_To_Approval" sourceRef="Gateway_ExecutionResult" targetRef="Gateway_MergeToApproval">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= not(executionSucceeded)</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Delay_To_Verify" sourceRef="Event_VerificationDelay" targetRef="Task_VerifyRecovery" />
+    <bpmn:sequenceFlow id="Flow_Verify_To_RecoveryDecision" sourceRef="Task_VerifyRecovery" targetRef="Gateway_RecoveryResult" />
+    <bpmn:sequenceFlow id="Flow_RecoveryResolved" sourceRef="Gateway_RecoveryResult" targetRef="EndEvent_Resolved">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= recoveryResolved</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_VerificationFailed_To_Approval" sourceRef="Gateway_RecoveryResult" targetRef="Gateway_MergeToApproval">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">= not(recoveryResolved)</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+  </bpmn:process>
+</bpmn:definitions>

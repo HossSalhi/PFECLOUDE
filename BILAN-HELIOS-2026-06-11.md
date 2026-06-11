@@ -101,7 +101,7 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L12 | Rollback/drain manuels | 🔴 VRAI* | *Choix de sécurité.* `execution_mode` AUTO/RECOMMEND existe ; pas de seuil auto haute-confiance. |
 | L13 | Cooldown répétés | 🟢 **FAIT 11/06** | Cooldown PAR CAUSE : `_check_app` renvoie la cause, `_cooldown_cause` ré-autorise un incident si la cause K8s change. Déployé+vérifié .161 (cycle propre). |
 | L14 | Dry-run | 🟢 FAIT | `KubernetesRemediationExecutor:69` `execute(plan, dryRun)` → `[DRY-RUN]`. |
-| L15 | 1 seul BPMN | 🔵 RESTE | Vrai feature : écrire node/db-remediation.bpmn (Zeebe) + workers + dispatch, puis **tester sur Camunda**. Pas faisable à l'aveugle (un BPMN malformé casse le déploiement). |
+| L15 | 1 seul BPMN | 🟢 **CODÉ+VALIDÉ 11/06** | `node-remediation.bpmn` (nœud = approbation forcée) **déployé+accepté par le Zeebe réel (HTTP 200)** + dispatcher `resolveProcessId()` (NODE_*→node-remediation) compilé. db-remediation + workers drain/réplication = enrichissement futur. Live au prochain build backend. |
 | L16 | Notif externe / email | 🟢 **FAIT+VÉRIFIÉ 11/06** | Backend activé (relais SMTP .161:2525), **email réel délivré** ("Email sent to houssamsalhi972@gmail.com"). Config durable dans `backend-configmap.yaml`. |
 | L17 | .161 SPOF orchestration | 🟢 **CODÉ+COMPILÉ 11/06** | Fallback : si Camunda down, `CamundaWorkflowService` exécute la remédiation directement via `RemediationExecutor` (gaté auto-exec). Compile OK (Maven). Live = au prochain build image backend. |
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
