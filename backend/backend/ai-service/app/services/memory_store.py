@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 # Key metric features used as the embedding vector for similarity search.
@@ -44,8 +46,6 @@ _VECTOR_DIM = len(_VECTOR_FEATURES)
 
 def _build_vector(features: dict[str, float]) -> list[float]:
     """Normalise metrics into a fixed-length similarity vector."""
-    import numpy as np
-
     SCALE = {
         "cpu_usage_cores": 2.0,
         "memory_working_set_bytes": 2_000_000_000.0,

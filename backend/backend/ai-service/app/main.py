@@ -30,9 +30,24 @@ async def _check_upstream(url: str, name: str) -> None:
         )
 
 
+def _warn_insecure_defaults(settings) -> None:
+    """Loudly flag insecure auth defaults so a misconfigured deploy is obvious in the logs."""
+    if not (settings.api_key or "").strip():
+        _startup_logger.warning(
+            "SECURITY: AIOPS_API_KEY is empty — service-to-service authentication is DISABLED. "
+            "Every endpoint is open. Set AIOPS_API_KEY in production."
+        )
+    if settings.autonomous_monitor_password == "admin-change-me":
+        _startup_logger.warning(
+            "SECURITY: autonomous_monitor_password is the built-in default 'admin-change-me'. "
+            "Set AIOPS_AUTONOMOUS_MONITOR_PASSWORD to a real secret."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    _warn_insecure_defaults(settings)
 
     # Non-blocking connectivity check — warns if Prometheus/Loki are down at boot
     await asyncio.gather(

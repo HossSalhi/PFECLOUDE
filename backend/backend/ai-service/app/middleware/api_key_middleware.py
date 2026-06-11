@@ -10,6 +10,8 @@ health probes always succeed without credentials.
 """
 from __future__ import annotations
 
+import hmac
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -30,7 +32,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             request.headers.get("X-API-Key")
             or _extract_api_key_from_auth(request.headers.get("Authorization", ""))
         )
-        if not incoming or incoming != self._api_key:
+        # Constant-time compare — `!=` short-circuits on the first differing byte,
+        # leaking the key length/prefix through response timing.
+        if not incoming or not hmac.compare_digest(incoming, self._api_key):
             return JSONResponse(
                 {"detail": "Invalid or missing API key. Set X-API-Key header."},
                 status_code=401,

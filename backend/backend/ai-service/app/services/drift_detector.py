@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -79,46 +80,63 @@ class DriftDetector:
         self._reference_locked = False
         self._prediction_count = 0
         self._last_report: dict[str, Any] = {}
+        # /predict and /mlops/drift run in FastAPI's threadpool — record() (writes) and
+        # compute_drift() (reads via list(deque)) can run concurrently across threads.
+        # A single lock serialises mutation and snapshotting to avoid "deque mutated
+        # during iteration" and torn _save() state.
+        self._lock = threading.Lock()
         self._load()
 
     def record(self, features: dict[str, float]) -> None:
         """Record feature values from one prediction for drift tracking."""
-        self._prediction_count += 1
-        for feat in MONITORED_FEATURES:
-            val = float(features.get(feat, 0.0))
-            if not self._reference_locked:
-                self._reference[feat].append(val)
-                if len(self._reference[feat]) >= self.REFERENCE_SIZE:
-                    self._reference_locked = True
-                    logger.info(
-                        "DriftDetector: reference window established (%d samples)",
-                        self.REFERENCE_SIZE,
-                    )
-            self._current[feat].append(val)
-        if self._prediction_count % 50 == 0:
-            self._save()
+        with self._lock:
+            self._prediction_count += 1
+            for feat in MONITORED_FEATURES:
+                val = float(features.get(feat, 0.0))
+                if not self._reference_locked:
+                    self._reference[feat].append(val)
+                    if len(self._reference[feat]) >= self.REFERENCE_SIZE:
+                        self._reference_locked = True
+                        logger.info(
+                            "DriftDetector: reference window established (%d samples)",
+                            self.REFERENCE_SIZE,
+                        )
+                self._current[feat].append(val)
+            should_save = self._prediction_count % 50 == 0
+            if should_save:
+                self._save()
 
     def compute_drift(self) -> dict[str, Any]:
         """Compute PSI and KS test for all monitored features. Returns full report."""
-        if not self._reference_locked:
-            ref_size = min(len(v) for v in self._reference.values()) if self._reference else 0
-            return {
-                "status": "warming_up",
-                "reference_samples": ref_size,
-                "required_samples": self.REFERENCE_SIZE,
-                "feature_drift": {},
-                "max_psi": 0.0,
-                "drifted_features": [],
-                "retrain_recommended": False,
+        # Snapshot both windows under the lock, then compute outside it so the (potentially
+        # slow) PSI/KS math never blocks concurrent record() calls from /predict.
+        with self._lock:
+            if not self._reference_locked:
+                ref_size = min(len(v) for v in self._reference.values()) if self._reference else 0
+                return {
+                    "status": "warming_up",
+                    "reference_samples": ref_size,
+                    "required_samples": self.REFERENCE_SIZE,
+                    "feature_drift": {},
+                    "max_psi": 0.0,
+                    "drifted_features": [],
+                    "retrain_recommended": False,
+                }
+            ref_snapshot = {
+                f: np.array(self._reference[f], dtype=np.float32) for f in MONITORED_FEATURES
             }
+            cur_snapshot = {
+                f: np.array(list(self._current[f]), dtype=np.float32) for f in MONITORED_FEATURES
+            }
+            prediction_count = self._prediction_count
 
         feature_drift: dict[str, dict] = {}
         max_psi = 0.0
         drifted: list[str] = []
 
         for feat in MONITORED_FEATURES:
-            ref = np.array(self._reference[feat], dtype=np.float32)
-            cur = np.array(list(self._current[feat]), dtype=np.float32)
+            ref = ref_snapshot[feat]
+            cur = cur_snapshot[feat]
             if len(cur) < 10:
                 continue
             psi = _psi(ref, cur)
@@ -142,9 +160,11 @@ class DriftDetector:
         try:
             from scipy.stats import ks_2samp
             for feat in MONITORED_FEATURES:
-                ref = np.array(self._reference[feat], dtype=np.float32)
-                cur = np.array(list(self._current[feat]), dtype=np.float32)
-                if len(cur) < 10 or feat not in feature_drift:
+                if feat not in feature_drift:
+                    continue
+                ref = ref_snapshot[feat]
+                cur = cur_snapshot[feat]
+                if len(cur) < 10:
                     continue
                 _, p = ks_2samp(ref, cur)
                 feature_drift[feat]["ks_p_value"] = round(float(p), 4)
@@ -157,9 +177,9 @@ class DriftDetector:
 
         report: dict[str, Any] = {
             "status": "drifted" if drifted else ("warning" if max_psi >= PSI_WARN else "stable"),
-            "reference_samples": len(self._reference[MONITORED_FEATURES[0]]),
-            "current_window_samples": len(self._current[MONITORED_FEATURES[0]]),
-            "total_predictions": self._prediction_count,
+            "reference_samples": len(ref_snapshot[MONITORED_FEATURES[0]]),
+            "current_window_samples": len(cur_snapshot[MONITORED_FEATURES[0]]),
+            "total_predictions": prediction_count,
             "max_psi": round(max_psi, 4),
             "drifted_features": drifted,
             "ks_drifted_features": ks_drifted,
@@ -167,20 +187,25 @@ class DriftDetector:
             "retrain_recommended": retrain,
             "computed_at": time.time(),
         }
-        self._last_report = report
+        with self._lock:
+            self._last_report = report
         return report
 
     def should_retrain_for_drift(self) -> bool:
-        if self._reference_locked and not self._last_report:
-            self.compute_drift()
-        return self._last_report.get("retrain_recommended", False)
+        with self._lock:
+            need_compute = self._reference_locked and not self._last_report
+        if need_compute:
+            self.compute_drift()  # acquires the lock itself — must not be held here
+        with self._lock:
+            return self._last_report.get("retrain_recommended", False)
 
     def reset_reference(self) -> None:
         """Reset reference window after retraining so the new model's baseline is rebuilt."""
-        self._reference = {f: [] for f in MONITORED_FEATURES}
-        self._reference_locked = False
-        self._last_report = {}
-        self._save()
+        with self._lock:
+            self._reference = {f: [] for f in MONITORED_FEATURES}
+            self._reference_locked = False
+            self._last_report = {}
+            self._save()
         logger.info("DriftDetector: reference reset — will rebuild from next %d predictions", self.REFERENCE_SIZE)
 
     def _save(self) -> None:

@@ -1,3 +1,5 @@
+import re
+
 ERROR_TERMS = (
     "error",
     "exception",
@@ -108,20 +110,24 @@ _NOISE_FRAGMENTS = (
 )
 
 
+# Pre-compiled alternation regexes — a single C-level scan per line beats an N-term
+# Python `in` loop. extract_log_features runs on up to ~5000 Loki lines per predict,
+# so this is on the hot path.
+_ERROR_RE = re.compile("|".join(re.escape(t) for t in ERROR_TERMS))
+_WARNING_RE = re.compile("|".join(re.escape(t) for t in WARNING_TERMS))
+_RESTART_RE = re.compile("|".join(re.escape(t) for t in RESTART_TERMS))
+_DB_RE = re.compile("|".join(re.escape(t) for t in DB_TERMS))
+_CRITICAL_RE = re.compile("|".join(re.escape(t) for t in CRITICAL_SINGLE_TERMS))
+_NOISE_FRAGMENT_RE = re.compile("|".join(re.escape(t) for t in _NOISE_FRAGMENTS))
+
+
 def _is_noise_line(text: str) -> bool:
     """Return True for framework/ORM debug lines that should not count as errors."""
     for prefix in _NOISE_PREFIXES:
         idx = text.find(prefix)
         if idx != -1 and idx < 60:  # prefix appears near the start (after timestamps)
             return True
-    for fragment in _NOISE_FRAGMENTS:
-        if fragment in text:
-            return True
-    return False
-
-
-def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
+    return _NOISE_FRAGMENT_RE.search(text) is not None
 
 
 def extract_log_features(lines: list[str]) -> dict[str, float]:
@@ -140,13 +146,13 @@ def extract_log_features(lines: list[str]) -> dict[str, float]:
 
     lowered = [line.lower() for line in lines]
     semantic = [line for line in lowered if not _is_noise_line(line)]
-    error_count = sum(1 for line in semantic if _contains_any(line, ERROR_TERMS))
-    warning_count = sum(1 for line in semantic if _contains_any(line, WARNING_TERMS))
-    restart_hits = sum(1 for line in semantic if _contains_any(line, RESTART_TERMS))
-    db_hits = sum(1 for line in semantic if _contains_any(line, DB_TERMS))
+    error_count = sum(1 for line in semantic if _ERROR_RE.search(line))
+    warning_count = sum(1 for line in semantic if _WARNING_RE.search(line))
+    restart_hits = sum(1 for line in semantic if _RESTART_RE.search(line))
+    db_hits = sum(1 for line in semantic if _DB_RE.search(line))
 
     # Critical single terms — a single occurrence is already significant
-    critical_hits = sum(1 for line in semantic if _contains_any(line, CRITICAL_SINGLE_TERMS))
+    critical_hits = sum(1 for line in semantic if _CRITICAL_RE.search(line))
 
     # Stack trace depth: consecutive "at " lines indicate exception propagation depth
     stack_depth = sum(
