@@ -50,6 +50,10 @@ data:
   INFRA_HEALTH_CAMUNDA_URL: "http://192.168.148.161:8080"
   INFRA_HEALTH_OLLAMA_URL: "http://192.168.148.161:11434"
   APP_SECURITY_CORS_ALLOWED_ORIGINS: "http://192.168.148.153:30880,http://192.168.148.158:30880,http://192.168.148.155:30880"
+  # SecurityStartupValidator : en prod réelle, fournir un vrai JWT_SECRET
+  # (openssl rand -base64 32) + BACKEND_API_PASSWORD via le Secret, puis remettre
+  # à "true". "false" = parité avec l'ancienne image (secrets par défaut, pas d'abort).
+  SECURITY_STRICT_MODE: "false"
   # Rôles utilisateurs (override via Secret en production)
   SUPER_ADMIN_USERNAME: "superadmin"
   ADMIN_USERNAME: "admin"

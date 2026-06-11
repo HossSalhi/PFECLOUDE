@@ -69,7 +69,10 @@ spec:
         fsGroup: 1000
       containers:
         - name: backend
-          image: pfe-backend:0.2.9
+          # 0.2.24 = image Jib (devtools exclu) buildée sans Docker et chargée sur les
+          # nœuds via ctr (cf. scripts/helios-ops/build-deploy-backend.sh). Contient
+          # L14/L15/L17. Déployée+vérifiée le 2026-06-11 (2/2, BPMN node-remediation actif).
+          image: pfe-backend:0.2.24
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

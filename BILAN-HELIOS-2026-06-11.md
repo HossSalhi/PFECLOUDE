@@ -101,9 +101,9 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L12 | Rollback/drain manuels | 🔴 VRAI* | *Choix de sécurité.* `execution_mode` AUTO/RECOMMEND existe ; pas de seuil auto haute-confiance. |
 | L13 | Cooldown répétés | 🟢 **FAIT 11/06** | Cooldown PAR CAUSE : `_check_app` renvoie la cause, `_cooldown_cause` ré-autorise un incident si la cause K8s change. Déployé+vérifié .161 (cycle propre). |
 | L14 | Dry-run | 🟢 FAIT | `KubernetesRemediationExecutor:69` `execute(plan, dryRun)` → `[DRY-RUN]`. |
-| L15 | 1 seul BPMN | 🟢 **CODÉ+VALIDÉ 11/06** | `node-remediation.bpmn` (nœud = approbation forcée) **déployé+accepté par le Zeebe réel (HTTP 200)** + dispatcher `resolveProcessId()` (NODE_*→node-remediation) compilé. db-remediation + workers drain/réplication = enrichissement futur. Live au prochain build backend. |
+| L15 | 1 seul BPMN | 🟢 **LIVE 11/06** | `node-remediation.bpmn` (nœud = approbation forcée) + dispatcher `resolveProcessId()` (NODE_*→node-remediation). **DÉPLOYÉ EN PROD** (image 0.2.24) : le backend déploie les 2 BPMN, Zeebe a les 2 process definitions. db-remediation = enrichissement futur. |
 | L16 | Notif externe / email | 🟢 **FAIT+VÉRIFIÉ 11/06** | Backend activé (relais SMTP .161:2525), **email réel délivré** ("Email sent to houssamsalhi972@gmail.com"). Config durable dans `backend-configmap.yaml`. |
-| L17 | .161 SPOF orchestration | 🟢 **CODÉ+COMPILÉ 11/06** | Fallback : si Camunda down, `CamundaWorkflowService` exécute la remédiation directement via `RemediationExecutor` (gaté auto-exec). Compile OK (Maven). Live = au prochain build image backend. |
+| L17 | .161 SPOF orchestration | 🟢 **LIVE 11/06** | Fallback : si Camunda down, `CamundaWorkflowService` exécute la remédiation directement via `RemediationExecutor` (gaté auto-exec). **DÉPLOYÉ EN PROD** (image 0.2.24, 2/2). |
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
 | L19 | Backup etcd | 🟢 **FAIT 11/06** | Cron 6h déployé+vérifié sur master (`/usr/local/bin/etcd-backup.sh`, 1er snapshot 23 MB). PG déjà via `postgres-scheduled-backup.yaml`. |
 | L20 | Registry local | 🟠 INFRA | Registry v2 sur .160 à déployer. |
