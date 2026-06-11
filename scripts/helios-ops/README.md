@@ -30,7 +30,23 @@ docker run -d --restart=always -p 5000:5000 --name registry registry:2
 # puis : sudo systemctl restart containerd   (⚠️ un nœud à la fois)
 ```
 
-## L11 — Watchdog RESTART_VM ⏸️ NON déployé (sécurité)
-Un endpoint HTTP `/restart/<node>` → `sudo reboot` est sensible (surface d'attaque).
-À déployer derrière le réseau interne uniquement, avec auth. Le code client existe
-déjà côté backend (`KubernetesRemediationExecutor.restartVm` + `remediation.watchdog-base-url`).
+## L11 — Watchdog RESTART_VM ⏸️ ARTEFACT fourni, NON déployé
+`vm-watchdog.py` (ce dossier) : watchdog central token-protégé (master .153 → SSH
++ `sudo systemctl reboot` sur les workers ; master exclu). Le code client backend
+existe (`KubernetesRemediationExecutor.restartVm` + `remediation.watchdog-base-url`).
+**Non déployé** : endpoint reboot = sensible, et le valider = rebooter un nœud
+(disruptif). De plus la HA K8s récupère déjà un node-down sans reboot VM (testé).
+Pour activer : lancer le watchdog (systemd) avec `WATCHDOG_TOKEN`, poser
+`REMEDIATION_WATCHDOG_BASE_URL` + ouvrir le port 9999 dans `backend-egress`.
+
+## L7 — Prometheus in-cluster (fédération) ❌ ÉCARTÉ
+`incluster-prometheus.yaml` existe MAIS l'archi a **délibérément retiré** le Prometheus
+in-cluster au profit du scrape DIRECT par .160 (cf. mémoire `project_helios_archi_separation`).
+Le redéployer contredirait ce choix + ajouterait ~0.5-1 Gi RAM sur un hôte saturé (L18).
+Le SPOF .160 est couvert autrement par `prometheus-rules.yaml` (alertes externes).
+
+## L1 / L5 — Données réelles ❌ hors-scope
+Entraîner l'IA sur 3-6 mois d'incidents prod réels labellisés. Le temps le fera.
+
+## L12 — Auto-exécution actions destructives 🔒 choix de design
+rollback/drain/cordon restent sous approbation humaine = **sécurité**, pas un bug.
