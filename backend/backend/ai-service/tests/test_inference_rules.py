@@ -14,7 +14,18 @@ class FixedIncidentModel:
 
 def build_engine(model_score: float | None = None) -> InferenceEngine:
     incident_model = FixedIncidentModel(model_score) if model_score is not None else None
-    return InferenceEngine(model_bundle=ModelBundle(incident_model, None, None, None, None, None))
+    # Keyword args so the test stays robust to ModelBundle field changes
+    # (gained scenario_model/scenario_labels when the 52-class scenario classifier landed).
+    return InferenceEngine(model_bundle=ModelBundle(
+        incident_model=incident_model,
+        severity_model=None,
+        action_model=None,
+        scenario_model=None,
+        feature_order=None,
+        severity_labels=None,
+        action_labels=None,
+        scenario_labels=None,
+    ))
 
 
 def test_vm_down_is_classified_and_escalated() -> None:
