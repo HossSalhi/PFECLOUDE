@@ -2,7 +2,15 @@
 
 > Audit réalisé en lisant le **code réel du dépôt**, pas une liste théorique.
 > Verdict honnête : **HELIOS est une plateforme réelle**, pas une coquille générique.
-> La majorité de la liste « limites L1-L25 » qui circulait est **périmée** — déjà corrigée.
+
+> ## ⚠️ ALERTE IMPORTANTE — Repo ≠ Production (.161)
+> Vérifié le 2026-06-11 : le code **déployé sur .161** est une version **plus ancienne/réduite**
+> que le repo (`autonomous_monitor.py` = **398 lignes en prod vs 738 dans le repo**, sans
+> MULTI_SIGNAL ni les correctifs Rounds 12-14). **Plusieurs items marqués 🟢 « FAIT » ci-dessous
+> sont FAITS DANS LE REPO mais PAS DÉPLOYÉS** (ex. L10 corrélation, perfs Round 12-14).
+> Pour les rendre live : **déploiement contrôlé** via `scripts/helios-ops/deploy-ai-service.sh`
+> (backup + vérif santé + rollback auto). À faire hors démo, avec re-test.
+> En revanche L8/L16/L19 (cette session) sont déployés ET vérifiés en réel.
 
 ---
 
