@@ -48,7 +48,11 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
+			<!-- 'provided' (au lieu de 'runtime') : exclut DevTools du classpath runtime
+			     que Jib embarque dans l'image conteneur. Sinon DevTools s'y retrouve et
+			     l'appli démarre en thread 'restartedMain' qui se coupe seul (CrashLoop).
+			     Reste dispo pour le dev en IDE / spring-boot:run. -->
+			<scope>provided</scope>
 			<optional>true</optional>
 		</dependency>
 		<dependency>
@@ -163,6 +167,39 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!--
+			  Contournement L18+L20 : construit l'image conteneur SANS daemon Docker
+			  (pas de VM Docker -> pas d'OOM sur l'hôte saturé) et SANS registry
+			  (sortie en tar local, chargé sur les nœuds air-gap via `ctr images import`).
+			    mvn -DskipTests package jib:buildTar   -> target/jib-image.tar
+			  containerizingMode=packaged utilise le fat-jar Spring Boot (DevTools EXCLU),
+			  donc l'appli démarre en thread `main` et non le `restartedMain` qui se coupe seul.
+			  Override du tag à l'invocation : -Djib.to.image=pfe-backend:0.2.24
+			-->
+			<plugin>
+				<groupId>com.google.cloud.tools</groupId>
+				<artifactId>jib-maven-plugin</artifactId>
+				<version>3.4.4</version>
+				<configuration>
+					<from>
+						<image>eclipse-temurin:17-jre</image>
+					</from>
+					<to>
+						<image>pfe-backend:dev</image>
+					</to>
+					<container>
+						<ports>
+							<port>8080</port>
+						</ports>
+						<jvmFlags>
+							<jvmFlag>-XX:TieredStopAtLevel=1</jvmFlag>
+							<jvmFlag>-Djava.security.egd=file:/dev/./urandom</jvmFlag>
+							<jvmFlag>-Dspring.jmx.enabled=false</jvmFlag>
+							<jvmFlag>-XX:MaxRAMPercentage=70</jvmFlag>
+						</jvmFlags>
+					</container>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
