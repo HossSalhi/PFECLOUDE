@@ -7,6 +7,8 @@ import com.orange.pfe.backend.model.action.IncidentAction;
 import com.orange.pfe.backend.model.human.TaskDecision;
 import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import com.orange.pfe.backend.model.workflow.WorkflowOrchestrationState;
+import com.orange.pfe.backend.service.remediation.RemediationExecutionResult;
+import com.orange.pfe.backend.service.remediation.RemediationExecutor;
 import com.orange.pfe.backend.service.remediation.RemediationPlan;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.response.ProcessInstanceEvent;
@@ -30,17 +32,20 @@ public class CamundaWorkflowService {
     private final CamundaProperties camundaProperties;
     private final RemediationProperties remediationProperties;
     private final WorkflowService workflowService;
+    private final RemediationExecutor remediationExecutor;
 
     public CamundaWorkflowService(
             ObjectProvider<CamundaClient> camundaClientProvider,
             CamundaProperties camundaProperties,
             RemediationProperties remediationProperties,
-            WorkflowService workflowService
+            WorkflowService workflowService,
+            RemediationExecutor remediationExecutor
     ) {
         this.camundaClientProvider = camundaClientProvider;
         this.camundaProperties = camundaProperties;
         this.remediationProperties = remediationProperties;
         this.workflowService = workflowService;
+        this.remediationExecutor = remediationExecutor;
     }
 
     public boolean isEnabled() {
@@ -74,7 +79,8 @@ public class CamundaWorkflowService {
             return;
         }
         if (!isEnabled()) {
-            logger.info("Camunda is disabled or unavailable; workflow {} stays backend-managed only", workflow.getId());
+            logger.warn("Camunda unavailable — L17 fallback: executing remediation directly for workflow {}", workflow.getId());
+            executeWithoutCamunda(workflow, plan, "Camunda unavailable");
             return;
         }
 
@@ -100,10 +106,42 @@ public class CamundaWorkflowService {
         } catch (Exception ex) {
             logger.error("Unable to start Camunda workflow for workflow {}", workflow.getId(), ex);
             workflow.addLog("Camunda start failed: " + ex.getMessage());
+            // L17 — Camunda unreachable after attempt: don't strand the workflow, execute directly.
+            executeWithoutCamunda(workflow, plan, "Camunda start failed: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * L17 — Camunda fallback. When the orchestrator is unreachable, the backend executes the
+     * remediation DIRECTLY (instead of leaving the workflow stuck) — but only for auto-executable
+     * plans that do not require human approval. Approval-gated plans stay manual, since without
+     * Camunda there is no approval channel and a human must decide.
+     */
+    private void executeWithoutCamunda(WorkflowInstance workflow, RemediationPlan plan, String reason) {
+        if (plan.approvalRequired() || !plan.autoExecutable()) {
             workflowService.updateOrchestrationState(
                     workflow,
                     WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
-                    "Camunda start failed; backend will keep the workflow local"
+                    reason + " — approval required, kept for manual handling"
+            );
+            return;
+        }
+        try {
+            RemediationExecutionResult result = remediationExecutor.execute(plan);
+            workflow.addLog("Direct remediation (Camunda fallback): " + result.message());
+            workflowService.updateOrchestrationState(
+                    workflow,
+                    result.success() ? WorkflowOrchestrationState.EXECUTION_PENDING : WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                    reason + " — executed directly via Kubernetes executor: " + result.message()
+            );
+            logger.warn("L17 fallback executed remediation for workflow {} (success={})",
+                    workflow.getId(), result.success());
+        } catch (Exception ex) {
+            logger.error("L17 fallback execution failed for workflow {}", workflow.getId(), ex);
+            workflowService.updateOrchestrationState(
+                    workflow,
+                    WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                    reason + " — direct execution failed: " + ex.getMessage()
             );
         }
     }

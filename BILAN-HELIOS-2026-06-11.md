@@ -101,13 +101,13 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L12 | Rollback/drain manuels | 🔴 VRAI* | *Choix de sécurité.* `execution_mode` AUTO/RECOMMEND existe ; pas de seuil auto haute-confiance. |
 | L13 | Cooldown répétés | 🟢 **FAIT 11/06** | Cooldown PAR CAUSE : `_check_app` renvoie la cause, `_cooldown_cause` ré-autorise un incident si la cause K8s change. Déployé+vérifié .161 (cycle propre). |
 | L14 | Dry-run | 🟢 FAIT | `KubernetesRemediationExecutor:69` `execute(plan, dryRun)` → `[DRY-RUN]`. |
-| L15 | 1 seul BPMN | 🔴 VRAI | Choix d'archi. |
+| L15 | 1 seul BPMN | 🔵 RESTE | Vrai feature : écrire node/db-remediation.bpmn (Zeebe) + workers + dispatch, puis **tester sur Camunda**. Pas faisable à l'aveugle (un BPMN malformé casse le déploiement). |
 | L16 | Notif externe / email | 🟢 **FAIT+VÉRIFIÉ 11/06** | Backend activé (relais SMTP .161:2525), **email réel délivré** ("Email sent to houssamsalhi972@gmail.com"). Config durable dans `backend-configmap.yaml`. |
-| L17 | .161 SPOF orchestration | 🔴 VRAI | Fallback direct non implémenté. |
+| L17 | .161 SPOF orchestration | 🟢 **CODÉ+COMPILÉ 11/06** | Fallback : si Camunda down, `CamundaWorkflowService` exécute la remédiation directement via `RemediationExecutor` (gaté auto-exec). Compile OK (Maven). Live = au prochain build image backend. |
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
 | L19 | Backup etcd | 🟢 **FAIT 11/06** | Cron 6h déployé+vérifié sur master (`/usr/local/bin/etcd-backup.sh`, 1er snapshot 23 MB). PG déjà via `postgres-scheduled-backup.yaml`. |
 | L20 | Registry local | 🟠 INFRA | Registry v2 sur .160 à déployer. |
-| L21 | NetworkPolicies | 🟠 **FICHIER OK, PAS APPLIQUÉ** | `network-policy.yaml` complet MAIS `kubectl get netpol -n pfe` = vide → **non déployé** au runtime. Appliquer = risqué à chaud (default-deny + il manque le port 2525 pour l'email) → fenêtre de maintenance. |
+| L21 | NetworkPolicies | 🟠 **CORRIGÉ, à appliquer en maintenance** | `network-policy.yaml` complété (sonde kubelet CNPG :8000 + email :2525) et **validé** `kubectl apply --dry-run=server` OK. Non appliqué live (default-deny à chaud) → fenêtre de maintenance avec vérif connectivité + rollback `kubectl delete`. |
 | L22 | ChromaDB/RAG | 🟢 FAIT | `memory_store.py` actif, mode persistant .161. |
 | L23 | Tests / CI | 🟢 FAIT | `.github/workflows/` (ai-ci pytest, backend, frontend, model-train) + `tests/` (4 fichiers). |
 | L24 | Incidents orphelins | 🟢 FAIT | `autonomous_monitor.py:464` cleanup. |

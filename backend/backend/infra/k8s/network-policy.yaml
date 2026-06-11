@@ -130,6 +130,29 @@ spec:
         - protocol: TCP
           port: 9187
 ---
+# CRITIQUE (L21) : autoriser les sondes liveness/readiness du kubelet vers le
+# gestionnaire d'instance CNPG (port 8000). SANS cette règle, default-deny fait
+# échouer les probes -> Postgres redémarre en boucle. Les sondes viennent du nœud
+# (IP du sous-réseau), pas d'un pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kubelet-probe-postgres
+  namespace: pfe
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.148.0/24
+      ports:
+        - protocol: TCP
+          port: 8000
+---
 # Backend egress: postgres + AI VM + Camunda + monitoring stack + DNS + K8s API
 # All external traffic is scoped to 192.168.148.0/24 subnet for least privilege
 apiVersion: networking.k8s.io/v1
@@ -183,6 +206,9 @@ spec:
           port: 3101
         - protocol: TCP
           port: 11434
+        # Relais SMTP HELIOS (.161:2525) pour les notifications email — sinon L16 cassé
+        - protocol: TCP
+          port: 2525
         - protocol: TCP
           port: 443
         - protocol: TCP

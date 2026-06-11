@@ -65,27 +65,26 @@ public class AIOpsClientService {
         // is fronted by a self-signed nginx cert and no CA import has been done.
         if (tlsSkipVerify) {
             log.warn("aiops.service.tls-skip-verify=true — TLS certificate validation DISABLED (dev/lab only)");
-            b = b.requestFactory(() -> {
-                try {
-                    SSLContext ctx = SSLContext.getInstance("TLS");
-                    ctx.init(null, new TrustManager[]{new X509TrustManager() {
-                        public void checkClientTrusted(X509Certificate[] c, String a) {}
-                        public void checkServerTrusted(X509Certificate[] c, String a) {}
-                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    }}, new SecureRandom());
-                    return new SimpleClientHttpRequestFactory() {
-                        @Override protected void prepareConnection(HttpURLConnection conn, String method) throws java.io.IOException {
-                            if (conn instanceof javax.net.ssl.HttpsURLConnection h) {
-                                h.setSSLSocketFactory(ctx.getSocketFactory());
-                                h.setHostnameVerifier((host, session) -> true);
-                            }
-                            super.prepareConnection(conn, method);
+            try {
+                final SSLContext ctx = SSLContext.getInstance("TLS");
+                ctx.init(null, new TrustManager[]{new X509TrustManager() {
+                    public void checkClientTrusted(X509Certificate[] c, String a) {}
+                    public void checkServerTrusted(X509Certificate[] c, String a) {}
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                }}, new SecureRandom());
+                SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory() {
+                    @Override protected void prepareConnection(HttpURLConnection conn, String method) throws java.io.IOException {
+                        if (conn instanceof javax.net.ssl.HttpsURLConnection h) {
+                            h.setSSLSocketFactory(ctx.getSocketFactory());
+                            h.setHostnameVerifier((host, session) -> true);
                         }
-                    };
-                } catch (Exception e) {
-                    throw new IllegalStateException("Failed to build skip-verify SSL context", e);
-                }
-            });
+                        super.prepareConnection(conn, method);
+                    }
+                };
+                b = b.requestFactory(factory);
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to build skip-verify SSL context", e);
+            }
         }
         this.restClient = b.build();
     }
