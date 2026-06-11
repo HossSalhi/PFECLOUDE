@@ -95,12 +95,12 @@ Reproductible : `scripts/helios-tests/test-worker-ha.sh`.
 | L13 | Cooldown répétés | 🔴 VRAI | Cooldown par (ns,app), pas par cause. Fix complet = contrat inter-services. |
 | L14 | Dry-run | 🟢 FAIT | `KubernetesRemediationExecutor:69` `execute(plan, dryRun)` → `[DRY-RUN]`. |
 | L15 | 1 seul BPMN | 🔴 VRAI | Choix d'archi. |
-| L16 | Notif externe / email | 🟢 FAIT | `EmailNotificationService` + `notifyEscalation`. Besoin : config SMTP (voir EMAIL-SETUP.md). |
+| L16 | Notif externe / email | 🟢 **FAIT+VÉRIFIÉ 11/06** | Backend activé (relais SMTP .161:2525), **email réel délivré** ("Email sent to houssamsalhi972@gmail.com"). Config durable dans `backend-configmap.yaml`. |
 | L17 | .161 SPOF orchestration | 🔴 VRAI | Fallback direct non implémenté. |
 | L18 | RAM hôte | 🟠 INFRA | Hôte 23.8GB tendu (mémoire projet). |
 | L19 | Backup etcd | 🟢 **FAIT 11/06** | Cron 6h déployé+vérifié sur master (`/usr/local/bin/etcd-backup.sh`, 1er snapshot 23 MB). PG déjà via `postgres-scheduled-backup.yaml`. |
 | L20 | Registry local | 🟠 INFRA | Registry v2 sur .160 à déployer. |
-| L21 | NetworkPolicies | 🟢 FAIT | `network-policy.yaml` complet (default-deny + egress scopé + fix label CNPG). |
+| L21 | NetworkPolicies | 🟠 **FICHIER OK, PAS APPLIQUÉ** | `network-policy.yaml` complet MAIS `kubectl get netpol -n pfe` = vide → **non déployé** au runtime. Appliquer = risqué à chaud (default-deny + il manque le port 2525 pour l'email) → fenêtre de maintenance. |
 | L22 | ChromaDB/RAG | 🟢 FAIT | `memory_store.py` actif, mode persistant .161. |
 | L23 | Tests / CI | 🟢 FAIT | `.github/workflows/` (ai-ci pytest, backend, frontend, model-train) + `tests/` (4 fichiers). |
 | L24 | Incidents orphelins | 🟢 FAIT | `autonomous_monitor.py:464` cleanup. |
