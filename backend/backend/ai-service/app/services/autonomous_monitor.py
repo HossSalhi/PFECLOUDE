@@ -198,7 +198,7 @@ class AutonomousMonitor:
             last_run_utc=self._last_run_utc,
             last_apps_analyzed=self._last_apps_analyzed,
             last_anomalies_found=self._last_anomalies_found,
-            recent_errors=list(self._recent_errors[-5:]),
+            recent_errors=list(self._recent_errors)[-5:],
             cooldowns=cooldown_info,
         )
 
