@@ -3,14 +3,13 @@
 > Audit réalisé en lisant le **code réel du dépôt**, pas une liste théorique.
 > Verdict honnête : **HELIOS est une plateforme réelle**, pas une coquille générique.
 
-> ## ⚠️ ALERTE IMPORTANTE — Repo ≠ Production (.161)
-> Vérifié le 2026-06-11 : le code **déployé sur .161** est une version **plus ancienne/réduite**
-> que le repo (`autonomous_monitor.py` = **398 lignes en prod vs 738 dans le repo**, sans
-> MULTI_SIGNAL ni les correctifs Rounds 12-14). **Plusieurs items marqués 🟢 « FAIT » ci-dessous
-> sont FAITS DANS LE REPO mais PAS DÉPLOYÉS** (ex. L10 corrélation, perfs Round 12-14).
-> Pour les rendre live : **déploiement contrôlé** via `scripts/helios-ops/deploy-ai-service.sh`
-> (backup + vérif santé + rollback auto). À faire hors démo, avec re-test.
-> En revanche L8/L16/L19 (cette session) sont déployés ET vérifiés en réel.
+> ## ✅ RÉCONCILIÉ — Repo déployé en prod (.161) le 2026-06-11
+> La prod tournait une version **plus ancienne** (`autonomous_monitor.py` 398 lignes vs 738).
+> **Déploiement contrôlé effectué** (backup + pré-vol import OK + rollback prêt) → le repo est
+> maintenant **LIVE** : Rounds 12-14 + corrélation L10 + scénario 52 classes tournent en prod.
+> Vérifié en réel : `/health`+`/ready` OK, monitor cycle propre (**3 apps analysées, 0 erreur**),
+> `/predict` OK (MEMORY_LEAK conf=0.725). **1 bug corrigé au passage** (`get_status` deque slice
+> → 500 sur `/monitor/status`, commit `074361a`). Backup conservé sur .161 (`app.bak-*`).
 
 ---
 
