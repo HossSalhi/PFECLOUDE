@@ -3,6 +3,8 @@ package com.orange.pfe.backend.model.human;
 import com.orange.pfe.backend.model.common.BaseEntity;
 import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import jakarta.persistence.*;
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 
 import java.time.LocalDateTime;
 
@@ -10,8 +12,12 @@ import java.time.LocalDateTime;
 @Table(name = "human_task")
 public class HumanTask extends BaseEntity {
 
-    @ManyToOne(optional = false)
+    // @NotFound(IGNORE): si le workflow_instance référencé a été purgé (orphelin),
+    // Hibernate renvoie null au lieu de lever ObjectNotFoundException — sinon UNE seule
+    // tâche orpheline fait planter (HTTP 500) toute la page Tâches Humaines. map() gère wi==null.
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "workflow_instance_id", nullable = false)
+    @NotFound(action = NotFoundAction.IGNORE)
     private WorkflowInstance workflowInstance;
 
     private String taskName;

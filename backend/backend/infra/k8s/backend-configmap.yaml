@@ -58,16 +58,20 @@ data:
   SUPER_ADMIN_USERNAME: "superadmin"
   ADMIN_USERNAME: "admin"
   USER_USERNAME: "operator"
-  # Notifications email — via le relais SMTP HELIOS sur .161:2525 (forward Gmail réel).
-  # Vérifié le 2026-06-11 : "Email sent to houssamsalhi972@gmail.com" (log relais).
-  # Pour capturer sans envoyer (démo) : MAIL_PORT=1025 (MailHog, UI http://192.168.148.161:8025).
+  # Notifications email — relais SMTP -> Gmail réel.
+  # IMPORTANT (12/06/2026) : le TCP sortant des VMs vers Internet est bloqué côté hôte,
+  # donc le relais sur .161:2525 ne joint plus Gmail. Workaround EN PROD : relais sur
+  # l'HÔTE (qui a Internet) = 192.168.148.1:2526 (C:\Users\houss\helios-host-relay.py,
+  # lancé au logon via Startup\helios-relay-startup.vbs). Vérifié : emails livrés à Gmail.
+  # Si le TCP sortant de .161 est rétabli : remettre MAIL_HOST=192.168.148.161 MAIL_PORT=2525.
+  # Démo locale sans Internet : MAIL_HOST=192.168.148.161 MAIL_PORT=1025 (MailHog, UI :8025).
   NOTIFICATION_EMAIL_ENABLED: "true"
   NOTIFICATION_EMAIL_TO: "houssamsalhi972@gmail.com"
   NOTIFICATION_EMAIL_FROM: "helios-aiops@orange.tn"
   NOTIFICATION_EMAIL_MIN_SEVERITY: "HIGH"
   NOTIFICATION_EMAIL_DASHBOARD_URL: "http://192.168.148.153:30880"
-  # Relais SMTP local (plaintext, pas d'auth, pas de STARTTLS)
-  MAIL_HOST: "192.168.148.161"
-  MAIL_PORT: "2525"
+  # Relais SMTP (plaintext, pas d'auth, pas de STARTTLS) — host-relay (Internet OK)
+  MAIL_HOST: "192.168.148.1"
+  MAIL_PORT: "2526"
   SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "false"
   SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "false"
