@@ -1,0 +1,110 @@
+name: ML Pipeline — Train & Register
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you retraining? (e.g. new incidents, drift detected)"
+        required: false
+        default: "manual trigger"
+      upload_to_registry:
+        description: "Upload trained model as release artifact"
+        type: boolean
+        default: true
+  # Scheduled weekly retrain (optional — comment out if not needed)
+  schedule:
+    - cron: "0 2 * * 1"   # every Monday at 02:00 UTC
+
+defaults:
+  run:
+    working-directory: backend/backend/ai-service
+
+jobs:
+  train:
+    name: Build Dataset & Train
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/backend/ai-service/requirements-dev.txt
+
+      - name: Install ML dependencies
+        run: |
+          pip install --upgrade pip
+          grep -v -E "^(chromadb|sentence-transformers)" requirements.txt | pip install -r /dev/stdin
+          pip install pytest==8.3.3
+
+      - name: Build training dataset
+        env:
+          PYTHONPATH: .
+          # Point to a Prometheus instance or use the offline synthetic generator
+          PROMETHEUS_URL: "http://localhost:9090"
+          LOKI_URL: "http://localhost:3100"
+          LOG_LEVEL: "INFO"
+        run: |
+          mkdir -p /tmp/helios-models
+          # Use synthetic dataset if Prometheus unreachable (CI has no cluster access)
+          python scripts/generate_synthetic_dataset.py \
+            --output /tmp/helios-models/training_data.csv \
+            --samples 5000 \
+            || python scripts/build_dataset.py \
+              --offline \
+              --output /tmp/helios-models/training_data.csv
+
+      - name: Train XGBoost models
+        env:
+          PYTHONPATH: .
+          MODELS_DIR: "/tmp/helios-models"
+        run: |
+          python scripts/train_baseline.py \
+            --data /tmp/helios-models/training_data.csv \
+            --output-dir /tmp/helios-models
+
+          echo "=== Trained model files ==="
+          ls -lh /tmp/helios-models/
+
+      - name: Run inference regression tests
+        env:
+          PYTHONPATH: .
+          MODELS_DIR: "/tmp/helios-models"
+        run: pytest tests/ -v --tb=short
+
+      - name: Compute model SHA tag
+        id: model-tag
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          DATE=$(date +'%Y%m%d')
+          echo "tag=${DATE}-${SHA}" >> $GITHUB_OUTPUT
+
+      - name: Upload trained models as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-models-${{ steps.model-tag.outputs.tag }}
+          path: /tmp/helios-models/
+          retention-days: 30
+
+      - name: Create GitHub release with model artifacts
+        if: inputs.upload_to_registry == 'true' || github.event_name == 'schedule'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: model-${{ steps.model-tag.outputs.tag }}
+          name: "HELIOS ML Models — ${{ steps.model-tag.outputs.tag }}"
+          body: |
+            Automated model retrain triggered by: ${{ inputs.reason || 'weekly schedule' }}
+            Commit: ${{ github.sha }}
+            Training samples: synthetic + rules-based dataset
+
+            ## Model files
+            - `incident_classifier.pkl` — XGBoost incident detector
+            - `scenario_classifier.pkl` — 52-class incident type classifier
+            - `severity_classifier.pkl` — severity level classifier
+          files: /tmp/helios-models/*.pkl
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

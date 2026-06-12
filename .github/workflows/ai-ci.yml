@@ -1,0 +1,61 @@
+name: AI Service CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/backend/ai-service/**"
+      - ".github/workflows/ai-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/backend/ai-service/**"
+      - ".github/workflows/ai-ci.yml"
+
+defaults:
+  run:
+    working-directory: backend/backend/ai-service
+
+jobs:
+  test:
+    name: Pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/backend/ai-service/requirements-dev.txt
+
+      - name: Install dependencies (no heavy extras)
+        run: |
+          pip install --upgrade pip
+          # Install without chromadb/sentence-transformers (GPU/network deps not available in CI)
+          grep -v -E "^(chromadb|sentence-transformers)" requirements.txt | pip install -r /dev/stdin
+          pip install pytest==8.3.3
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+          # Stub-out settings that require running services
+          PROMETHEUS_URL: "http://localhost:9090"
+          LOKI_URL: "http://localhost:3100"
+          OLLAMA_URL: "http://localhost:11434"
+          BACKEND_URL: "http://localhost:8080"
+          MODELS_DIR: "/tmp/helios-models"
+          LOG_LEVEL: "WARNING"
+        run: |
+          mkdir -p /tmp/helios-models
+          pytest tests/ -v --tb=short
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-results
+          path: backend/backend/ai-service/.pytest_cache/
+          retention-days: 7
