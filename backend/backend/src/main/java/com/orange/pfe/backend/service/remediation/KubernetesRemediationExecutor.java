@@ -70,6 +70,15 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         if (plan.actionType() == null) {
             return new RemediationExecutionResult(false, plan.targetName(), "No executable action was selected");
         }
+        // ESCALATION / INVESTIGATION ne sont PAS des actions Kubernetes : l'« action » est
+        // l'escalade vers un humain (ou l'investigation), déjà réalisée via la tâche humaine.
+        // On ne route donc PAS vers l'exécuteur K8s ni le contrôle d'allowlist — sinon les
+        // incidents nœud (namespace virtuel "k8s-nodes") échouent sur "not allowlisted" et
+        // rebouclent en "requires review". Succès no-op = l'escalade a bien eu lieu.
+        if (plan.actionType() == ActionType.ESCALATION || plan.actionType() == ActionType.INVESTIGATION) {
+            return new RemediationExecutionResult(true, plan.targetName(),
+                    "Escaladé à l'opérateur humain — aucune action Kubernetes automatique requise");
+        }
         if (!isNamespaceAllowlisted(plan.targetNamespace())) {
             return new RemediationExecutionResult(
                     false,
