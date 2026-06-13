@@ -19375,7 +19375,10 @@ spec:
         - name: MONITORING_QUERIES_CONFIGMAP
           value: cnpg-default-monitoring
         image: ghcr.io/cloudnative-pg/cloudnative-pg:1.28.1
-        imagePullPolicy: Always
+        # IfNotPresent (pas Always) : cluster air-gap — image pré-chargée sur les nœuds (ctr).
+        # Always -> ImagePullBackOff après reboot -> opérateur mort -> plus de failover CNPG
+        # -> DB DOWN si le nœud du primary tombe (incident 13/06/2026, corrigé).
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /readyz
