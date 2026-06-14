@@ -408,10 +408,20 @@ public class AIOpsOrchestrationService {
         RemediationTargetKind targetKind;
         if (!pendingPage.isEmpty()) {
             action = pendingPage.getContent().get(0);
-            actionType = action.getType();
-            targetKind = action.getTargetKind() != null ? action.getTargetKind() : RemediationTargetKind.POD;
+            // Si le type existant est EXECUTABLE on le garde ; sinon (INVESTIGATION/ESCALATION =
+            // simples conseils, no-op cote executeur) on impose l'action calculee
+            // (RESTART_POD/RESTART_VM) pour une VRAIE execution, et on aligne le type de l'action.
+            ActionType existing = action.getType();
+            if (existing != null && existing != ActionType.INVESTIGATION && existing != ActionType.ESCALATION) {
+                actionType = existing;
+            } else {
+                action.setType(actionType);
+            }
             if (action.getTargetNamespace() != null) { namespace = action.getTargetNamespace(); }
             if (action.getTargetName() != null) { app = action.getTargetName(); }
+            targetKind = (actionType == ActionType.RESTART_POD
+                    || actionType == ActionType.DELETE_CRASHLOOPING_PODS)
+                    ? RemediationTargetKind.POD : RemediationTargetKind.DEPLOYMENT;
         } else {
             targetKind = (actionType == ActionType.RESTART_POD
                     || actionType == ActionType.DELETE_CRASHLOOPING_PODS)
