@@ -6,9 +6,13 @@ import com.orange.pfe.backend.dto.AIPredictEvidence;
 import com.orange.pfe.backend.dto.AIPredictRequest;
 import com.orange.pfe.backend.dto.AIPredictResponse;
 import com.orange.pfe.backend.exception.IncidentNotFoundException;
+import com.orange.pfe.backend.model.action.ActionStatus;
 import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.model.action.AutomationMode;
+import com.orange.pfe.backend.model.action.IncidentAction;
 import com.orange.pfe.backend.model.action.RemediationTargetKind;
+import com.orange.pfe.backend.repository.IncidentActionRepository;
+import org.springframework.data.domain.PageRequest;
 import com.orange.pfe.backend.model.core.Incident;
 import com.orange.pfe.backend.model.decision.DecisionSource;
 import com.orange.pfe.backend.model.decision.DecisionType;
@@ -46,6 +50,7 @@ public class AIOpsOrchestrationService {
 
     private final AIOpsClientService aiOpsClientService;
     private final IncidentRepository incidentRepository;
+    private final IncidentActionRepository incidentActionRepository;
     private final WorkflowService workflowService;
     private final ActionService actionService;
     private final HumanTaskService humanTaskService;
@@ -62,6 +67,7 @@ public class AIOpsOrchestrationService {
     public AIOpsOrchestrationService(
             AIOpsClientService aiOpsClientService,
             IncidentRepository incidentRepository,
+            IncidentActionRepository incidentActionRepository,
             WorkflowService workflowService,
             ActionService actionService,
             HumanTaskService humanTaskService,
@@ -77,6 +83,7 @@ public class AIOpsOrchestrationService {
     ) {
         this.aiOpsClientService = aiOpsClientService;
         this.incidentRepository = incidentRepository;
+        this.incidentActionRepository = incidentActionRepository;
         this.workflowService = workflowService;
         this.actionService = actionService;
         this.humanTaskService = humanTaskService;
@@ -393,24 +400,40 @@ public class AIOpsOrchestrationService {
             actionType = isNode ? ActionType.RESTART_VM : ActionType.RESTART_POD;
         }
 
-        RemediationTargetKind targetKind = (actionType == ActionType.RESTART_POD
-                || actionType == ActionType.DELETE_CRASHLOOPING_PODS)
-                ? RemediationTargetKind.POD : RemediationTargetKind.DEPLOYMENT;
+        // Reutiliser l'action PENDING deja recommandee (evite un doublon) ; sinon en creer
+        // une nouvelle en mode MANUEL (c'est l'operateur qui declenche via "Demarrer").
+        var pendingPage = incidentActionRepository.findByIncidentIdAndStatus(
+                incident.getId(), ActionStatus.PENDING, PageRequest.of(0, 1));
+        IncidentAction action;
+        RemediationTargetKind targetKind;
+        if (!pendingPage.isEmpty()) {
+            action = pendingPage.getContent().get(0);
+            actionType = action.getType();
+            targetKind = action.getTargetKind() != null ? action.getTargetKind() : RemediationTargetKind.POD;
+            if (action.getTargetNamespace() != null) { namespace = action.getTargetNamespace(); }
+            if (action.getTargetName() != null) { app = action.getTargetName(); }
+        } else {
+            targetKind = (actionType == ActionType.RESTART_POD
+                    || actionType == ActionType.DELETE_CRASHLOOPING_PODS)
+                    ? RemediationTargetKind.POD : RemediationTargetKind.DEPLOYMENT;
+            action = actionService.createAction(
+                    incident, actionType,
+                    "Execution declenchee par l'operateur (Demarrer): " + safe(rawAction),
+                    "HUMAN-OPERATOR",
+                    namespace, targetKind, app, AutomationMode.MANUAL
+            );
+        }
 
         WorkflowInstance workflow = workflowService.startWorkflow(
                 incident, "Incident-Remediation-Workflow", namespace, app);
 
-        var action = actionService.createAction(
-                incident, actionType,
-                "Execution declenchee par l'operateur (Demarrer): " + safe(rawAction),
-                "HUMAN-OPERATOR",
-                namespace, targetKind, app, AutomationMode.AUTO
-        );
-
         // approvalRequired=false + autoExecutable=true : le clic "Demarrer" de l'operateur
         // VAUT approbation -> Camunda execute directement, sans Human Task d'attente.
+        // Le mode de l'action reste celui d'origine (MANUEL = declenche par l'operateur).
         RemediationPlan plan = new RemediationPlan(
-                actionType, AutomationMode.AUTO, false, true, false, false, false,
+                actionType,
+                action.getAutomationMode() != null ? action.getAutomationMode() : AutomationMode.MANUAL,
+                false, true, false, false, false,
                 namespace, targetKind, app, "Execution directe demandee par l'operateur (Demarrer)"
         );
 
