@@ -7,11 +7,13 @@ import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.model.action.AutomationMode;
 import com.orange.pfe.backend.model.action.RemediationTargetKind;
 import com.orange.pfe.backend.model.core.Incident;
+import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import com.orange.pfe.backend.model.enums.IncidentSeverity;
 import com.orange.pfe.backend.model.enums.IncidentSource;
 import com.orange.pfe.backend.model.enums.IncidentStatus;
 import com.orange.pfe.backend.repository.IncidentRepository;
 import com.orange.pfe.backend.service.InfrastructureHealthService.ComponentStatus;
+import com.orange.pfe.backend.service.remediation.RemediationPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -47,6 +49,8 @@ public class InfrastructureHealthScheduler {
     private final AIOpsClientService aiOpsClientService;
     private final ActionService actionService;
     private final LeaderElectionService leaderElectionService;
+    private final WorkflowService workflowService;
+    private final CamundaWorkflowService camundaWorkflowService;
 
     public InfrastructureHealthScheduler(
             InfraHealthProperties props,
@@ -55,7 +59,9 @@ public class InfrastructureHealthScheduler {
             IncidentHistoryService historyService,
             AIOpsClientService aiOpsClientService,
             ActionService actionService,
-            LeaderElectionService leaderElectionService
+            LeaderElectionService leaderElectionService,
+            WorkflowService workflowService,
+            CamundaWorkflowService camundaWorkflowService
     ) {
         this.props = props;
         this.healthService = healthService;
@@ -64,6 +70,8 @@ public class InfrastructureHealthScheduler {
         this.aiOpsClientService = aiOpsClientService;
         this.actionService = actionService;
         this.leaderElectionService = leaderElectionService;
+        this.workflowService = workflowService;
+        this.camundaWorkflowService = camundaWorkflowService;
     }
 
     @Scheduled(fixedDelayString = "${infra.health.interval-seconds:300}000")
@@ -125,9 +133,54 @@ public class InfrastructureHealthScheduler {
         // action so the operator can hit "Demarrer remediation" to fire Camunda.
         enrichIncidentWithAi(incident, status);
 
+        // Récupération du nœud orchestrée par CAMUNDA : crée une action RESTART_VM (AUTO)
+        // et lance le workflow Camunda -> agent hôte (vmrun start). Le watchdog hôte reste
+        // filet de sécurité (GRACE 120s) si Camunda échoue.
+        triggerNodePowerOnViaCamunda(incident, status);
+
         log.warn("Incident created - infrastructure component DOWN: {}/{} - {}",
                 status.namespace(), status.app(), status.detail());
         return true;
+    }
+
+    /**
+     * Pour un nœud WORKER tombé : crée une action RESTART_VM (AUTO) et déclenche le
+     * workflow Camunda qui appelle l'agent hôte pour rallumer la VM. C'est Camunda qui
+     * orchestre la récupération du nœud. Master exclu (jamais rallumé automatiquement).
+     */
+    private void triggerNodePowerOnViaCamunda(Incident incident, ComponentStatus status) {
+        String node = status.app();
+        if (!"k8s-nodes".equals(status.namespace()) || node == null
+                || !node.toLowerCase().startsWith("k8s-worker")) {
+            return; // seulement les noeuds worker du cluster
+        }
+        try {
+            RemediationPlan plan = new RemediationPlan(
+                    ActionType.RESTART_VM, AutomationMode.AUTO,
+                    false, true, false, false, false,
+                    "k8s-nodes", RemediationTargetKind.UNKNOWN, node,
+                    "Noeud " + node + " NotReady — power-on automatique via agent hote (Camunda)"
+            );
+            var action = actionService.createAction(
+                    incident, ActionType.RESTART_VM,
+                    "Power-on automatique du noeud " + node + " via l'agent hote",
+                    "AI-SYSTEM", "k8s-nodes", RemediationTargetKind.UNKNOWN, node,
+                    AutomationMode.AUTO
+            );
+            WorkflowInstance workflow = workflowService.startWorkflow(
+                    incident, "Node-Remediation-Workflow", "k8s-nodes", node);
+            AIPredictResponse pred = new AIPredictResponse();
+            pred.setIncidentType("NODE_NOT_READY");
+            pred.setRecommendedAction("RESTART_VM");
+            camundaWorkflowService.startWorkflow(workflow, action, plan, pred);
+            incident.setStatus(IncidentStatus.IN_PROGRESS);
+            incidentRepository.save(incident);
+            historyService.record(incident, IncidentStatus.IN_PROGRESS,
+                    "RESTART_VM auto via Camunda -> agent hote (rallumage " + node + ")");
+            log.warn("Node power-on via Camunda declenche pour {}", node);
+        } catch (Exception ex) {
+            log.error("Echec declenchement RESTART_VM Camunda pour {}: {}", node, ex.getMessage());
+        }
     }
 
     private void enrichIncidentWithAi(Incident incident, ComponentStatus status) {
@@ -172,20 +225,8 @@ public class InfrastructureHealthScheduler {
 
             incidentRepository.save(incident);
 
-            String recommendedAction = prediction.getRecommendedAction();
-            if (recommendedAction != null && !recommendedAction.isBlank()) {
-                actionService.createAction(
-                        incident,
-                        ActionType.INVESTIGATION,
-                        "AI recommended action: " + recommendedAction
-                                + (aiExplanation != null ? " | " + aiExplanation : ""),
-                        "AI-SYSTEM",
-                        status.namespace(),
-                        RemediationTargetKind.DEPLOYMENT,
-                        status.app(),
-                        AutomationMode.MANUAL
-                );
-            }
+            // Pas d'action INVESTIGATION ici : la remédiation du noeud est l'action
+            // RESTART_VM (AUTO) creee + executee via Camunda dans triggerNodePowerOnViaCamunda.
 
             historyService.record(incident, incident.getStatus(),
                     "AI enrichment: type=" + safe(prediction.getIncidentType())

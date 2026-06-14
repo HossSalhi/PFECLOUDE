@@ -9,6 +9,7 @@ import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import com.orange.pfe.backend.model.workflow.WorkflowOrchestrationState;
 import com.orange.pfe.backend.service.remediation.RemediationExecutionResult;
 import com.orange.pfe.backend.service.remediation.RemediationExecutor;
+import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.service.remediation.RemediationPlan;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.response.ProcessInstanceEvent;
@@ -78,12 +79,20 @@ public class CamundaWorkflowService {
      * node-remediation process (which forces human approval before drain/cordon/escalate).
      * Everything else uses the default app remediation process.
      */
-    private String resolveProcessId(String incidentType) {
+    private String resolveProcessId(String incidentType, RemediationPlan plan) {
         if (incidentType == null) {
             return camundaProperties.getProcessId();
         }
         String t = incidentType.toUpperCase();
-        if (t.startsWith("NODE_") || t.contains("NODE") || t.equals("MONITORING_DOWN") || t.equals("AI_SERVICE_DOWN")) {
+        boolean isNode = t.startsWith("NODE_") || t.contains("NODE")
+                || t.equals("MONITORING_DOWN") || t.equals("AI_SERVICE_DOWN");
+        if (isNode) {
+            // Auto-démarrage VM : un RESTART_VM auto-exécutable (power-on du worker via l'agent
+            // hôte) passe par le process AUTO (incident-remediation) pour s'exécuter SANS
+            // approbation. Les autres actions nœud (drain/cordon) restent gated humain.
+            if (plan != null && plan.autoExecutable() && plan.actionType() == ActionType.RESTART_VM) {
+                return camundaProperties.getProcessId();
+            }
             return NODE_PROCESS_ID;
         }
         return camundaProperties.getProcessId();
@@ -105,7 +114,7 @@ public class CamundaWorkflowService {
         }
 
         try {
-            String processId = resolveProcessId(prediction.getIncidentType());
+            String processId = resolveProcessId(prediction.getIncidentType(), plan);
             ProcessInstanceEvent processInstanceEvent = requireClient()
                     .newCreateInstanceCommand()
                     .bpmnProcessId(processId)

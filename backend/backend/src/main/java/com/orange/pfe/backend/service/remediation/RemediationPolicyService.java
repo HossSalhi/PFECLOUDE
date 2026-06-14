@@ -33,6 +33,16 @@ public class RemediationPolicyService {
         ActionType actionType = recommendationOnly
                 ? null
                 : mapActionType(preferredExecutableAction(prediction), prediction.getIncidentType());
+        // Auto-démarrage VM : RESTART_VM UNIQUEMENT pour le vrai incident nœud — namespace
+        // canonique "k8s-nodes" où app = nom du nœud (k8s-worker1). Un node-down crée aussi des
+        // incidents pour les apps affectées (ex. pfe/podinfo) ; ceux-là NE doivent PAS recevoir
+        // RESTART_VM (sinon target=app, pas le nœud -> l'agent rejette). Le nom de nœud (app) sert
+        // de target pour l'agent vmrun.
+        if (!recommendationOnly && "k8s-nodes".equalsIgnoreCase(request.getNamespace())
+                && prediction.getIncidentType() != null
+                && prediction.getIncidentType().toUpperCase(Locale.ROOT).contains("NODE")) {
+            actionType = ActionType.RESTART_VM;
+        }
         String targetNamespace = request.getNamespace();
         String targetName = request.getApp();
         RemediationTargetKind targetKind = mapTargetKind(actionType);
@@ -61,6 +71,12 @@ public class RemediationPolicyService {
                 || actionType == ActionType.ESCALATION
                 || dbRelated;
         boolean approvalRequired = !recommendationOnly && !autoExecutable && prediction.isIncident();
+        // Incident NŒUD = récupération 100% automatique par le watchdog hôte (rallume la
+        // VM), quel que soit le namespace de détection (k8s-nodes, kube-system, ...). On
+        // affiche donc le mode AUTO (pas d'action manuelle attendue de l'opérateur).
+        boolean nodeIncident = isNodeIncident(prediction.getIncidentType(), request.getApp());
+        AutomationMode automationMode = (autoExecutable || nodeIncident)
+                ? AutomationMode.AUTO : AutomationMode.MANUAL;
         String rationale = buildRationale(
                 actionType, autoExecutable, approvalRequired, cooldownBlocked, dbRelated,
                 confidenceEligible, severityEligible, appAllowlisted, namespaceAllowlisted,
@@ -69,7 +85,7 @@ public class RemediationPolicyService {
 
         return new RemediationPlan(
                 actionType,
-                autoExecutable ? AutomationMode.AUTO : AutomationMode.MANUAL,
+                automationMode,
                 approvalRequired,
                 autoExecutable,
                 manualFollowUp,
@@ -93,7 +109,22 @@ public class RemediationPolicyService {
                 || actionType == ActionType.SCALE_DEPLOYMENT
                 || actionType == ActionType.SCALE_DOWN
                 || actionType == ActionType.DELETE_CRASHLOOPING_PODS
-                || actionType == ActionType.FORCE_RECREATE_DEPLOYMENT;
+                || actionType == ActionType.FORCE_RECREATE_DEPLOYMENT
+                // RESTART_VM auto-exécutable : power-on d'un worker tombé via l'agent hôte
+                // (ne fait que démarrer la VM, jamais l'éteindre -> sûr).
+                || actionType == ActionType.RESTART_VM;
+    }
+
+    // Un incident est "noeud" si le type contient NODE ou si la cible est un noeud K8s
+    // (k8s-worker / k8s-master). Ces incidents sont recuperes automatiquement par le
+    // watchdog hote -> affiches en mode AUTO quel que soit le namespace de detection.
+    private boolean isNodeIncident(String incidentType, String app) {
+        boolean typeNode = incidentType != null
+                && incidentType.toUpperCase(Locale.ROOT).contains("NODE");
+        boolean appNode = app != null
+                && (app.toLowerCase(Locale.ROOT).startsWith("k8s-worker")
+                 || app.toLowerCase(Locale.ROOT).startsWith("k8s-master"));
+        return typeNode || appNode;
     }
 
     // ── Allowlist checks (support "*" wildcard) ───────────────────────────────

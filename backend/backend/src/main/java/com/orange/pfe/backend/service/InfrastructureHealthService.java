@@ -49,17 +49,11 @@ public class InfrastructureHealthService {
     public List<ComponentStatus> checkAll() {
         List<ComponentStatus> results = new ArrayList<>();
 
-        // --- VM Monitoring ---
-        results.add(checkHttp("infra", "prometheus", props.getPrometheusUrl() + "/-/healthy"));
-        results.add(checkHttp("infra", "loki",       props.getLokiUrl()       + "/loki/api/v1/labels"));
-        results.add(checkHttp("infra", "grafana",    props.getGrafanaUrl()    + "/api/health"));
-
-        // --- VM IaCamunda ---
-        results.add(checkHttp("infra", "ai-service", props.getAiServiceUrl()  + "/health"));
-        results.add(checkHttp("infra", "camunda",    props.getCamundaUrl()    + "/v2/topology"));
-        results.add(checkHttp("infra", "ollama",     props.getOllamaUrl()     + "/api/tags"));
-
-        // --- Kubernetes nodes ---
+        // HELIOS ne se surveille PAS lui-même : on ne teste PAS sa propre stack
+        // (prometheus, loki, grafana, ai-service, camunda, ollama). On surveille
+        // uniquement l'INFRA À SUPERVISER = les nœuds du cluster Kubernetes (les VM
+        // master/worker). Les applications clientes déployées sont, elles, suivies
+        // par le polling applicatif (AIOps polling + découverte), hors stack HELIOS.
         results.addAll(checkKubernetesNodes());
 
         return results;
