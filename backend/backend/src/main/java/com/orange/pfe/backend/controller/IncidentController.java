@@ -48,6 +48,13 @@ public class IncidentController {
     @PutMapping("/{id}/status/{status}")
     public ResponseEntity<IncidentResponse> updateStatus(@PathVariable Long id,
                                                          @PathVariable IncidentStatus status) {
+        // "Demarrer" depuis la LISTE = passage IN_PROGRESS : declenche directement la
+        // remediation Camunda (le clic operateur vaut approbation) -> pas besoin de
+        // passer par la page Taches Humaines.
+        if (status == IncidentStatus.IN_PROGRESS) {
+            orchestrationService.executeRecommendation(id);
+            return ResponseEntity.ok(service.getById(id));
+        }
         return ResponseEntity.ok(service.updateStatus(id, status));
     }
 

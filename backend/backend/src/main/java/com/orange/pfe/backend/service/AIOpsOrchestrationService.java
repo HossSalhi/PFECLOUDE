@@ -372,12 +372,25 @@ public class AIOpsOrchestrationService {
         Incident incident = incidentRepository.findById(incidentId)
                 .orElseThrow(() -> new IncidentNotFoundException(incidentId));
 
+        // Garde : ne pas (re)executer un incident deja traite/en cours.
+        if (incident.getStatus() == IncidentStatus.RESOLVED
+                || incident.getStatus() == IncidentStatus.CLOSED
+                || incident.getStatus() == IncidentStatus.ARCHIVED
+                || incident.getStatus() == IncidentStatus.IN_PROGRESS) {
+            log.info("executeRecommendation: incident {} deja {} - ignore", incidentId, incident.getStatus());
+            return;
+        }
+
         String namespace = incident.getNamespace() != null ? incident.getNamespace() : "pfe";
         String app = incident.getApp() != null ? incident.getApp() : "backend";
         String rawAction = parseFieldFromDescription(incident.getDescription(), "action");
         ActionType actionType = remediationPolicyService.mapActionType(rawAction, incident.getIncidentType());
         if (actionType == null || actionType == ActionType.INVESTIGATION || actionType == ActionType.ESCALATION) {
-            actionType = ActionType.RESTART_POD;
+            // Incident noeud -> RESTART_VM (rallumer la VM via l'agent hote) ; sinon RESTART_POD.
+            boolean isNode = (incident.getIncidentType() != null
+                        && incident.getIncidentType().toUpperCase(java.util.Locale.ROOT).contains("NODE"))
+                    || (app != null && app.toLowerCase(java.util.Locale.ROOT).startsWith("k8s-worker"));
+            actionType = isNode ? ActionType.RESTART_VM : ActionType.RESTART_POD;
         }
 
         RemediationTargetKind targetKind = (actionType == ActionType.RESTART_POD
@@ -389,14 +402,16 @@ public class AIOpsOrchestrationService {
 
         var action = actionService.createAction(
                 incident, actionType,
-                "Manual execution of AI recommendation: " + safe(rawAction),
+                "Execution declenchee par l'operateur (Demarrer): " + safe(rawAction),
                 "HUMAN-OPERATOR",
-                namespace, targetKind, app, AutomationMode.MANUAL
+                namespace, targetKind, app, AutomationMode.AUTO
         );
 
+        // approvalRequired=false + autoExecutable=true : le clic "Demarrer" de l'operateur
+        // VAUT approbation -> Camunda execute directement, sans Human Task d'attente.
         RemediationPlan plan = new RemediationPlan(
-                actionType, AutomationMode.MANUAL, true, false, false, false, false,
-                namespace, targetKind, app, "Manual execution requested by operator"
+                actionType, AutomationMode.AUTO, false, true, false, false, false,
+                namespace, targetKind, app, "Execution directe demandee par l'operateur (Demarrer)"
         );
 
         AIPredictResponse prediction = new AIPredictResponse();
@@ -405,19 +420,18 @@ public class AIOpsOrchestrationService {
         prediction.setSeverity(incident.getSeverity() != null ? incident.getSeverity().name() : "MEDIUM");
         prediction.setRecommendedAction(rawAction);
         prediction.setFinalExecutableAction(rawAction);
-        prediction.setExecutionMode("MANUAL");
-        prediction.setConfidence(0.0);
+        prediction.setExecutionMode("AUTO");
+        prediction.setConfidence(1.0);
         prediction.setDecisionExplanation(incident.getExplanation());
 
+        // Camunda execute la remediation directement (le clic Demarrer = approbation).
         camundaWorkflowService.startWorkflow(workflow, action, plan, prediction);
-        humanTaskService.createTask("Validate AI remediation for incident #" + incident.getId(), workflow);
-        remediationMetricsService.approvalPending();
 
-        incident.setStatus(IncidentStatus.WAITING_FOR_APPROVAL);
-        workflowService.updateOrchestrationState(workflow, WorkflowOrchestrationState.WAITING_FOR_APPROVAL,
-                "Manual execution requested by operator");
-        historyService.record(incident, IncidentStatus.WAITING_FOR_APPROVAL,
-                "Execution manuelle déclenchée — en attente d'approbation");
+        incident.setStatus(IncidentStatus.IN_PROGRESS);
+        workflowService.updateOrchestrationState(workflow, WorkflowOrchestrationState.EXECUTION_PENDING,
+                "Execution directe declenchee par l'operateur");
+        historyService.record(incident, IncidentStatus.IN_PROGRESS,
+                "Remediation declenchee par l'operateur (Demarrer) - Camunda execute directement");
         incidentRepository.save(incident);
 
         log.info("executeRecommendation: incident={} action={} workflow={}", incidentId, actionType, workflow.getId());
