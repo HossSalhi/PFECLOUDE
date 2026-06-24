@@ -170,8 +170,11 @@ STATE = NodeState()
 
 # ── kubectl helpers ───────────────────────────────────────────────────────────
 
-def get_node_statuses(cfg: dict) -> dict[str, str]:
-    """Returns {node_name: 'Ready'|'NotReady'|'Unknown'}"""
+def get_node_statuses(cfg: dict):
+    """Returns {node_name: 'Ready'|'NotReady'|'Unknown'} on success, or None if kubectl could not
+    answer (missing kubeconfig, transient API error). None means "cannot assess workers" — the caller
+    must then NOT restart them (a genuinely-down worker still appears in the list as Unknown, so a
+    real outage is never silenced; only an inconclusive kubectl is)."""
     kubeconfig = cfg.get("kubeconfig_path", "")
     kubectl = cfg.get("kubectl_path", "kubectl")
     cmd = [kubectl, "--kubeconfig", kubeconfig, "get", "nodes",
@@ -190,7 +193,7 @@ def get_node_statuses(cfg: dict) -> dict[str, str]:
         return statuses
     except Exception as exc:
         log.warning("kubectl get nodes failed: %s", exc)
-        return {}
+        return None
 
 
 def is_reachable(ip: str, port: int, timeout: float = 4.0) -> bool:
@@ -385,13 +388,14 @@ def polling_loop(cfg: dict):
                     if secs >= grace and STATE.should_restart(cp_node, grace):
                         trigger_restart(cp_node)
 
-            # 2) WORKERS: assessed via kubectl, which is only trustworthy when the API is up.
-            statuses = get_node_statuses(cfg) if cp_alive else {}
+            # 2) WORKERS: assessed via kubectl, which is only trustworthy when the API is up AND
+            #    kubectl actually answered. If it could not (None: master down, missing kubeconfig,
+            #    transient error) we DON'T touch the workers — never false-restart healthy workers.
+            statuses = get_node_statuses(cfg) if cp_alive else None
             for node in managed_nodes:
                 if node == cp_node:
                     continue
-                if not cp_alive:
-                    # API down -> we cannot judge worker health; skip (fix the master first).
+                if not cp_alive or not statuses:
                     continue
                 status = statuses.get(node, "Unknown")
                 if status == "Ready":
