@@ -26,4 +26,11 @@ public interface WorkflowRepository extends JpaRepository<WorkflowInstance, Long
 
     @Query("SELECT DISTINCT wf FROM WorkflowInstance wf LEFT JOIN FETCH wf.logs")
     List<WorkflowInstance> findAllWithLogs();
+
+    @Query("SELECT DISTINCT wf FROM WorkflowInstance wf LEFT JOIN FETCH wf.logs WHERE wf.incident.id = :incidentId ORDER BY wf.id DESC")
+    List<WorkflowInstance> findByIncidentIdWithLogs(@Param("incidentId") Long incidentId);
+
+    /** Status of the most recent workflow for an incident (used to gate auto-resolve while Camunda is still running). */
+    @Query("SELECT wf.status FROM WorkflowInstance wf WHERE wf.incident.id = :incidentId ORDER BY wf.id DESC")
+    List<WorkflowStatus> findLatestStatusByIncidentId(@Param("incidentId") Long incidentId);
 }

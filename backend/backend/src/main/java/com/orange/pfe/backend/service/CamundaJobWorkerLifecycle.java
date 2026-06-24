@@ -8,9 +8,9 @@ import com.orange.pfe.backend.model.action.AutomationMode;
 import com.orange.pfe.backend.model.action.IncidentAction;
 import com.orange.pfe.backend.model.action.RemediationTargetKind;
 import com.orange.pfe.backend.model.enums.IncidentStatus;
-import com.orange.pfe.backend.model.human.TaskDecision;
 import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import com.orange.pfe.backend.model.workflow.WorkflowOrchestrationState;
+import com.orange.pfe.backend.model.workflow.WorkflowStatus;
 import com.orange.pfe.backend.repository.HumanTaskRepository;
 import com.orange.pfe.backend.repository.IncidentActionRepository;
 import com.orange.pfe.backend.service.remediation.RecoveryVerificationResult;
@@ -33,8 +33,15 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.orange.pfe.backend.dto.WorkflowLogDTO;
+import com.orange.pfe.backend.model.human.HumanTask;
+import com.orange.pfe.backend.model.human.TaskDecision;
+
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -61,6 +68,7 @@ public class CamundaJobWorkerLifecycle {
     private final IncidentHistoryService incidentHistoryService;
 
     private final AIOpsClientService aiOpsClientService;
+    private final NotificationService notificationService;
 
     private JobWorker executeWorker;
     private JobWorker verifyWorker;
@@ -80,7 +88,8 @@ public class CamundaJobWorkerLifecycle {
             HumanTaskService humanTaskService,
             RemediationProperties remediationProperties,
             IncidentHistoryService incidentHistoryService,
-            AIOpsClientService aiOpsClientService
+            AIOpsClientService aiOpsClientService,
+            NotificationService notificationService
     ) {
         this.camundaClient = camundaClient;
         this.camundaWorkflowService = camundaWorkflowService;
@@ -95,6 +104,7 @@ public class CamundaJobWorkerLifecycle {
         this.remediationProperties = remediationProperties;
         this.incidentHistoryService = incidentHistoryService;
         this.aiOpsClientService = aiOpsClientService;
+        this.notificationService = notificationService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -106,7 +116,10 @@ public class CamundaJobWorkerLifecycle {
                     .jobType("execute-remediation")
                     .handler(this::handleExecuteRemediation)
                     .name("backend-execute-remediation")
-                    .maxJobsActive(2)
+                    // 16 concurrent demo incidents create 16 execute jobs at once. maxJobsActive(2)
+                    // throttled the worker to 2 in-flight -> the rest sat ACTIVE-undrained in Zeebe ->
+                    // action PENDING forever. 16 lets the worker drain a full burst in one pass.
+                    .maxJobsActive(16)
                     .fetchVariables(
                             "workflowId",
                             "actionId",
@@ -128,8 +141,12 @@ public class CamundaJobWorkerLifecycle {
                     .jobType("verify-remediation")
                     .handler(this::handleVerifyRemediation)
                     .name("backend-verify-remediation")
-                    .maxJobsActive(2)
-                    .fetchVariables("workflowId", "targetNamespace", "targetName")
+                    // maxJobsActive(1) serialized ALL verifications: each blocks its thread with
+                    // Thread.sleep for up to retries×delay (minutes), so 16 incidents queued ~ hours and
+                    // most stayed IN_PROGRESS. 16 lets verifications run in parallel (24 worker threads).
+                    .maxJobsActive(16)
+                    .timeout(Duration.ofMinutes(6))   // > verifyDelay(25s) + 9×retryDelay(18s) = 187s
+                    .fetchVariables("workflowId", "targetNamespace", "targetName", "actionType", "incidentType")
                     .open();
 
             autoEscalateWorker = camundaClient.newWorker()
@@ -208,6 +225,14 @@ public class CamundaJobWorkerLifecycle {
 
             markActionInProgress(action);
 
+            // Name the SPECIFIC incident (title carries the real measured signal) so the Camunda
+            // trace itself differs per test instead of showing generic boilerplate.
+            if (workflow.getIncident() != null) {
+                workflowService.addWorkflowLog(workflowId,
+                        "🎯 Remédiation de l'incident #" + workflow.getIncident().getId()
+                                + " — " + workflow.getIncident().getTitle());
+            }
+
             RemediationPlan plan = buildPlan(variables, action);
             if (plan.autoExecutable()) {
                 remediationMetricsService.autoRemediationAttempted();
@@ -222,22 +247,67 @@ public class CamundaJobWorkerLifecycle {
                         IncidentStatus.IN_PROGRESS,
                         "Automated remediation executed: " + result.message()
                 );
-                workflowService.updateOrchestrationState(
-                        workflow,
-                        WorkflowOrchestrationState.EXECUTION_PENDING,
-                        IncidentStatus.IN_PROGRESS,
-                        "Remediation executed successfully; waiting before verification"
-                );
+                // Trace pédagogique : on distingue une vraie action Kubernetes d'une simple escalade.
+                boolean isEscalationOnly = action.getType() == ActionType.INVESTIGATION
+                        || action.getType() == ActionType.ESCALATION;
+                String target = action.getTargetNamespace() + "/" + action.getTargetName();
+                boolean nodeTarget = "k8s-nodes".equalsIgnoreCase(action.getTargetNamespace());
+                if (isEscalationOnly) {
+                    if (nodeTarget) {
+                        workflowService.addWorkflowLog(workflowId,
+                                "🔍 Décision IA : panne nœud — aucune action kubectl ne peut réparer un nœud "
+                                + "injoignable (redémarrer ses pods n'aide pas).");
+                        workflowService.addWorkflowLog(workflowId,
+                                "↗ Escalade : power-on de la VM " + action.getTargetName()
+                                + " délégué au watchdog hôte (hors cluster) + rééquilibrage des charges.");
+                        workflowService.addWorkflowLog(workflowId,
+                                "$ vmrun start " + action.getTargetName()
+                                + "   (équivalent — power-on VM exécuté par le watchdog hôte)");
+                        workflowService.addWorkflowLog(workflowId,
+                                "⏳ HELIOS surveille le retour du nœud à l'état Ready avant de conclure.");
+                    } else {
+                        workflowService.addWorkflowLog(workflowId,
+                                "🔍 Décision IA : aucune action Kubernetes automatique sûre pour ce type de panne.");
+                        workflowService.addWorkflowLog(workflowId,
+                                "↗ Escalade à l'opérateur humain pour " + target + " (cause probable : configuration/applicatif).");
+                        workflowService.addWorkflowLog(workflowId,
+                                "⏳ HELIOS vérifie maintenant si la panne se résout d'elle-même avant de conclure.");
+                    }
+                    workflowService.updateOrchestrationState(
+                            workflow,
+                            WorkflowOrchestrationState.EXECUTION_PENDING,
+                            IncidentStatus.IN_PROGRESS,
+                            nodeTarget ? "Escalade nœud enregistrée ; surveillance du retour du nœud à Ready"
+                                       : "Escalade humaine enregistrée ; surveillance pour confirmer si la panne persiste"
+                    );
+                } else {
+                    workflowService.addWorkflowLog(workflowId,
+                            "▶ Action automatique choisie : " + describeActionFr(action.getType()) + " sur " + target);
+                    String kubectlCmd = buildKubectlEquivalent(action.getType(), action.getTargetNamespace(), action.getTargetName());
+                    if (kubectlCmd != null) {
+                        workflowService.addWorkflowLog(workflowId, "$ " + kubectlCmd + "   (équivalent kubectl)");
+                    }
+                    workflowService.addWorkflowLog(workflowId,
+                            "✓ Action appliquée : " + result.message());
+                    workflowService.updateOrchestrationState(
+                            workflow,
+                            WorkflowOrchestrationState.EXECUTION_PENDING,
+                            IncidentStatus.IN_PROGRESS,
+                            "Action appliquée ; vérification que le système revient à la normale"
+                    );
+                }
             } else {
                 actionService.markActionFailed(actionId, result.message(), EXECUTOR_USERNAME, result.message());
                 remediationMetricsService.remediationFailed();
                 remediationMetricsService.executionDuration(System.nanoTime() - startedAtNanos);
                 incidentHistoryService.record(
                         workflow.getIncident(),
-                        IncidentStatus.WAITING_FOR_APPROVAL,
-                        "Automated remediation failed and requires review: " + result.message()
+                        IncidentStatus.RESOLUTION_FAILED,
+                        "Automated remediation failed: " + result.message()
                 );
-                parkWorkflowForApproval(workflow, "Automation attempt failed: " + result.message());
+                workflowService.addWorkflowLog(workflowId,
+                        "✗ Échec: " + result.message());
+                parkWorkflowAsFailed(workflow, "Automation attempt failed: " + result.message());
             }
 
             completeJobWithRetry(
@@ -265,14 +335,64 @@ public class CamundaJobWorkerLifecycle {
             String targetName = stringValue(variables.get("targetName"));
 
             WorkflowInstance workflow = workflowService.getWorkflowInstance(workflowId);
+
+            // Guard: duplicate job activation (lock expired and re-activated by another pod)
+            if (workflow.getStatus() == WorkflowStatus.FAILED
+                    || workflow.getStatus() == WorkflowStatus.COMPLETED) {
+                logger.warn("verify-remediation job {} is a duplicate — workflow #{} already {}; completing no-op",
+                        job.getKey(), workflowId, workflow.getStatus());
+                completeJobWithRetry(jobClient, job,
+                        Map.of("recoveryResolved", false, "verificationMessage", "skipped-duplicate"),
+                        "verify-remediation");
+                return;
+            }
+
             workflowService.updateOrchestrationState(
                     workflow,
                     WorkflowOrchestrationState.VERIFYING,
                     IncidentStatus.IN_PROGRESS,
-                    "Starting post-remediation recovery checks"
+                    "Démarrage des vérifications post-remédiation"
             );
-
-            RecoveryVerificationResult verificationResult = recoveryVerificationService.verify(namespace, targetName);
+            String actionTypeVar = stringValue(variables.get("actionType"));
+            String incidentTypeVar = stringValue(variables.get("incidentType"));
+            RecoveryVerificationResult verificationResult;
+            if ("k8s-nodes".equalsIgnoreCase(namespace)) {
+                // NODE incident: the "workload" is a NODE, not a deployment — there is no kubectl fix; the
+                // host watchdog powers the VM back on (rejoin ~2-3 min). Verify by polling the node's Ready
+                // status (not deployment health / AI), so the workflow concludes RESOLVED cleanly via Camunda.
+                workflowService.addWorkflowLog(workflowId,
+                        "⏳ Vérification du nœud " + targetName + " : HELIOS attend que le nœud redevienne "
+                        + "Ready (rallumage de la VM par le watchdog hôte). Plusieurs essais espacés.");
+                boolean nodeBack = false;
+                int attempts = 18; // ~18 x 15s = 270s, within the 6-min verify worker timeout
+                for (int i = 1; i <= attempts; i++) {
+                    nodeBack = remediationExecutor.isNodeReady(targetName);
+                    workflowService.addWorkflowLog(workflowId, nodeBack
+                            ? "✓ Vérification " + i + "/" + attempts + " — le nœud " + targetName
+                                    + " est de retour Ready → incident RÉSOLU"
+                            : "⏳ Vérification " + i + "/" + attempts + " — nœud " + targetName
+                                    + " encore NotReady (rallumage de la VM par le watchdog hôte en cours)...");
+                    if (nodeBack || i == attempts) break;
+                    Thread.sleep(15_000L);
+                }
+                verificationResult = new RecoveryVerificationResult(nodeBack, !nodeBack,
+                        nodeBack ? "node " + targetName + " back Ready"
+                                 : "node " + targetName + " still NotReady after verification window");
+            } else {
+                workflowService.addWorkflowLog(workflowId,
+                        "⏳ Vérification du rétablissement (2 conditions : pods tous prêts + l'IA ne détecte plus "
+                        + "d'anomalie). Plusieurs essais espacés pour laisser le système se stabiliser.");
+                // AUTOSCALING / SCALE_DEPLOYMENT: verify in "scale mode" — success = the added replicas are
+                // Ready. The AI still reading high load is expected (sustained load is why we scaled), so it
+                // must not keep the incident open. Other types verify normally (workload healthy + AI clear).
+                boolean scaleMode = "SCALE_DEPLOYMENT".equalsIgnoreCase(actionTypeVar)
+                        || "AUTOSCALING".equalsIgnoreCase(incidentTypeVar);
+                verificationResult = recoveryVerificationService.verify(
+                        namespace, targetName,
+                        msg -> workflowService.addWorkflowLog(workflowId, msg),
+                        scaleMode
+                );
+            }
             boolean resolved = verificationResult.resolved();
             remediationMetricsService.verification(resolved);
 
@@ -284,16 +404,31 @@ public class CamundaJobWorkerLifecycle {
                         IncidentStatus.RESOLVED,
                         "Post-remediation verification succeeded: " + verificationResult.message()
                 );
-                workflowService.completeWorkflow(workflowId);
+                WorkflowInstance completed = workflowService.completeWorkflow(workflowId);
+                try {
+                    notificationService.notifyIncidentResolved(completed.getIncident());
+                } catch (Exception ex) {
+                    logger.warn("Resolved notification failed for incident #{}: {}",
+                            completed.getIncident().getId(), ex.getMessage());
+                }
             } else {
                 remediationMetricsService.remediationFailed();
                 remediationMetricsService.verificationDuration(System.nanoTime() - startedAtNanos);
+                // Raison lisible par un humain (sans jargon) pour la trace + l'email d'escalade.
+                String humanReason = "La panne persiste après remédiation : "
+                        + (verificationResult.workloadHealthy()
+                            ? "les pods sont prêts mais "
+                            : "le déploiement n'est toujours pas disponible et ")
+                        + "l'IA détecte encore l'anomalie après toutes les tentatives. "
+                        + "Cause probable : panne non corrigeable par un redémarrage (config/applicatif ou dépendance externe). "
+                        + "→ Escalade à l'opérateur humain.";
                 incidentHistoryService.record(
                         workflow.getIncident(),
-                        IncidentStatus.WAITING_FOR_APPROVAL,
-                        "Post-remediation verification failed: " + verificationResult.message()
+                        IncidentStatus.RESOLUTION_FAILED,
+                        humanReason
                 );
-                parkWorkflowForApproval(workflow, "Post-remediation verification failed: " + verificationResult.message());
+                workflowService.addWorkflowLog(workflowId, "✗ " + humanReason);
+                parkWorkflowAsFailed(workflow, humanReason);
             }
 
             completeJobWithRetry(
@@ -323,20 +458,10 @@ public class CamundaJobWorkerLifecycle {
 
             WorkflowInstance workflow = workflowService.getWorkflowInstance(workflowId);
 
-            incidentHistoryService.record(
-                    workflow.getIncident(),
-                    IncidentStatus.WAITING_FOR_APPROVAL,
-                    "ESCALATED — approval timeout reached (" + timeoutIso + ", severity=" + severity
-                    + "). Incident auto-escalated to on-call team."
-            );
-            workflowService.updateOrchestrationState(
-                    workflow,
-                    WorkflowOrchestrationState.ESCALATED,
-                    IncidentStatus.WAITING_FOR_APPROVAL,
-                    "Auto-escalated after approval timeout " + timeoutIso
-            );
+            parkWorkflowAsFailed(workflow,
+                    "HELIOS n'a pas pu résoudre automatiquement (severity=" + severity + ", timeout=" + timeoutIso + ")");
 
-            logger.warn("Incident #{} auto-escalated (timeout={}, severity={})",
+            logger.warn("Incident #{} marked RESOLUTION_FAILED via auto-escalate (timeout={}, severity={})",
                     workflow.getIncident().getId(), timeoutIso, severity);
 
             completeJobWithRetry(
@@ -404,21 +529,69 @@ public class CamundaJobWorkerLifecycle {
         }
     }
 
-    private void parkWorkflowForApproval(WorkflowInstance workflow, String reason) {
-        workflowService.updateOrchestrationState(
+    private void parkWorkflowAsFailed(WorkflowInstance staleWorkflow, String reason) {
+        // Reload fresh from DB — the stale object may have been detached for minutes
+        // (verification runs 7 min); cascading a detached incident via repo.save() doesn't persist.
+        WorkflowInstance workflow = workflowService.getWorkflowInstance(staleWorkflow.getId());
+
+        // Idempotent guard — avoid double-write if called twice (BPMN route + duplicate job)
+        if (workflow.getStatus() == WorkflowStatus.FAILED
+                || workflow.getStatus() == WorkflowStatus.COMPLETED) {
+            logger.info("parkWorkflowAsFailed: workflow #{} already {} — skipping", workflow.getId(), workflow.getStatus());
+            return;
+        }
+        workflowService.finalizeWorkflow(
                 workflow,
-                WorkflowOrchestrationState.WAITING_FOR_APPROVAL,
-                IncidentStatus.WAITING_FOR_APPROVAL,
-                reason
+                WorkflowOrchestrationState.ESCALATED,
+                WorkflowStatus.FAILED,
+                IncidentStatus.RESOLUTION_FAILED,
+                "HELIOS a épuisé toutes les tentatives de remédiation. Raison: " + reason
+        );
+        incidentHistoryService.record(
+                workflow.getIncident(),
+                IncidentStatus.RESOLUTION_FAILED,
+                "HELIOS n'a pas pu résoudre l'incident automatiquement. Raison: " + reason
         );
 
+        // Auto-close any PENDING human tasks so they no longer block the operator UI
+        List<HumanTask> pendingTasks =
+                humanTaskRepository.findByWorkflowInstanceIdAndDecision(workflow.getId(), TaskDecision.PENDING);
+        if (!pendingTasks.isEmpty()) {
+            LocalDateTime now = LocalDateTime.now();
+            pendingTasks.forEach(t -> { t.setDecision(TaskDecision.CANCELLED); t.setCompletedAt(now); });
+            humanTaskRepository.saveAll(pendingTasks);
+            logger.info("Auto-closed {} pending human task(s) for workflow #{}", pendingTasks.size(), workflow.getId());
+        }
+
+        // Create a new PENDING task so the operator sees this in the human tasks list
         if (!humanTaskRepository.existsByWorkflowInstanceIdAndDecision(workflow.getId(), TaskDecision.PENDING)) {
             humanTaskService.createTask(
-                    "Review remediation follow-up for incident #" + workflow.getIncident().getId(),
+                    "Remédiation échouée — intervention requise pour l'incident #" + workflow.getIncident().getId(),
                     workflow
             );
-            remediationMetricsService.approvalPending();
         }
+
+        // Load workflow logs for rich email report
+        List<WorkflowLogDTO> workflowLogs = Collections.emptyList();
+        try {
+            workflowLogs = workflowService.getWorkflowLogsForIncident(workflow.getIncident().getId());
+        } catch (Exception ex) {
+            logger.warn("Could not load workflow logs for failure email: {}", ex.getMessage());
+        }
+
+        try {
+            notificationService.notifyRemediationFailedWithTrace(workflow.getIncident(), reason, workflowLogs);
+        } catch (Exception ex) {
+            logger.warn("Failed to send escalation notification for incident #{}: {}",
+                    workflow.getIncident().getId(), ex.getMessage());
+        }
+        logger.warn("Incident #{} marked RESOLUTION_FAILED — HELIOS could not auto-remediate. Reason: {}",
+                workflow.getIncident().getId(), reason);
+    }
+
+    private void parkWorkflowForApproval(WorkflowInstance workflow, String reason) {
+        // WAITING_FOR_APPROVAL supprimé — tout incident non résolu passe directement à RESOLUTION_FAILED.
+        parkWorkflowAsFailed(workflow, reason);
     }
 
     private void markActionInProgress(IncidentAction action) {
@@ -450,31 +623,59 @@ public class CamundaJobWorkerLifecycle {
     }
 
     private void failJob(JobClient jobClient, ActivatedJob job, Exception ex, Map<String, Object> variables) {
+        // WorkflowNotFoundException has TWO very different causes:
+        //  (1) TRANSACTION RACE (the common one): the Camunda process instance is created INSIDE the same
+        //      DB transaction that writes the workflow_instance row, so a fast worker can activate the
+        //      execute job BEFORE that row is committed -> getWorkflowInstance() throws "not found". This
+        //      is a LEGITIMATE current-run job; dropping it permanently (retries=0) strands the real
+        //      remediation in PENDING forever (no kubectl command ever runs). We instead FAIL WITH BACKOFF
+        //      so the creating tx commits, then the next activation finds the row and runs the real action.
+        //  (2) TRUE ORPHAN (rare): the workflow row was purged by a demo reset while its PI lived on. Such
+        //      a job never finds its row -> it exhausts its retries here and is then dropped for good.
+        if (ex instanceof com.orange.pfe.backend.exception.WorkflowNotFoundException) {
+            int remaining = Math.max(0, job.getRetries() - 1);
+            try {
+                if (remaining > 0) {
+                    logger.warn("Workflow not visible yet for job {} ('{}') — retrying ({} left; creating tx likely still committing): {}",
+                            job.getKey(), job.getType(), remaining, ex.getMessage());
+                    jobClient.newFailCommand(job).retries(remaining)
+                            .retryBackoff(Duration.ofSeconds(6))
+                            .errorMessage("workflow not yet visible (tx committing): " + ex.getMessage())
+                            .send().join();
+                } else {
+                    logger.warn("Dropping ORPHAN job {} ('{}') — workflow still gone after retries (purged): {}",
+                            job.getKey(), job.getType(), ex.getMessage());
+                    jobClient.newFailCommand(job).retries(0).errorMessage("orphan: workflow purged").send().join();
+                }
+            } catch (Exception e) { logger.debug("not-found fail-command error: {}", e.getMessage()); }
+            return;
+        }
         int retries = Math.max(0, job.getRetries() - 1);
 
         if (retries == 0) {
-            // Last retry exhausted — park the workflow so operators know manual action is needed.
+            // All retries exhausted — escalate to super admin via email (no HumanTask).
             Long workflowId = null;
             try { workflowId = longValue(variables.get("workflowId")); } catch (Exception ignored) {}
             if (workflowId != null) {
                 try {
                     WorkflowInstance wf = workflowService.getWorkflowInstance(workflowId);
+                    String reason = "Job '" + job.getType() + "' failed permanently after all retries. Error: " + ex.getMessage();
                     incidentHistoryService.record(
                             wf.getIncident(),
-                            IncidentStatus.WAITING_FOR_APPROVAL,
-                            "Job '" + job.getType() + "' exhausted all retries — manual intervention required. "
-                            + "Error: " + ex.getMessage()
+                            IncidentStatus.RESOLUTION_FAILED,
+                            "HELIOS a épuisé toutes ses tentatives. Super admin notifié. " + reason
                     );
                     workflowService.updateOrchestrationState(
                             wf,
-                            WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
-                            IncidentStatus.WAITING_FOR_APPROVAL,
-                            "Job '" + job.getType() + "' failed permanently after all retries"
+                            WorkflowOrchestrationState.ESCALATED,
+                            IncidentStatus.RESOLUTION_FAILED,
+                            reason
                     );
-                    logger.error("Job '{}' for workflow #{} failed permanently — moved to MANUAL_FOLLOW_UP",
+                    notificationService.notifyRemediationFailed(wf.getIncident(), reason);
+                    logger.error("Job '{}' for workflow #{} failed permanently — super admin notified via email",
                             job.getType(), workflowId);
                 } catch (Exception notifyEx) {
-                    logger.warn("Could not park workflow after permanent job failure", notifyEx);
+                    logger.warn("Could not escalate workflow after permanent job failure", notifyEx);
                 }
             }
         }
@@ -587,6 +788,46 @@ public class CamundaJobWorkerLifecycle {
     private String stringValueOrDefault(Object value, String fallback) {
         String resolved = stringValue(value);
         return resolved == null || resolved.isBlank() ? fallback : resolved;
+    }
+
+    /** Returns the kubectl-equivalent command string, or {@code null} for non-K8s actions (e.g. INVESTIGATION). */
+    private String buildKubectlEquivalent(ActionType type, String ns, String name) {
+        if (type == null) return null;
+        String n = name != null ? name : "<app>";
+        String namespace = ns != null ? ns : "pfe";
+        return switch (type) {
+            case RESTART_POD               -> "kubectl delete pod -n " + namespace + " -l app=" + n;
+            case SCALE_DEPLOYMENT          -> "kubectl scale deployment/" + n + " -n " + namespace + " --replicas=<N+1>";
+            case SCALE_DOWN                -> "kubectl scale deployment/" + n + " -n " + namespace + " --replicas=1";
+            case ROLLBACK_DEPLOYMENT       -> "kubectl rollout undo deployment/" + n + " -n " + namespace;
+            case DELETE_CRASHLOOPING_PODS  -> "kubectl delete pods -n " + namespace + " -l app=" + n;
+            case REMOVE_NETWORK_POLICY     -> "kubectl delete networkpolicy <bloquante-récente> -n " + namespace;
+            case FORCE_RECREATE_DEPLOYMENT -> "kubectl rollout restart deployment/" + n + " -n " + namespace;
+            case CORDON_NODE               -> "kubectl cordon " + n;
+            case DRAIN_NODE                -> "kubectl drain " + n + " --ignore-daemonsets --delete-emptydir-data";
+            case INVESTIGATION             -> null;  // escalation, no K8s command
+            default                        -> null;
+        };
+    }
+
+    /** Description en français clair de l'action, pour la trace lisible par un opérateur. */
+    private String describeActionFr(ActionType type) {
+        if (type == null) return "action inconnue";
+        return switch (type) {
+            case RESTART_POD               -> "supprimer le pod pour le redémarrer";
+            case SCALE_DEPLOYMENT          -> "ajouter des répliques (scale up)";
+            case SCALE_DOWN                -> "réduire les répliques (scale down)";
+            case ROLLBACK_DEPLOYMENT       -> "revenir à la version précédente (rollback)";
+            case DELETE_CRASHLOOPING_PODS  -> "supprimer les pods en crash pour forcer une recréation propre";
+            case REMOVE_NETWORK_POLICY     -> "supprimer la NetworkPolicy bloquante (rétablir la connectivité)";
+            case FORCE_RECREATE_DEPLOYMENT -> "redémarrage progressif de tous les pods (rollout restart)";
+            case CORDON_NODE               -> "isoler le nœud (cordon)";
+            case DRAIN_NODE                -> "vider le nœud et migrer les pods (drain)";
+            case RESTART_VM                -> "redémarrer la VM du worker (watchdog)";
+            case INVESTIGATION             -> "investigation / escalade humaine";
+            case ESCALATION                -> "escalade à l'équipe d'astreinte";
+            default                        -> type.name();
+        };
     }
 
     private <T extends Enum<T>> T enumValue(Class<T> enumType, Object rawValue, T currentValue, T fallback) {

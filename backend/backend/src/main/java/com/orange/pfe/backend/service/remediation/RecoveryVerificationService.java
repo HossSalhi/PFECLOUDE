@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
+import java.util.function.Consumer;
 
 @Service
 public class RecoveryVerificationService {
@@ -44,16 +45,35 @@ public class RecoveryVerificationService {
      * Verify recovery after remediation. Returns when resolved or all retries exhausted.
      */
     public RecoveryVerificationResult verify(String namespace, String app) throws InterruptedException {
+        return verify(namespace, app, msg -> {});
+    }
+
+    /**
+     * Same as {@link #verify(String, String)} but calls {@code perAttemptLog} after each check
+     * so callers can write per-attempt entries to the workflow trace.
+     */
+    public RecoveryVerificationResult verify(String namespace, String app, Consumer<String> perAttemptLog)
+            throws InterruptedException {
+        return verify(namespace, app, perAttemptLog, false);
+    }
+
+    /**
+     * @param scaleMode AUTOSCALING/SCALE_DEPLOYMENT case: the success criterion is "extra capacity is up
+     *                  and all pods Ready" — the AI continuing to see high load is EXPECTED (sustained
+     *                  load is exactly why we scaled), so it must NOT count as an unresolved incident.
+     */
+    public RecoveryVerificationResult verify(String namespace, String app, Consumer<String> perAttemptLog,
+                                             boolean scaleMode) throws InterruptedException {
         int attempts = Math.max(1, properties.getVerificationRetryAttempts());
         int retryDelaySeconds = Math.max(0, properties.getVerificationRetryDelaySeconds());
         RecoveryVerificationResult lastResult = null;
 
         for (int attempt = 1; attempt <= attempts; attempt++) {
-            lastResult = verifyOnce(namespace, app, attempt, attempts);
+            lastResult = verifyOnce(namespace, app, attempt, attempts, scaleMode);
+            perAttemptLog.accept(buildVerificationSummary(attempt, attempts, lastResult, scaleMode));
             if (lastResult.resolved() || attempt == attempts) {
                 return lastResult;
             }
-
             if (retryDelaySeconds > 0) {
                 logger.info("Recovery verification still sees an incident for {}/{}; retrying in {}s",
                         namespace, app, retryDelaySeconds);
@@ -62,6 +82,44 @@ public class RecoveryVerificationService {
         }
 
         return lastResult;
+    }
+
+    private String buildVerificationSummary(int attempt, int total, RecoveryVerificationResult result, boolean scaleMode) {
+        if (result.resolved()) {
+            if (scaleMode) {
+                return String.format(Locale.ROOT,
+                        "✓ Vérification %d/%d — OK : capacité ajoutée, tous les pods (répliques) sont prêts → "
+                        + "autoscaling RÉSOLU (la charge soutenue est attendue, c'est la raison du scale-up)",
+                        attempt, total);
+            }
+            return String.format(Locale.ROOT,
+                    "✓ Vérification %d/%d — OK : pods tous prêts ET l'IA ne détecte plus d'anomalie → incident RÉSOLU",
+                    attempt, total);
+        }
+        if (scaleMode) {
+            return String.format(Locale.ROOT,
+                    "✗ Vérification %d/%d — les nouvelles répliques ne sont pas encore toutes prêtes",
+                    attempt, total);
+        }
+        // Parse aiConfidence from the raw message ("...aiConfidence=0.8765,...")
+        String conf = "?";
+        for (String part : result.message().split(",")) {
+            String p = part.trim();
+            if (p.startsWith("aiConfidence=")) {
+                conf = p.substring("aiConfidence=".length());
+                break;
+            }
+        }
+        // Deux conditions doivent être vraies pour résoudre : workload sain ET IA ne voit plus rien.
+        String workloadPart = result.workloadHealthy()
+                ? "pods prêts=OUI"
+                : "pods prêts=NON (déploiement pas encore disponible)";
+        String aiPart = result.aiStillSeesIncident()
+                ? "IA détecte encore l'anomalie"
+                : "IA ne voit plus rien";
+        return String.format(Locale.ROOT,
+                "✗ Vérification %d/%d — pas encore résolu : %s, %s (confiance IA %s)",
+                attempt, total, workloadPart, aiPart, conf);
     }
 
     /**
@@ -95,7 +153,7 @@ public class RecoveryVerificationService {
         check.setNamespace(namespace);
         check.setApp(app);
         check.setWindowMinutes(Math.max(1, properties.getVerificationWindowMinutes()));
-        check.setFeatureOverrides(kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app));
+        check.setFeatureOverrides(kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app, false));
         check.setRemediationContext(remediationHistoryContextService.buildContext(namespace, app));
 
         AIPredictResponse currentState = aiOpsClientService.predict(check);
@@ -173,21 +231,35 @@ public class RecoveryVerificationService {
         );
     }
 
-    private RecoveryVerificationResult verifyOnce(String namespace, String app, int attempt, int totalAttempts) {
+    private RecoveryVerificationResult verifyOnce(String namespace, String app, int attempt, int totalAttempts,
+                                                  boolean scaleMode) {
         boolean workloadHealthy = remediationExecutor.isWorkloadHealthy(namespace, app);
 
         AIPredictRequest request = new AIPredictRequest();
         request.setNamespace(namespace);
         request.setApp(app);
         request.setWindowMinutes(Math.max(1, properties.getVerificationWindowMinutes()));
-        request.setFeatureOverrides(kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app));
+        // includePodKillSignal=false: the remediation just killed/recreated the pod (expected),
+        // so the historical pod-kill signal must NOT keep the incident "active" during verification.
+        java.util.Map<String, Double> overrides =
+                kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app, false);
+        // Reachability marker: cAdvisor reports normal metrics for a partitioned pod, so the AI alone
+        // would wrongly verify "resolved". Treat "still unreachable" as the incident persisting.
+        boolean stillUnreachable = overrides.remove("service_unreachable_detected") != null;
+        request.setFeatureOverrides(overrides);
         request.setRemediationContext(remediationHistoryContextService.buildContext(namespace, app));
 
         AIPredictResponse followUp = aiOpsClientService.predict(request);
         double followUpConfidence = followUp.getConfidence() == null ? 0.0d : followUp.getConfidence();
         boolean rawIncidentSignal = followUp.isIncident();
         boolean confidencePersistent = followUpConfidence >= properties.getVerificationIncidentConfidenceThreshold();
-        boolean aiStillSeesIncident = rawIncidentSignal && confidencePersistent;
+        boolean aiStillSeesIncident = stillUnreachable || (rawIncidentSignal && confidencePersistent);
+        // AUTOSCALING: the remediation is "add capacity". Once the extra replicas are Ready the response
+        // has succeeded; the AI legitimately still reads high load (that is WHY we scaled), so we must not
+        // treat that as an unresolved incident — resolution hinges on workload health alone.
+        if (scaleMode) {
+            aiStillSeesIncident = false;
+        }
 
         String message = String.format(
                 Locale.ROOT,

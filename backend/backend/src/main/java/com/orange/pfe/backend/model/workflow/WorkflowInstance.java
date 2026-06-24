@@ -80,7 +80,8 @@ public class WorkflowInstance extends BaseEntity {
 
     public void addLog(String message) {
         if (message != null && !message.isEmpty()) {
-            WorkflowLog log = new WorkflowLog(message, this);
+            String safe = message.length() > 250 ? message.substring(0, 247) + "..." : message;
+            WorkflowLog log = new WorkflowLog(safe, this);
             logs.add(log);
         }
     }

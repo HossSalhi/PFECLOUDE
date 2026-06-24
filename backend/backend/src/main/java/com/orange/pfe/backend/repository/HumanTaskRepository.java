@@ -13,4 +13,6 @@ public interface HumanTaskRepository extends JpaRepository<HumanTask, Long> {
     long countByDecision(TaskDecision decision);
 
     boolean existsByWorkflowInstanceIdAndDecision(Long workflowInstanceId, TaskDecision decision);
+
+    List<HumanTask> findByWorkflowInstanceIdAndDecision(Long workflowInstanceId, TaskDecision decision);
 }

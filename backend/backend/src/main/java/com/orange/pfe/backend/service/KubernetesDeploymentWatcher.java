@@ -360,9 +360,16 @@ public class KubernetesDeploymentWatcher {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private boolean hasActiveAiIncident(String namespace, String app) {
-        return incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
-                ACTIVE_STATUSES, IncidentSource.AI, namespace, app
-        );
+        if (incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
+                ACTIVE_STATUSES, IncidentSource.AI, namespace, app)) {
+            return true;
+        }
+        // Same anti-churn window as the poller: after ANY incident on this app, the fault metrics linger
+        // and remediation perturbs the pods — a watch-triggered re-analysis during that tail is a
+        // DUPLICATE, not a new fault. Block it so we keep ONE specific incident per app per fault.
+        long dedupMinutes = pollingProperties.getWindowMinutes() + 6L;
+        return incidentRepository.existsBySourceAndNamespaceAndAppAndCreatedAtAfter(
+                IncidentSource.AI, namespace, app, java.time.LocalDateTime.now().minusMinutes(dedupMinutes));
     }
 
     private void updateResourceVersion(V1Deployment deployment) {

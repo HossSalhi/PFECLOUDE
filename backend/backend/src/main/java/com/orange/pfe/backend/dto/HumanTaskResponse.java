@@ -14,10 +14,11 @@ public class HumanTaskResponse {
     private LocalDateTime createdAt;
     private Long incidentId;
     private String incidentTitle;
+    private String incidentStatus;
 
     public HumanTaskResponse(Long id, String taskName, TaskDecision decision,
                              String workflowId, LocalDateTime createdAt,
-                             Long incidentId, String incidentTitle) {
+                             Long incidentId, String incidentTitle, String incidentStatus) {
         this.id = id;
         this.taskName = taskName;
         this.name = taskName;
@@ -27,6 +28,7 @@ public class HumanTaskResponse {
         this.createdAt = createdAt;
         this.incidentId = incidentId;
         this.incidentTitle = incidentTitle;
+        this.incidentStatus = incidentStatus;
     }
 
     public Long getId() { return id; }
@@ -38,4 +40,5 @@ public class HumanTaskResponse {
     public LocalDateTime getCreatedAt() { return createdAt; }
     public Long getIncidentId() { return incidentId; }
     public String getIncidentTitle() { return incidentTitle; }
+    public String getIncidentStatus() { return incidentStatus; }
 }

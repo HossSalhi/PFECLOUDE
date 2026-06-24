@@ -1,5 +1,6 @@
 package com.orange.pfe.backend.service;
 
+import com.orange.pfe.backend.dto.WorkflowLogDTO;
 import com.orange.pfe.backend.model.core.Incident;
 import com.orange.pfe.backend.model.enums.IncidentSeverity;
 import com.orange.pfe.backend.model.human.HumanTask;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -73,7 +75,8 @@ public class EmailNotificationService {
         String body = buildIncidentHtml(incident,
                 "Approbation humaine requise",
                 "#FF7900",
-                "L'IA a proposé une action de remédiation qui nécessite votre approbation avant exécution.");
+                "L'IA a proposé une action de remédiation qui nécessite votre approbation avant exécution."
+                + buildManualCommandsSection(incident));
         sendToOperators(subject, body);
     }
 
@@ -159,8 +162,102 @@ public class EmailNotificationService {
         String subject = String.format("[HELIOS] Remédiation échouée — Incident #%d", incident.getId());
         String body = buildIncidentHtml(incident, "Échec de la remédiation automatique", "#dc3545",
                 "La remédiation automatique a échoué. Intervention manuelle requise.<br><br>" +
-                "<strong>Raison :</strong> " + escapeHtml(reason));
+                "<strong>Raison :</strong> " + escapeHtml(reason)
+                + buildManualCommandsSection(incident));
         sendToOperators(subject, body);
+    }
+
+    @Async
+    public void sendRemediationFailedWithTrace(Incident incident, String reason, List<WorkflowLogDTO> workflowLogs) {
+        String subject = String.format("[HELIOS] ❌ Rapport d'échec — Incident #%d | %s",
+                incident.getId(), incident.getApp() != null ? incident.getApp() : incident.getTitle());
+
+        String incidentDetails = buildIncidentDetailsTable(incident);
+        String aiSection = buildAIAnalysisSection(incident);
+        String camundaSection = buildCamundaTraceSection(workflowLogs);
+        String failureSection = String.format("""
+            <div style="margin-top:20px;padding:14px;background:#fff3cd;border-left:4px solid #dc3545;border-radius:4px;">
+              <p style="margin:0;color:#721c24;"><strong>Raison de l'échec :</strong> %s</p>
+            </div>""", escapeHtml(reason));
+        String manualSection = buildManualCommandsSection(incident);
+        String linkSection = String.format("""
+            <div style="margin:24px 0;text-align:center;">
+              <a href="%s/incidents/%d" style="background:#dc3545;color:white;padding:10px 28px;border-radius:4px;text-decoration:none;font-weight:bold;">
+                Voir le rapport complet
+              </a>
+            </div>""", dashboardUrl, incident.getId());
+
+        String content = """
+            <p style="color:#555;">HELIOS n'a pas pu résoudre cet incident automatiquement. Voici le rapport complet de ce qui a été tenté.</p>
+            """ + incidentDetails + aiSection + camundaSection + failureSection + manualSection + linkSection;
+
+        String body = buildSystemHtml("❌ Rapport d'échec — Remédiation automatique impossible", "#dc3545", content);
+        sendToOperators(subject, body);
+    }
+
+    private String buildIncidentDetailsTable(Incident incident) {
+        String createdAt = incident.getCreatedAt() != null ? incident.getCreatedAt().format(FMT) : "N/A";
+        return String.format("""
+            <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Résumé de l'incident</h3>
+            <table style="width:100%%;border-collapse:collapse;">
+              <tr><td style="padding:7px 10px;font-weight:bold;width:150px;">ID</td><td style="padding:7px 10px;">#%d</td></tr>
+              <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;">Titre</td><td style="padding:7px 10px;">%s</td></tr>
+              <tr><td style="padding:7px 10px;font-weight:bold;">Type</td>
+                  <td style="padding:7px 10px;"><code style="background:#e9ecef;padding:2px 6px;border-radius:3px;font-size:12px;">%s</code></td></tr>
+              <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;">Sévérité</td>
+                  <td style="padding:7px 10px;"><span style="background:%s;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">%s</span></td></tr>
+              <tr><td style="padding:7px 10px;font-weight:bold;">Application</td><td style="padding:7px 10px;">%s</td></tr>
+              <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;">Namespace</td><td style="padding:7px 10px;">%s</td></tr>
+              <tr><td style="padding:7px 10px;font-weight:bold;">Détecté le</td><td style="padding:7px 10px;">%s</td></tr>
+            </table>""",
+                incident.getId(), escapeHtml(incident.getTitle()),
+                incident.getIncidentType() != null ? escapeHtml(incident.getIncidentType()) : "N/A",
+                severityColor(incident.getSeverity()), incident.getSeverity() != null ? incident.getSeverity().name() : "N/A",
+                incident.getApp() != null ? escapeHtml(incident.getApp()) : "N/A",
+                incident.getNamespace() != null ? escapeHtml(incident.getNamespace()) : "N/A",
+                createdAt
+        );
+    }
+
+    private String buildAIAnalysisSection(Incident incident) {
+        String description = incident.getDescription() != null ? escapeHtml(incident.getDescription()) : "N/A";
+        String explanation = incident.getExplanation() != null ? escapeHtml(incident.getExplanation()) : "N/A";
+        return String.format("""
+            <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Analyse IA</h3>
+            <table style="width:100%%;border-collapse:collapse;">
+              <tr><td style="padding:7px 10px;font-weight:bold;width:150px;vertical-align:top;">Description</td>
+                  <td style="padding:7px 10px;">%s</td></tr>
+              <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;vertical-align:top;">Explication IA</td>
+                  <td style="padding:7px 10px;font-size:13px;color:#555;">%s</td></tr>
+            </table>""", description, explanation);
+    }
+
+    private String buildCamundaTraceSection(List<WorkflowLogDTO> logs) {
+        if (logs == null || logs.isEmpty()) {
+            return """
+                <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Chronologie Camunda</h3>
+                <p style="color:#888;font-size:13px;">Aucune trace d'exécution disponible.</p>""";
+        }
+        StringBuilder rows = new StringBuilder();
+        AtomicInteger idx = new AtomicInteger(1);
+        for (WorkflowLogDTO log : logs) {
+            String ts = log.getCreatedAt() != null ? log.getCreatedAt().format(FMT) : "—";
+            String bg = idx.get() % 2 == 0 ? "background:#f8f9fa;" : "";
+            rows.append(String.format("""
+                <tr style="%s"><td style="padding:6px 10px;color:#888;font-size:11px;white-space:nowrap;width:160px;">%s</td>
+                    <td style="padding:6px 10px;font-size:13px;color:#333;">%s</td></tr>""",
+                    bg, escapeHtml(ts), escapeHtml(log.getMessage() != null ? log.getMessage() : "")));
+            idx.incrementAndGet();
+        }
+        return String.format("""
+            <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Chronologie Camunda (%d étape(s))</h3>
+            <table style="width:100%%;border-collapse:collapse;border:1px solid #dee2e6;">
+              <thead><tr style="background:#343a40;color:white;">
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Horodatage</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Étape</th>
+              </tr></thead>
+              <tbody>%s</tbody>
+            </table>""", logs.size(), rows.toString());
     }
 
     @Async
@@ -435,6 +532,74 @@ public class EmailNotificationService {
               </div>
             </body></html>
             """, headerColor, escapeHtml(title), content, dashboardUrl);
+    }
+
+    // ── Manual intervention commands ──────────────────────────────────────────
+
+    private String buildManualCommandsSection(Incident incident) {
+        String ns  = incident.getNamespace() != null ? incident.getNamespace() : "pfe";
+        String app = incident.getApp()       != null ? incident.getApp()       : "<app>";
+        String type = incident.getIncidentType() != null ? incident.getIncidentType() : "";
+
+        String diagnostic;
+        String remediation;
+
+        switch (type) {
+            case "POD_CRASH_LOOP" -> {
+                diagnostic = """
+                    kubectl logs -n %s -l app=%s --previous --tail=50
+                    kubectl describe pod -n %s -l app=%s""".formatted(ns, app, ns, app);
+                remediation = """
+                    # Supprimer les pods en crash (K8s les recrée proprement)
+                    kubectl delete pods -n %s -l app=%s
+                    # Si le crash persiste, corriger l'image ou la commande :
+                    kubectl edit deployment %s -n %s""".formatted(ns, app, app, ns);
+            }
+            case "POD_IMAGE_PULL_BACKOFF" -> {
+                diagnostic = """
+                    kubectl describe pod -n %s -l app=%s
+                    kubectl get deployment %s -n %s -o jsonpath='{.spec.template.spec.containers[0].image}'"""
+                        .formatted(ns, app, app, ns);
+                remediation = """
+                    # Corriger l'image (remplacer <image>:<tag> par l'image valide)
+                    kubectl set image deployment/%s app=<image>:<tag> -n %s
+                    kubectl rollout status deployment/%s -n %s""".formatted(app, ns, app, ns);
+            }
+            case "DEPLOYMENT_UNAVAILABLE" -> {
+                diagnostic = """
+                    kubectl get pods -n %s -l app=%s
+                    kubectl describe deployment %s -n %s""".formatted(ns, app, app, ns);
+                remediation = """
+                    kubectl rollout restart deployment/%s -n %s
+                    kubectl rollout status  deployment/%s -n %s""".formatted(app, ns, app, ns);
+            }
+            case "NODE_NOT_READY" -> {
+                diagnostic = """
+                    kubectl get nodes -o wide
+                    kubectl describe node <nom-du-noeud>""";
+                remediation = """
+                    # Se connecter au noeud et redémarrer kubelet
+                    ssh kube@<ip-noeud> "sudo systemctl restart kubelet"
+                    # Vérifier que le noeud revient Ready
+                    kubectl get nodes --watch""";
+            }
+            default -> {
+                diagnostic = """
+                    kubectl get pods -n %s -l app=%s
+                    kubectl describe deployment %s -n %s""".formatted(ns, app, app, ns);
+                remediation = """
+                    kubectl logs -n %s -l app=%s --tail=50
+                    kubectl rollout restart deployment/%s -n %s""".formatted(ns, app, app, ns);
+            }
+        }
+
+        return """
+            <div style="margin-top:24px;border-top:2px solid #dee2e6;padding-top:16px;">
+              <h3 style="color:#343a40;font-size:15px;margin:0 0 12px;">Commandes de diagnostic</h3>
+              <pre style="background:#1e1e1e;color:#d4d4d4;padding:14px;border-radius:6px;font-size:12px;overflow-x:auto;white-space:pre-wrap;">%s</pre>
+              <h3 style="color:#343a40;font-size:15px;margin:16px 0 12px;">Commandes de remédiation manuelle</h3>
+              <pre style="background:#1e1e1e;color:#d4d4d4;padding:14px;border-radius:6px;font-size:12px;overflow-x:auto;white-space:pre-wrap;">%s</pre>
+            </div>""".formatted(escapeHtml(diagnostic), escapeHtml(remediation));
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────

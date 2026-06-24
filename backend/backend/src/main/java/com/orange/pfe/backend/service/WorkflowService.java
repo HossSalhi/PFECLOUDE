@@ -9,11 +9,13 @@ import com.orange.pfe.backend.model.enums.IncidentStatus;
 import com.orange.pfe.backend.model.workflow.WorkflowInstance;
 import com.orange.pfe.backend.model.workflow.WorkflowOrchestrationState;
 import com.orange.pfe.backend.model.workflow.WorkflowStatus;
+import com.orange.pfe.backend.repository.IncidentRepository;
 import com.orange.pfe.backend.repository.WorkflowRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -21,9 +23,11 @@ import java.util.stream.Collectors;
 public class WorkflowService {
 
     private final WorkflowRepository repo;
+    private final IncidentRepository incidentRepo;
 
-    public WorkflowService(WorkflowRepository repo) {
+    public WorkflowService(WorkflowRepository repo, IncidentRepository incidentRepo) {
         this.repo = repo;
+        this.incidentRepo = incidentRepo;
     }
 
     @Transactional
@@ -161,12 +165,30 @@ public class WorkflowService {
         workflow.setOrchestrationState(orchestrationState);
         if (incidentStatus != null) {
             workflow.getIncident().setStatus(incidentStatus);
+            incidentRepo.save(workflow.getIncident());
         }
         if (logMessage != null && !logMessage.isBlank()) {
             workflow.addLog(logMessage);
         }
         workflow.endWorkflow(workflowStatus);
         return repo.save(workflow);
+    }
+
+    @Transactional
+    public void addWorkflowLog(Long workflowId, String message) {
+        repo.findByIdWithLogs(workflowId).ifPresent(wf -> {
+            wf.addLog(message);
+            repo.save(wf);
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkflowLogDTO> getWorkflowLogsForIncident(Long incidentId) {
+        return repo.findByIncidentIdWithLogs(incidentId).stream()
+                .flatMap(wf -> wf.getLogs().stream())
+                .sorted(Comparator.comparing(log -> log.getCreatedAt()))
+                .map(log -> new WorkflowLogDTO(log.getId(), log.getMessage(), log.getCreatedAt()))
+                .collect(Collectors.toList());
     }
 
     private WorkflowInstanceDTO mapToDTO(WorkflowInstance workflow) {

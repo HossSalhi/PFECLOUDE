@@ -2,6 +2,7 @@ package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.config.AiopsPollingProperties;
 import com.orange.pfe.backend.config.AiopsPollingProperties.Target;
+import com.orange.pfe.backend.config.RemediationProperties;
 import com.orange.pfe.backend.dto.AIOpsAnalyzeRequest;
 import com.orange.pfe.backend.model.enums.IncidentSource;
 import com.orange.pfe.backend.model.enums.IncidentStatus;
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +34,7 @@ public class AIOpsPollingScheduler {
     private final AIOpsOrchestrationService orchestrationService;
     private final IncidentRepository incidentRepository;
     private final AiopsPollingProperties pollingProperties;
+    private final RemediationProperties remediationProperties;
     private final KubernetesDiscoveryService discoveryService;
     private final LeaderElectionService leaderElectionService;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -40,12 +43,14 @@ public class AIOpsPollingScheduler {
             AIOpsOrchestrationService orchestrationService,
             IncidentRepository incidentRepository,
             AiopsPollingProperties pollingProperties,
+            RemediationProperties remediationProperties,
             KubernetesDiscoveryService discoveryService,
             LeaderElectionService leaderElectionService
     ) {
         this.orchestrationService = orchestrationService;
         this.incidentRepository = incidentRepository;
         this.pollingProperties = pollingProperties;
+        this.remediationProperties = remediationProperties;
         this.discoveryService = discoveryService;
         this.leaderElectionService = leaderElectionService;
     }
@@ -124,12 +129,28 @@ public class AIOpsPollingScheduler {
     }
 
     /**
-     * Vérifie si un incident AI actif existe pour ce namespace/app spécifique.
-     * Évite de bloquer la surveillance des autres apps si l'une d'elles a un incident.
+     * Vérifie si un incident AI actif existe pour ce namespace/app.
+     * - Statuts actifs (NEW/OPEN/IN_PROGRESS) : bloque toujours.
+     * - RESOLVED récent (< fenêtre + 1 min) : bloque pour éviter de re-détecter les
+     *   métriques de panne encore visibles dans la fenêtre Prometheus.
+     * - RESOLUTION_FAILED récent (< cooldown) : bloque pour éviter le spam. L'incident RESTE ouvert
+     *   (jamais auto-fermé) pour que l'ingénieur le traite ; après le cooldown, si la panne persiste,
+     *   un nouvel incident peut être créé (la dédup exclut RESOLUTION_FAILED).
      */
     private boolean hasActiveAiIncidentFor(String namespace, String app) {
-        return incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
-                ACTIVE_STATUSES, IncidentSource.AI, namespace, app
-        );
+        if (incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
+                ACTIVE_STATUSES, IncidentSource.AI, namespace, app)) {
+            return true;
+        }
+        // Anti-churn: after ANY incident on this app, the fault metrics linger in the Prometheus/
+        // cAdvisor window for a few minutes (and the verification itself perturbs the pods). A new
+        // detection during that tail is a DUPLICATE, not a new fault. Block any new incident for the
+        // app for a generous window after the last one was created — this guarantees one specific,
+        // actionable incident per app per fault (no churn duplicates, no post-resolution noise).
+        long dedupMinutes = Math.max(pollingProperties.getWindowMinutes() + 6L,
+                remediationProperties.getCooldownMinutes() + 1L);
+        LocalDateTime dedupCutoff = LocalDateTime.now().minusMinutes(dedupMinutes);
+        return incidentRepository.existsBySourceAndNamespaceAndAppAndCreatedAtAfter(
+                IncidentSource.AI, namespace, app, dedupCutoff);
     }
 }

@@ -4,6 +4,7 @@ import com.orange.pfe.backend.dto.*;
 import com.orange.pfe.backend.model.enums.IncidentStatus;
 import com.orange.pfe.backend.service.AIOpsOrchestrationService;
 import com.orange.pfe.backend.service.IncidentService;
+import com.orange.pfe.backend.service.WorkflowService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -13,6 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/incidents")
 @Validated
@@ -20,10 +23,14 @@ public class IncidentController {
 
     private final IncidentService service;
     private final AIOpsOrchestrationService orchestrationService;
+    private final WorkflowService workflowService;
 
-    public IncidentController(IncidentService service, AIOpsOrchestrationService orchestrationService) {
+    public IncidentController(IncidentService service,
+                              AIOpsOrchestrationService orchestrationService,
+                              WorkflowService workflowService) {
         this.service = service;
         this.orchestrationService = orchestrationService;
+        this.workflowService = workflowService;
     }
 
     @PostMapping
@@ -68,6 +75,11 @@ public class IncidentController {
     public ResponseEntity<Void> execute(@PathVariable Long id) {
         orchestrationService.executeRecommendation(id);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/{id}/workflow-logs")
+    public ResponseEntity<List<WorkflowLogDTO>> getWorkflowLogs(@PathVariable Long id) {
+        return ResponseEntity.ok(workflowService.getWorkflowLogsForIncident(id));
     }
 
     @DeleteMapping("/{id}")

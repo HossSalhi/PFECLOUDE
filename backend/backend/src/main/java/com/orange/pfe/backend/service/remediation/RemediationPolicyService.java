@@ -109,6 +109,7 @@ public class RemediationPolicyService {
                 || actionType == ActionType.SCALE_DEPLOYMENT
                 || actionType == ActionType.SCALE_DOWN
                 || actionType == ActionType.DELETE_CRASHLOOPING_PODS
+                || actionType == ActionType.REMOVE_NETWORK_POLICY
                 || actionType == ActionType.FORCE_RECREATE_DEPLOYMENT
                 // RESTART_VM auto-exécutable : power-on d'un worker tombé via l'agent hôte
                 // (ne fait que démarrer la VM, jamais l'éteindre -> sûr).
@@ -174,7 +175,7 @@ public class RemediationPolicyService {
 
     public ActionType mapActionType(String recommendedAction, String incidentType) {
         if (recommendedAction == null || recommendedAction.isBlank()) {
-            return ActionType.INVESTIGATION;
+            return ActionType.FORCE_RECREATE_DEPLOYMENT; // concrete default, never passive investigation
         }
 
         String normalized = recommendedAction.trim().toUpperCase(Locale.ROOT);
@@ -232,7 +233,16 @@ public class RemediationPolicyService {
             case "CHECK_DB_CONNECTIVITY_AND_RESTART":
             case "CHECK_DATABASE_CONNECTION_POOL_AND_RESTART":
             case "FAILOVER_DATABASE_AND_RESTART_WORKLOAD":
-                return ActionType.RESTART_POD;
+                // Rolling restart of the WHOLE deployment (all replicas) — clears a runaway process
+                // on EVERY pod (a single-pod restart leaves the stress on the other replica). Real
+                // command "kubectl rollout restart deployment/X".
+                return ActionType.FORCE_RECREATE_DEPLOYMENT;
+
+            // ── Network policy removal (partition / DNS / service unreachable) ─────
+            case "REMOVE_NETWORK_POLICY":
+            case "REMOVE_BLOCKING_NETWORK_POLICY":
+            case "DELETE_NETWORK_POLICY":
+                return ActionType.REMOVE_NETWORK_POLICY;
 
             // ── Scale-up actions ──────────────────────────────────────────────
             case "ESCALATE_AND_RECOVER_REPLICAS":
@@ -248,43 +258,37 @@ public class RemediationPolicyService {
             case "ESCALATE_NODE_OUTAGE_AND_FAILOVER_WORKLOAD":
                 return ActionType.ESCALATION;
 
+            // No more passive INVESTIGATION: an INVESTIGATE recommendation becomes a concrete, safe
+            // rolling restart (the standard first remediation that resolves most transient faults).
             case "INVESTIGATE":
-                return ActionType.INVESTIGATION;
+                return ActionType.FORCE_RECREATE_DEPLOYMENT;
 
             default:
                 break;
         }
 
         // Fallback keyword matching
+        if (normalized.contains("NETWORK")) return ActionType.REMOVE_NETWORK_POLICY;
         if (normalized.contains("ROLLBACK")) return ActionType.ROLLBACK_DEPLOYMENT;
         if (normalized.contains("CRASHLOOP")) return ActionType.DELETE_CRASHLOOPING_PODS;
         if (normalized.contains("DRAIN")) return ActionType.DRAIN_NODE;
         if (normalized.contains("CORDON")) return ActionType.CORDON_NODE;
-        if (normalized.contains("RESTART")) return ActionType.RESTART_POD;
+        if (normalized.contains("RESTART")) return ActionType.FORCE_RECREATE_DEPLOYMENT;
         if (normalized.contains("SCALE_DOWN") || normalized.contains("REDUCE")) return ActionType.SCALE_DOWN;
         if (normalized.contains("SCALE") || normalized.contains("REPLICA")) return ActionType.SCALE_DEPLOYMENT;
         if (normalized.contains("ESCALATE")) return ActionType.ESCALATION;
 
-        if (incidentType != null) {
-            String normalizedType = incidentType.toUpperCase(Locale.ROOT);
-            if (normalizedType.contains("DB") || normalizedType.contains("DATABASE")) {
-                return ActionType.INVESTIGATION;
-            }
-        }
-
-        if (normalized.contains("DIAGNOSTIC") || normalized.contains("LATENCY")) {
-            return ActionType.RESTART_POD;
-        }
-
-        return ActionType.INVESTIGATION;
+        // Database / latency / anything else on an app: a rolling restart is the concrete default
+        // (never a passive INVESTIGATION). Node/VM incidents are routed to ESCALATION/RESTART_VM above.
+        return ActionType.FORCE_RECREATE_DEPLOYMENT;
     }
 
     private RemediationTargetKind mapTargetKind(ActionType actionType) {
         if (actionType == null) return RemediationTargetKind.UNKNOWN;
         return switch (actionType) {
             case RESTART_POD, DELETE_CRASHLOOPING_PODS -> RemediationTargetKind.POD;
-            case SCALE_DEPLOYMENT, SCALE_DOWN, ROLLBACK_DEPLOYMENT, FORCE_RECREATE_DEPLOYMENT
-                    -> RemediationTargetKind.DEPLOYMENT;
+            case SCALE_DEPLOYMENT, SCALE_DOWN, ROLLBACK_DEPLOYMENT, FORCE_RECREATE_DEPLOYMENT,
+                    REMOVE_NETWORK_POLICY -> RemediationTargetKind.DEPLOYMENT;
             default -> RemediationTargetKind.UNKNOWN;
         };
     }

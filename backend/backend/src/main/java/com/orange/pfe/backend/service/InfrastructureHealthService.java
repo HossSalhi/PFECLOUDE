@@ -49,14 +49,98 @@ public class InfrastructureHealthService {
     public List<ComponentStatus> checkAll() {
         List<ComponentStatus> results = new ArrayList<>();
 
-        // HELIOS ne se surveille PAS lui-même : on ne teste PAS sa propre stack
-        // (prometheus, loki, grafana, ai-service, camunda, ollama). On surveille
-        // uniquement l'INFRA À SUPERVISER = les nœuds du cluster Kubernetes (les VM
-        // master/worker). Les applications clientes déployées sont, elles, suivies
-        // par le polling applicatif (AIOps polling + découverte), hors stack HELIOS.
+        // K8s nodes (NotReady detection)
         results.addAll(checkKubernetesNodes());
 
+        // Node resource pressure conditions (DiskPressure, MemoryPressure)
+        results.addAll(checkNodePressures());
+
+        // In-cluster DNS resolution health (CoreDNS)
+        results.add(checkDnsResolution());
+
+        // External VM services : stack monitoring (.160) et IA + Camunda (.161).
+        // namespace="infra" : c'est le namespace attendu par l'UI Infrastructure (filtre
+        // getVmComponents -> namespace === 'infra') et par buildDescription (case "infra").
+        results.add(checkVmService("infra", "prometheus", props.getPrometheusUrl()));
+        results.add(checkVmService("infra", "grafana",    props.getGrafanaUrl()));
+        results.add(checkVmService("infra", "loki",       props.getLokiUrl()));
+        results.add(checkVmService("infra", "ai-service", props.getAiServiceUrl()));
+        results.add(checkVmService("infra", "camunda",    props.getCamundaUrl()));
+        results.add(checkVmService("infra", "ollama",     props.getOllamaUrl()));
+
         return results;
+    }
+
+    /**
+     * Vérifie l'accessibilité d'un service VM externe. UP = le service répond (HTTP < 500) ;
+     * DOWN = connexion refusée/timeout (process injoignable) ou erreur serveur 5xx. On reste
+     * tolérant sur le code (4xx = process up mais chemin /health absent) pour éviter les faux DOWN.
+     */
+    private ComponentStatus checkVmService(String namespace, String app, String url) {
+        if (url == null || url.isBlank()) {
+            return new ComponentStatus(namespace, app, false, "URL non configurée");
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(props.getTimeoutSeconds()))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            boolean up = resp.statusCode() < 500;
+            log.debug("VM health {}/{} -> {} (HTTP {})", namespace, app, up ? "UP" : "DOWN", resp.statusCode());
+            return new ComponentStatus(namespace, app, up, "HTTP " + resp.statusCode());
+        } catch (Exception ex) {
+            log.debug("VM health {}/{} -> DOWN: {}", namespace, app, ex.getMessage());
+            return new ComponentStatus(namespace, app, false, "Injoignable: " + truncate(ex.getMessage()));
+        }
+    }
+
+    /**
+     * Detects DiskPressure and MemoryPressure conditions on any node.
+     * Each pressured node yields one ComponentStatus(namespace="node-pressure", ...).
+     */
+    public List<ComponentStatus> checkNodePressures() {
+        List<ComponentStatus> results = new ArrayList<>();
+        try {
+            ApiClient client = buildK8sClient();
+            CoreV1Api coreApi = new CoreV1Api(client);
+            V1NodeList nodeList = coreApi.listNode().execute();
+            for (V1Node node : nodeList.getItems()) {
+                String nodeName = node.getMetadata() != null ? node.getMetadata().getName() : "unknown";
+                if (node.getStatus() == null || node.getStatus().getConditions() == null) continue;
+                for (V1NodeCondition cond : node.getStatus().getConditions()) {
+                    if (!"DiskPressure".equals(cond.getType()) && !"MemoryPressure".equals(cond.getType())) continue;
+                    if (!"True".equals(cond.getStatus())) continue;
+                    String detail = cond.getType() + " on " + nodeName
+                            + (cond.getMessage() != null ? " — " + truncate(cond.getMessage()) : "");
+                    // app name encodes node + condition so each pair has its own incident
+                    results.add(new ComponentStatus("node-pressure", nodeName + "-" + cond.getType(), false, detail));
+                    log.warn("Node pressure detected: {}/{} — {}", nodeName, cond.getType(), detail);
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Cannot check node pressures: {}", ex.getMessage());
+        }
+        return results;
+    }
+
+    /**
+     * Validates in-cluster DNS by resolving a well-known cluster-internal hostname.
+     * Returns DOWN when CoreDNS is misconfigured or unreachable.
+     */
+    public ComponentStatus checkDnsResolution() {
+        try {
+            java.net.InetAddress.getByName("kubernetes.default.svc.cluster.local");
+            return new ComponentStatus("cluster", "coredns", true, "DNS resolution OK");
+        } catch (java.net.UnknownHostException ex) {
+            return new ComponentStatus("cluster", "coredns", false,
+                    "DNS FAILURE — in-cluster resolution failed: " + ex.getMessage());
+        } catch (Exception ex) {
+            // Other errors (security, interrupted…) → treat as inconclusive, not a failure
+            log.debug("DNS check inconclusive: {}", ex.getMessage());
+            return new ComponentStatus("cluster", "coredns", true, "DNS check inconclusive: " + ex.getMessage());
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -26,8 +26,12 @@ public class LeaderElectionService {
     private static final Logger log = LoggerFactory.getLogger(LeaderElectionService.class);
 
     private static final String LEASE_NAME = "aiops-scheduler";
-    /** A lease not renewed within this window is taken over by another replica. */
-    private static final int LEASE_TTL_SECONDS = 300;
+    /** A lease not renewed within this window is taken over by another replica. The leader renews on
+     *  every scheduler tick (<=30s), so 60s = 2 renewal windows (no flapping) while letting leadership
+     *  fail over in ~60-90s when the leader's node is killed — fast enough that the surviving replica
+     *  detects the NotReady node and records the NODE_NOT_READY incident BEFORE the host watchdog powers
+     *  the VM back on (was 300s, which let the node recover before detection resumed). */
+    private static final int LEASE_TTL_SECONDS = 60;
 
     private final JdbcTemplate jdbc;
     private final String instanceId;

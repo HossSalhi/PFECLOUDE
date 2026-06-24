@@ -56,7 +56,6 @@ public class CamundaWorkflowRecoveryService {
     private final CamundaWorkflowService camundaWorkflowService;
     private final RecoveryVerificationService recoveryVerificationService;
     private final HumanTaskRepository humanTaskRepository;
-    private final HumanTaskService humanTaskService;
     private final IncidentHistoryService incidentHistoryService;
     private final RemediationMetricsService remediationMetricsService;
     private final RemediationProperties remediationProperties;
@@ -69,7 +68,6 @@ public class CamundaWorkflowRecoveryService {
             CamundaWorkflowService camundaWorkflowService,
             RecoveryVerificationService recoveryVerificationService,
             HumanTaskRepository humanTaskRepository,
-            HumanTaskService humanTaskService,
             IncidentHistoryService incidentHistoryService,
             RemediationMetricsService remediationMetricsService,
             RemediationProperties remediationProperties,
@@ -81,7 +79,6 @@ public class CamundaWorkflowRecoveryService {
         this.camundaWorkflowService = camundaWorkflowService;
         this.recoveryVerificationService = recoveryVerificationService;
         this.humanTaskRepository = humanTaskRepository;
-        this.humanTaskService = humanTaskService;
         this.incidentHistoryService = incidentHistoryService;
         this.remediationMetricsService = remediationMetricsService;
         this.remediationProperties = remediationProperties;
@@ -158,18 +155,13 @@ public class CamundaWorkflowRecoveryService {
             if (wf.getStartedAt() != null && wf.getStartedAt().isAfter(cutoff)) continue;
             try {
                 logger.warn("Camunda DOWN: parking stuck CREATED workflow {} as MANUAL_FOLLOW_UP", wf.getId());
-                workflowService.updateOrchestrationState(
+                workflowService.finalizeWorkflow(
                         wf,
-                        WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
-                        IncidentStatus.WAITING_FOR_APPROVAL,
-                        "Camunda unreachable for " + failures + " consecutive checks — workflow parked for manual follow-up"
+                        WorkflowOrchestrationState.ESCALATED,
+                        WorkflowStatus.FAILED,
+                        IncidentStatus.RESOLUTION_FAILED,
+                        "Camunda inaccessible (" + failures + " vérifications consécutives) — incident marqué RESOLUTION_FAILED"
                 );
-                if (!humanTaskRepository.existsByWorkflowInstanceIdAndDecision(wf.getId(), TaskDecision.PENDING)) {
-                    humanTaskService.createTask(
-                            "Camunda DOWN — manual follow-up for incident #" + wf.getIncident().getId(),
-                            wf
-                    );
-                }
             } catch (Exception ex) {
                 logger.warn("Could not park workflow {} during Camunda-down recovery", wf.getId(), ex);
             }
@@ -266,7 +258,7 @@ public class CamundaWorkflowRecoveryService {
         remediationMetricsService.remediationFailed();
         incidentHistoryService.record(
                 workflow.getIncident(),
-                IncidentStatus.WAITING_FOR_APPROVAL,
+                IncidentStatus.RESOLUTION_FAILED,
                 "Recovered stuck workflow but verification failed: " + verificationResult.message()
         );
         parkWorkflowForApproval(
@@ -345,21 +337,20 @@ public class CamundaWorkflowRecoveryService {
         camundaWorkflowService.publishDecision(workflow, TaskDecision.APPROVED, latestAction.getId());
     }
 
-    private void parkWorkflowForApproval(WorkflowInstance workflow, String reason) {
-        workflowService.updateOrchestrationState(
-                workflow,
-                WorkflowOrchestrationState.WAITING_FOR_APPROVAL,
-                IncidentStatus.WAITING_FOR_APPROVAL,
-                reason
-        );
-
-        if (!humanTaskRepository.existsByWorkflowInstanceIdAndDecision(workflow.getId(), TaskDecision.PENDING)) {
-            humanTaskService.createTask(
-                    "Review remediation follow-up for incident #" + workflow.getIncident().getId(),
-                    workflow
-            );
-            remediationMetricsService.approvalPending();
+    private void parkWorkflowForApproval(WorkflowInstance staleWorkflow, String reason) {
+        // WAITING_FOR_APPROVAL supprimé — tout incident non résolu passe directement à RESOLUTION_FAILED.
+        WorkflowInstance workflow = workflowService.getWorkflowInstance(staleWorkflow.getId());
+        if (workflow.getStatus() == WorkflowStatus.FAILED || workflow.getStatus() == WorkflowStatus.COMPLETED) {
+            logger.info("parkWorkflowForApproval: workflow #{} already {} — skipping", workflow.getId(), workflow.getStatus());
+            return;
         }
+        workflowService.finalizeWorkflow(
+                workflow,
+                WorkflowOrchestrationState.ESCALATED,
+                WorkflowStatus.FAILED,
+                IncidentStatus.RESOLUTION_FAILED,
+                "HELIOS a épuisé toutes les tentatives de remédiation. Raison: " + reason
+        );
     }
 
     private String safe(String value) {

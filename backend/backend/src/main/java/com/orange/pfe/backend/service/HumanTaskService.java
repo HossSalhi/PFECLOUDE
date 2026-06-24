@@ -159,13 +159,15 @@ public class HumanTaskService {
                 : (wi != null ? String.valueOf(wi.getId()) : null);
         Long incidentId = null;
         String incidentTitle = null;
+        String incidentStatus = null;
         if (wi != null && wi.getIncident() != null) {
             incidentId = wi.getIncident().getId();
             incidentTitle = wi.getIncident().getTitle();
+            incidentStatus = wi.getIncident().getStatus() != null ? wi.getIncident().getStatus().name() : null;
         }
         return new HumanTaskResponse(
                 task.getId(), task.getTaskName(), task.getDecision(),
-                workflowId, task.getCreatedAt(), incidentId, incidentTitle
+                workflowId, task.getCreatedAt(), incidentId, incidentTitle, incidentStatus
         );
     }
 

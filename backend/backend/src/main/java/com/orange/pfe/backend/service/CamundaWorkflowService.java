@@ -87,10 +87,16 @@ public class CamundaWorkflowService {
         boolean isNode = t.startsWith("NODE_") || t.contains("NODE")
                 || t.equals("MONITORING_DOWN") || t.equals("AI_SERVICE_DOWN");
         if (isNode) {
-            // Auto-démarrage VM : un RESTART_VM auto-exécutable (power-on du worker via l'agent
-            // hôte) passe par le process AUTO (incident-remediation) pour s'exécuter SANS
-            // approbation. Les autres actions nœud (drain/cordon) restent gated humain.
-            if (plan != null && plan.autoExecutable() && plan.actionType() == ActionType.RESTART_VM) {
+            // The node-remediation process gates DESTRUCTIVE node-level actions (drain/cordon) behind
+            // human approval. But several NODE_ incident types are remediated by a SAFE, auto-executable
+            // pod/deployment action — e.g. NODE_DISK_PRESSURE (ephemeral-storage eviction) -> DELETE the
+            // evicted pod, or auto VM power-on -> RESTART_VM. Routing those through the approval process
+            // strands them until a 5-min timeout -> RESOLUTION_FAILED. Only DRAIN/CORDON stay gated;
+            // any other auto-executable action uses the AUTO process so it runs immediately.
+            boolean safeAutoAction = plan != null && plan.autoExecutable()
+                    && plan.actionType() != ActionType.DRAIN_NODE
+                    && plan.actionType() != ActionType.CORDON_NODE;
+            if (safeAutoAction) {
                 return camundaProperties.getProcessId();
             }
             return NODE_PROCESS_ID;
@@ -246,14 +252,15 @@ public class CamundaWorkflowService {
         variables.put("incidentType", prediction.getIncidentType());
         variables.put("confidence", prediction.getConfidence() == null ? 0.0d : prediction.getConfidence());
         variables.put("verificationDelayIso", "PT" + remediationProperties.getVerifyDelaySeconds() + "S");
-        // Approval timeout by severity: CRITICAL=30m, HIGH=1h, others=2h
+        // Safety-net timer: if code path stalls, Camunda auto-escalates after 5 min max.
+        // Normal path resolves in ~50s (initial delay + retries); timer is last resort.
         String severity = workflow.getIncident().getSeverity() != null
                 ? workflow.getIncident().getSeverity().name()
                 : "MEDIUM";
         String approvalTimeoutIso = switch (severity) {
-            case "CRITICAL" -> "PT30M";
-            case "HIGH"     -> "PT1H";
-            default         -> "PT2H";
+            case "CRITICAL" -> "PT3M";
+            case "HIGH"     -> "PT5M";
+            default         -> "PT5M";
         };
         variables.put("approvalTimeoutIso", approvalTimeoutIso);
         variables.put("approvalDecision", "PENDING");

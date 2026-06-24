@@ -7,6 +7,7 @@ public enum IncidentStatus {
     RESOLVED,
     CLOSED,
     ARCHIVED,
-    WAITING_FOR_APPROVAL // ajouté pour les incidents automatiques
+    WAITING_FOR_APPROVAL,
+    RESOLUTION_FAILED // remédiation tentée mais impossible à résoudre automatiquement
 
 }

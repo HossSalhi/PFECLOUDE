@@ -1,6 +1,7 @@
 package com.orange.pfe.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.orange.pfe.backend.dto.WorkflowLogDTO;
 import com.orange.pfe.backend.model.core.Incident;
 import com.orange.pfe.backend.model.enums.IncidentSeverity;
 import com.orange.pfe.backend.model.human.HumanTask;
@@ -106,6 +107,16 @@ public class NotificationService {
         ));
         sendWebhook(buildTypedWebhookPayload(incident, "❌ Remédiation échouée — " + reason));
         emailService.ifPresent(e -> e.sendRemediationFailed(incident, reason));
+    }
+
+    public void notifyRemediationFailedWithTrace(Incident incident, String reason, List<WorkflowLogDTO> workflowLogs) {
+        sseEventService.broadcast("remediation_failed", Map.of(
+                "id",     incident.getId(),
+                "title",  incident.getTitle(),
+                "reason", reason != null ? reason : "unknown"
+        ));
+        sendWebhook(buildTypedWebhookPayload(incident, "❌ Remédiation échouée — " + reason));
+        emailService.ifPresent(e -> e.sendRemediationFailedWithTrace(incident, reason, workflowLogs));
     }
 
     public void notifyHumanTaskCreated(HumanTask task) {
