@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POM minimal : sert UNIQUEMENT a reconstruire l'image frontend avec jib (sans Docker, air-gap).
+  jib prend pfe-frontend:1.1.2 comme base (export local fe-base.tar) et superpose le dernier
+  build Angular (dist/frontend) dans /usr/share/nginx/html. L'entrypoint nginx est herite (INHERIT).
+  Build : mvn -q jib:buildTar  -> target/jib-image.tar  (puis import ctr sur les noeuds)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.orange.pfe</groupId>
+    <artifactId>frontend</artifactId>
+    <version>1.1.4</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <version>3.4.4</version>
+                <configuration>
+                    <from>
+                        <image>tar://C:/Users/houss/IdeaProjects/PFE-Orange/frontend/fe-base.tar</image>
+                    </from>
+                    <to>
+                        <image>pfe-frontend:1.1.4</image>
+                    </to>
+                    <container>
+                        <entrypoint>INHERIT</entrypoint>
+                        <ports>
+                            <port>8080</port>
+                        </ports>
+                    </container>
+                    <extraDirectories>
+                        <paths>
+                            <path>
+                                <from>dist/frontend</from>
+                                <into>/usr/share/nginx/html</into>
+                            </path>
+                        </paths>
+                    </extraDirectories>
+                    <outputPaths>
+                        <tar>C:/Users/houss/IdeaProjects/PFE-Orange/pfe-frontend-1.1.4.tar</tar>
+                    </outputPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

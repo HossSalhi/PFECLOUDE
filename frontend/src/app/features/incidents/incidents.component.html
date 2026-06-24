@@ -100,18 +100,6 @@
               <button class="btn btn-ghost btn-xs" (click)="viewDetail(inc.id)" title="Voir le détail">
                 <i class="fas fa-eye"></i>
               </button>
-              <ng-container *ngFor="let s of statusOptions">
-                <button *ngIf="inc.status !== s"
-                        class="btn btn-xs"
-                        [class.btn-success]="s === 'RESOLVED'"
-                        [class.btn-info]="s === 'IN_PROGRESS'"
-                        [class.btn-ghost]="s === 'OPEN'"
-                        [disabled]="updatingId === inc.id"
-                        (click)="updateStatus(inc, s)"
-                        [title]="s">
-                  {{ s === 'IN_PROGRESS' ? 'Démarrer' : s === 'RESOLVED' ? 'Résoudre' : 'Rouvrir' }}
-                </button>
-              </ng-container>
             </div>
           </td>
         </tr>

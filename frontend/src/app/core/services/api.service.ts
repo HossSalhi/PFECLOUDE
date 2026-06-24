@@ -73,6 +73,9 @@ export interface Task {
   status: string;
   createdAt: string;
   variables?: any;
+  incidentId?: number;
+  incidentTitle?: string;
+  incidentStatus?: string;
 }
 
 export interface RemediationSummary {
@@ -119,6 +122,12 @@ export interface IncidentHistoryEntry {
   id: number;
   status: string;
   comment: string;
+  createdAt: string;
+}
+
+export interface WorkflowLogEntry {
+  id: number;
+  message: string;
   createdAt: string;
 }
 
@@ -205,6 +214,11 @@ export class ApiService {
 
   getIncidentHistory(id: number): Observable<IncidentHistoryEntry[]> {
     return this.http.get<IncidentHistoryEntry[]>(`${this.baseUrl}/api/incidents/${id}/history`)
+      .pipe(catchError(this.handleError));
+  }
+
+  getWorkflowLogs(incidentId: number): Observable<WorkflowLogEntry[]> {
+    return this.http.get<WorkflowLogEntry[]>(`${this.baseUrl}/api/incidents/${incidentId}/workflow-logs`)
       .pipe(catchError(this.handleError));
   }
 

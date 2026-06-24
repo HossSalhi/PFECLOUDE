@@ -961,6 +961,16 @@ ul, ol { list-style: none; }
     color: var(--danger);
     border-color: var(--danger-border);
   }
+  &.resolution_failed {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-color: var(--danger-border);
+  }
+  &.waiting_for_approval {
+    background: var(--purple-bg);
+    color: var(--purple);
+    border-color: var(--purple-border);
+  }
   &.purple {
     background: var(--purple-bg);
     color: var(--purple);

@@ -78,7 +78,6 @@ export class AppComponent implements OnInit, OnDestroy {
     { label: 'AI Decisions',    icon: '🤖', route: '/ai-decisions' },
     { label: 'Remediation',     icon: '🔧', route: '/remediation' },
     { label: 'Human Tasks',     icon: '👤', route: '/tasks' },
-    { label: 'Fine-Tuning',     icon: '🧠', route: '/fine-tuning' },
   ];
 
   constructor(

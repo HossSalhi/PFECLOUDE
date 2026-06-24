@@ -71,17 +71,6 @@
         </a>
       </ng-container>
 
-      <!-- MLOps -->
-      <ng-container *ngIf="authService.isSuperAdmin()">
-        <div class="nav-divider"></div>
-        <div class="nav-section-label">MLOps</div>
-
-        <a routerLink="/fine-tuning" class="nav-item" [class.active]="isActive('/fine-tuning')">
-          <i class="fas fa-microchip nav-icon"></i>
-          <span class="nav-label">Fine-Tuning</span>
-        </a>
-      </ng-container>
-
       <!-- Administration -->
       <ng-container *ngIf="authService.isAtLeastAdmin()">
         <div class="nav-divider"></div>

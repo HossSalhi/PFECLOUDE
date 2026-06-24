@@ -30,7 +30,12 @@ export class HumanTasksComponent implements OnInit, OnDestroy {
     this.loading = true;
     this.subs.push(
       this.api.getPendingTasks().subscribe({
-        next: tasks => { this.pendingTasks = tasks || []; this.loading = false; },
+        next: tasks => {
+          this.pendingTasks = (tasks || []).filter(t =>
+            t.incidentStatus !== 'RESOLVED' && t.incidentStatus !== 'CLOSED'
+          );
+          this.loading = false;
+        },
         error: () => { this.loading = false; }
       }),
       this.api.getTasks().subscribe({

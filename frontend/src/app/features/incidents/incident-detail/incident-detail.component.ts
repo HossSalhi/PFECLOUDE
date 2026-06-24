@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { ApiService, Incident, Action } from '../../../core/services/api.service';
+import { ApiService, Incident, Action, WorkflowLogEntry } from '../../../core/services/api.service';
 
 interface HistoryEntry {
   id: number;
@@ -18,12 +18,10 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
   incident: Incident | null = null;
   history: HistoryEntry[] = [];
   actions: Action[] = [];
+  workflowLogs: WorkflowLogEntry[] = [];
   loading = true;
-  updatingStatus = false;
   incidentId!: number;
   private subs: Subscription[] = [];
-
-  statusOptions = ['OPEN', 'IN_PROGRESS', 'RESOLVED'];
 
   constructor(
     private route: ActivatedRoute,
@@ -53,47 +51,10 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
       next: hist => { this.history = hist || []; },
       error: () => {}
     });
-  }
-
-  updateStatus(newStatus: string): void {
-    if (!this.incident) return;
-
-    // "Démarrer" (IN_PROGRESS) declenche le pipeline de remediation:
-    // - Cree un workflow Camunda
-    // - Cree une Human Task pour validation
-    // - Le pod sera redemarre/scale via kubectl par le worker Camunda apres approbation
-    // S'applique a tous les incidents OPEN sauf les MANUAL (qui sont juste des notes)
-    const shouldTriggerRemediation =
-      newStatus === 'IN_PROGRESS' &&
-      this.incident.source !== 'MANUAL' &&
-      this.incident.status === 'OPEN';
-
-    if (shouldTriggerRemediation) {
-      this.updatingStatus = true;
-      this.api.executeIncident(this.incident.id).subscribe({
-        next: () => { this.updatingStatus = false; this.loadAll(); },
-        error: () => { this.updatingStatus = false; }
-      });
-      return;
-    }
-
-    // Sinon: simple changement de statut en DB (cas MANUAL ou Resolved/Reouvert)
-    this.updatingStatus = true;
-    this.api.updateIncidentStatus(this.incident.id, newStatus).subscribe({
-      next: updated => {
-        this.incident = { ...this.incident!, status: updated.status };
-        this.updatingStatus = false;
-        this.loadAll();
-      },
-      error: () => { this.updatingStatus = false; }
+    this.api.getWorkflowLogs(this.incidentId).subscribe({
+      next: logs => { this.workflowLogs = logs || []; },
+      error: () => {}
     });
-  }
-
-  /** True si cliquer "Demarrer" va declencher Camunda (pas juste un changement DB). */
-  willTriggerRemediation(): boolean {
-    return !!this.incident
-        && this.incident.status === 'OPEN'
-        && this.incident.source !== 'MANUAL';
   }
 
   goBack(): void {

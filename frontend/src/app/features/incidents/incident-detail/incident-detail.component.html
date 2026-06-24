@@ -98,43 +98,6 @@
 
       </div>
 
-      <!-- Status Actions -->
-      <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--gray-200);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span style="font-size:13px;font-weight:600;color:var(--gray-600);">
-          <i class="fas fa-arrows-rotate" style="color:var(--orange-primary);"></i>
-          Changer le statut :
-        </span>
-        <ng-container *ngFor="let s of statusOptions">
-          <button *ngIf="incident.status !== s"
-                  class="btn btn-sm"
-                  [class.btn-success]="s === 'RESOLVED'"
-                  [class.btn-info]="s === 'IN_PROGRESS' && !willTriggerRemediation()"
-                  [class.btn-primary]="s === 'IN_PROGRESS' && willTriggerRemediation()"
-                  [class.btn-ghost]="s === 'OPEN'"
-                  [disabled]="updatingStatus"
-                  [title]="s === 'IN_PROGRESS' && willTriggerRemediation()
-                           ? 'Démarre un workflow Camunda et crée une tâche pour approuver la remédiation Kubernetes'
-                           : (s === 'IN_PROGRESS' ? 'Changer simplement le statut (sans remédiation Camunda)' : '')"
-                  (click)="updateStatus(s)">
-            <i class="fas"
-               [ngClass]="s === 'RESOLVED' ? 'fa-check'
-                          : (s === 'IN_PROGRESS' && willTriggerRemediation()) ? 'fa-rocket'
-                          : s === 'IN_PROGRESS' ? 'fa-play'
-                          : 'fa-rotate-left'"></i>
-            {{ s === 'IN_PROGRESS'
-               ? (willTriggerRemediation() ? 'Démarrer remédiation (Camunda)' : 'Démarrer')
-               : s === 'RESOLVED' ? 'Résoudre' : 'Rouvrir' }}
-          </button>
-        </ng-container>
-      </div>
-      <!-- Info — explique ce qui se passera -->
-      <div *ngIf="willTriggerRemediation()"
-           style="margin-top:10px;padding:10px 14px;background:rgba(255,121,0,.08);border-left:3px solid var(--orange-primary);border-radius:6px;font-size:12px;color:var(--gray-700);">
-        <i class="fas fa-info-circle" style="color:var(--orange-primary);margin-right:6px;"></i>
-        Cliquer sur <strong>Démarrer remédiation</strong> lance un workflow Camunda et crée une tâche d'approbation
-        humaine. Après approbation, l'action de remédiation (restart pod, scale, etc.) sera exécutée automatiquement sur Kubernetes.
-      </div>
-
     </div>
   </div>
 
@@ -166,6 +129,107 @@
       <!-- Fallback raw (non-standard explanation) -->
       <div *ngIf="!hasStructuredExplanation()" style="background:var(--gray-100);border-radius:8px;padding:16px;font-size:14px;line-height:1.7;color:var(--gray-700);border-left:3px solid var(--orange-primary);">
         {{ incident.explanation }}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Trace d'exécution Camunda/IA (visible quand RESOLUTION_FAILED ou logs dispo) ── -->
+  <div class="card mb-20"
+       *ngIf="incident.status === 'RESOLUTION_FAILED' || workflowLogs.length > 0">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon" style="background:rgba(220,38,38,.12);color:#dc2626;">
+          <i class="fas fa-terminal"></i>
+        </div>
+        Trace d'exécution — Ce que Camunda & l'IA ont tenté
+      </div>
+      <span class="badge-status resolution_failed" *ngIf="incident.status === 'RESOLUTION_FAILED'">
+        <i class="fas fa-circle-xmark"></i> Résolution échouée
+      </span>
+    </div>
+    <div class="card-body">
+
+      <!-- Action tentée (depuis la table des actions) -->
+      <div *ngIf="actions.length > 0" style="margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:10px;">
+          <i class="fas fa-wrench" style="color:var(--orange-primary);margin-right:6px;"></i>Action exécutée
+        </div>
+        <div *ngFor="let a of actions" style="display:flex;align-items:flex-start;gap:14px;background:var(--gray-100);border:1px solid var(--gray-200);border-left:3px solid var(--orange-primary);border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+          <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(255,121,0,.12);color:var(--orange-primary);">
+            <i class="fas fa-play"></i>
+          </div>
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span class="mono" style="font-size:13px;font-weight:700;color:var(--gray-800);">{{ a.actionType || a.type }}</span>
+              <span class="badge-status" [ngClass]="(a.status || '').toLowerCase()">{{ a.status }}</span>
+              <span class="badge-status" [ngClass]="a.automated ? 'ai' : 'manual'" style="font-size:11px;">
+                <i class="fas" [ngClass]="a.automated ? 'fa-robot' : 'fa-user'"></i>
+                {{ a.automated ? 'Auto' : 'Manuel' }}
+              </span>
+            </div>
+            <div *ngIf="a.targetNamespace || a.targetName" style="font-size:12px;color:var(--gray-500);margin-bottom:6px;">
+              <span *ngIf="a.targetNamespace" class="mono">{{ a.targetNamespace }}/</span><span *ngIf="a.targetName" class="mono">{{ a.targetName }}</span>
+            </div>
+            <div *ngIf="a.result" style="background:#fff;border:1px solid var(--gray-200);border-radius:6px;padding:8px 12px;font-size:13px;font-family:monospace;color:var(--gray-700);word-break:break-word;">
+              <i class="fas fa-terminal" style="color:var(--gray-400);margin-right:6px;font-size:11px;"></i>{{ a.result }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs Camunda (étapes du workflow) -->
+      <div *ngIf="workflowLogs.length > 0">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:10px;">
+          <i class="fas fa-list-check" style="color:var(--orange-primary);margin-right:6px;"></i>Étapes Camunda / IA
+        </div>
+        <div style="border-left:2px solid var(--gray-200);padding-left:16px;display:flex;flex-direction:column;gap:6px;">
+          <div *ngFor="let log of workflowLogs"
+               style="display:flex;align-items:flex-start;gap:10px;">
+            <!-- Dot color depends on log type -->
+            <div [style]="
+              log.message.startsWith('✓') ? 'flex-shrink:0;margin-top:5px;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-left:-20px;' :
+              log.message.startsWith('✗') ? 'flex-shrink:0;margin-top:5px;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-left:-20px;' :
+              log.message.startsWith('$') ? 'flex-shrink:0;margin-top:5px;width:8px;height:8px;border-radius:50%;background:#8b5cf6;margin-left:-20px;' :
+              log.message.startsWith('▶') ? 'flex-shrink:0;margin-top:5px;width:8px;height:8px;border-radius:50%;background:#FF7900;margin-left:-20px;' :
+              'flex-shrink:0;margin-top:5px;width:8px;height:8px;border-radius:50%;background:var(--gray-300);margin-left:-20px;'">
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:11px;color:var(--gray-400);margin-bottom:2px;">{{ log.createdAt | date:'dd/MM/yy HH:mm:ss' }}</div>
+
+              <!-- $ kubectl command → monospace code block -->
+              <ng-container *ngIf="log.message.startsWith('$')">
+                <div style="background:#1e1e2e;border-radius:6px;padding:7px 12px;font-family:monospace;font-size:12px;color:#a6e3a1;word-break:break-all;margin-top:2px;">
+                  {{ log.message }}
+                </div>
+              </ng-container>
+
+              <!-- ✓ success result -->
+              <ng-container *ngIf="log.message.startsWith('✓')">
+                <div style="font-size:13px;color:#16a34a;font-weight:500;word-break:break-word;">{{ log.message }}</div>
+              </ng-container>
+
+              <!-- ✗ failure/check fail -->
+              <ng-container *ngIf="log.message.startsWith('✗')">
+                <div style="font-size:13px;color:#dc2626;font-weight:500;word-break:break-word;">{{ log.message }}</div>
+              </ng-container>
+
+              <!-- ▶ action label -->
+              <ng-container *ngIf="log.message.startsWith('▶')">
+                <div style="font-size:13px;color:#FF7900;font-weight:600;word-break:break-word;">{{ log.message }}</div>
+              </ng-container>
+
+              <!-- Default: regular step message -->
+              <ng-container *ngIf="!log.message.startsWith('$') && !log.message.startsWith('✓') && !log.message.startsWith('✗') && !log.message.startsWith('▶')">
+                <div style="font-size:13px;color:var(--gray-600);word-break:break-word;">{{ log.message }}</div>
+              </ng-container>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="actions.length === 0 && workflowLogs.length === 0"
+           style="text-align:center;padding:20px;color:var(--gray-500);font-size:14px;">
+        <i class="fas fa-clock" style="margin-right:8px;"></i>Données de traçabilité non disponibles pour cet incident.
       </div>
     </div>
   </div>

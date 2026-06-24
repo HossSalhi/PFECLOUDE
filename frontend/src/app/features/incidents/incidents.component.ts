@@ -16,12 +16,9 @@ export class IncidentsComponent implements OnInit, OnDestroy {
   pageSize = 20;
   totalPages = 0;
   totalElements = 0;
-  updatingId: number | null = null;
   private subs: Subscription[] = [];
 
-  filters = ['ALL', 'OPEN', 'IN_PROGRESS', 'RESOLVED'];
-
-  statusOptions = ['OPEN', 'IN_PROGRESS', 'RESOLVED'];
+  filters = ['ALL', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'RESOLUTION_FAILED'];
 
   constructor(
     private api: ApiService,
@@ -61,17 +58,6 @@ export class IncidentsComponent implements OnInit, OnDestroy {
       this.currentPage = page;
       this.loadIncidents();
     }
-  }
-
-  updateStatus(incident: Incident, newStatus: string): void {
-    this.updatingId = incident.id;
-    this.api.updateIncidentStatus(incident.id, newStatus).subscribe({
-      next: () => {
-        this.updatingId = null;
-        this.loadIncidents();
-      },
-      error: () => { this.updatingId = null; }
-    });
   }
 
   getPages(): number[] {
