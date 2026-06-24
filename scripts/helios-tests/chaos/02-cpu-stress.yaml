@@ -1,0 +1,19 @@
+# Scenario 2: CPU saturation → throttling, high latency
+# Expected: HELIOS detects HIGH_CPU_USAGE → SCALE_DEPLOYMENT (more replicas)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cpu-stress
+  namespace: helios-tests
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  stressors:
+    cpu:
+      workers: 4      # 4 threads hammering CPU
+      load: 95        # 95% CPU load
+  duration: "5m"

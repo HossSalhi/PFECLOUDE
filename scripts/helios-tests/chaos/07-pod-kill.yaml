@@ -1,0 +1,35 @@
+# Scenario 7: Kill pods (simulate service crash)
+# Expected: HELIOS detects POD_CRASH_LOOP or DEPLOYMENT_UNAVAILABLE → RESTART_POD
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-kill
+  namespace: helios-tests
+spec:
+  action: pod-kill
+  mode: one            # kill one pod at a time (PDB keeps one alive)
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  gracePeriod: 0       # immediate SIGKILL (no graceful shutdown)
+  duration: "10m"
+  scheduler:
+    cron: "@every 2m"  # kill one pod every 2 minutes
+---
+# Scenario 7b: pod-failure (freeze without kill — container reports failure)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure
+  namespace: helios-tests
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  duration: "5m"

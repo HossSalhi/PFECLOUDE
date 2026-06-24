@@ -1,0 +1,41 @@
+# Scenario 3a: HTTP latency injection (2s delay on all requests)
+# Expected: HELIOS detects HIGH_RESPONSE_TIME → RESTART_POD
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-latency
+  namespace: helios-tests
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  target: Request
+  port: 80
+  path: "*"
+  delay: "2000ms"
+  duration: "5m"
+---
+# Scenario 3b: HTTP 503 injection (50% of responses)
+# Expected: HELIOS detects DEPLOYMENT_UNAVAILABLE → RESTART_POD
+apiVersion: chaos-mesh.org/v1alpha1
+kind: HTTPChaos
+metadata:
+  name: http-5xx
+  namespace: helios-tests
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  target: Response
+  port: 80
+  path: "*"
+  replace:
+    code: 503
+  percent: 50          # inject 503 on 50% of responses
+  duration: "5m"

@@ -1,0 +1,25 @@
+# Scenario 4: Database outage — cut network from backend to postgres
+# Expected: HELIOS detects DB_CONNECTION_FAILURE → RESTART_POD (reconnects)
+# If CNPG standby is available, automatic failover happens first
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: db-outage
+  namespace: pfe
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - pfe
+    labelSelectors:
+      app.kubernetes.io/name: backend
+  direction: both
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - pfe
+      labelSelectors:
+        cnpg.io/cluster: postgres    # CNPG pods
+  duration: "3m"

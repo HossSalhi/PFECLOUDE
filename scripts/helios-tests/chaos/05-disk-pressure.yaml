@@ -1,0 +1,39 @@
+# Scenario 5: Disk / storage pressure (fill ephemeral storage)
+# Expected: HELIOS detects STORAGE_PRESSURE → pod evicted → RESTART_POD on another node
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: disk-pressure
+  namespace: helios-tests
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  stressors:
+    memory:
+      workers: 1
+      size: "100MB"
+  # Disk fill via IOChaos
+  duration: "5m"
+---
+# Fill ephemeral storage to trigger eviction
+apiVersion: chaos-mesh.org/v1alpha1
+kind: IOChaos
+metadata:
+  name: disk-fill
+  namespace: helios-tests
+spec:
+  action: fault
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  volumePath: /var/cache/nginx
+  percent: 100         # 100% fault rate on all IO
+  errno: 28            # ENOSPC — no space left on device
+  duration: "5m"

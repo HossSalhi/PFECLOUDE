@@ -1,0 +1,10 @@
+import paramiko
+key = paramiko.Ed25519Key.from_private_key_file("C:/Users/houss/.ssh/id_ed25519")
+c = paramiko.SSHClient()
+c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect("192.168.148.153", username="kube", pkey=key, timeout=10, allow_agent=False, look_for_keys=False)
+_, out, _ = c.exec_command("kubectl get pods -n pfe -l app=backend -o wide")
+print(out.read().decode())
+_, out2, _ = c.exec_command("kubectl describe pods -n pfe -l app=backend | grep 'Image:'")
+print(out2.read().decode())
+c.close()

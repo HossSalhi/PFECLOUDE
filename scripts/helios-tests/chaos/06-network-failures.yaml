@@ -1,0 +1,57 @@
+# Scenario 6a: Packet loss (30%) between nginx and clients
+# Expected: HELIOS detects HIGH_ERROR_RATE → RESTART_POD or SCALE_DEPLOYMENT
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: packet-loss
+  namespace: helios-tests
+spec:
+  action: loss
+  mode: all
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  loss:
+    loss: "30"         # 30% packet loss
+    correlation: "25"
+  direction: both
+  duration: "5m"
+---
+# Scenario 6b: Network partition (full cut) — simulate node isolation
+# Expected: pods go NotReady → HELIOS watchdog reschedules or CORDON_NODE
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-partition
+  namespace: helios-tests
+spec:
+  action: partition
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  direction: both
+  duration: "4m"
+---
+# Scenario 6c: DNS failures — DNS queries return NXDOMAIN
+# Expected: HELIOS detects service mesh DNS errors → RESTART_POD
+apiVersion: chaos-mesh.org/v1alpha1
+kind: DNSChaos
+metadata:
+  name: dns-failure
+  namespace: helios-tests
+spec:
+  action: random
+  mode: all
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  patterns:
+    - "*.svc.cluster.local"   # all in-cluster DNS
+  duration: "5m"

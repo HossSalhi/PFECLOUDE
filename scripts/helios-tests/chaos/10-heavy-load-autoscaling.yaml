@@ -1,0 +1,38 @@
+# Scenario 10: Heavy load → HPA autoscaling validation
+# Run stress_nginx.py with --workers 200 simultaneously
+# Expected: HELIOS detects HIGH_CPU_USAGE → SCALE_DEPLOYMENT (replicas 2→4)
+# HPA handles horizontal scaling; HELIOS validates the scale-up happened
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-test-hpa
+  namespace: helios-tests
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-test
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60   # scale up when avg CPU > 60%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30   # fast scale-up (30s window)
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120  # slow scale-down (2min window)

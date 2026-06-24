@@ -1,0 +1,12 @@
+import paramiko
+key = paramiko.Ed25519Key.from_private_key_file("C:/Users/houss/.ssh/id_ed25519")
+c = paramiko.SSHClient()
+c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect("192.168.148.153", username="kube", pkey=key, timeout=10, allow_agent=False, look_for_keys=False)
+_, out, _ = c.exec_command("kubectl get pods -n pfe -l app=podinfo --no-headers | awk '{print $1}'")
+pod = out.read().decode().strip()
+print(f"Pod: {pod}")
+_, out2, err2 = c.exec_command(f"kubectl delete pod {pod} -n pfe")
+print(out2.read().decode())
+print(err2.read().decode())
+c.close()

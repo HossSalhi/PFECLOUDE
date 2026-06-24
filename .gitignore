@@ -43,3 +43,12 @@ docs/
 
 # Downloaded/cached infrastructure artifacts
 backend/backend/infra/host-services/.cache/
+
+# Container image tars (large build artifacts: pfe-backend, cnpg, frontend, jib)
+*.tar
+
+# Frontend jib/maven build output
+frontend/target/
+
+# Local restore snapshots / scratch
+.restore/

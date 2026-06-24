@@ -1,0 +1,22 @@
+# Scenario 1: Memory exhaustion → OOMKilled
+# Expected: HELIOS detects POD_CRASH_LOOP → RESTART_POD
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: memory-exhaustion
+  namespace: helios-tests
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  stressors:
+    memory:
+      workers: 4
+      size: "200MB"     # exceeds container limit of 128Mi → OOMKill
+      options:
+        - "--vm-keep"
+  duration: "5m"
+  gracePeriod: 0

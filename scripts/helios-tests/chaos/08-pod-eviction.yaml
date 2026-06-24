@@ -1,0 +1,20 @@
+# Scenario 8: Pod eviction via resource pressure (node memory pressure)
+# Simulates kubelet evicting low-priority pods under node memory pressure
+# Expected: HELIOS detects DEPLOYMENT_UNAVAILABLE → RESTART_POD (reschedule)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: node-memory-pressure
+  namespace: helios-tests
+spec:
+  mode: all            # stress ALL nginx pods simultaneously
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  stressors:
+    memory:
+      workers: 2
+      size: "180MB"    # push node toward eviction threshold
+  duration: "5m"

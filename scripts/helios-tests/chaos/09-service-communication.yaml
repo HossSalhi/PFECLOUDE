@@ -1,0 +1,48 @@
+# Scenario 9: Service-to-service communication failure
+# Cut backend → nginx-test AND introduce latency on backend → any service
+# Expected: HELIOS detects cascading service degradation → RESTART_POD on failing side
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: svc-to-svc-delay
+  namespace: pfe
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - pfe
+    labelSelectors:
+      app.kubernetes.io/name: backend
+  delay:
+    latency: "1500ms"
+    correlation: "50"
+    jitter: "500ms"
+  direction: to         # delay requests FROM backend TO other services
+  externalTargets:
+    - "192.168.148.161"  # AI service on .161
+  duration: "5m"
+---
+# Simultaneous: cut helios-tests nginx from backend (simulate broken upstream)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: upstream-partition
+  namespace: helios-tests
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - helios-tests
+    labelSelectors:
+      app: nginx-test
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - pfe
+      labelSelectors:
+        app.kubernetes.io/name: backend
+  duration: "5m"

@@ -1,0 +1,110 @@
+# ===================================================================
+# DEMO HELIOS — 3 apps génératrices d'incidents différents
+# Image podinfo (en cache sur le cluster — air-gap OK)
+#
+# PARTIE 1 — Détection + diagnostic IA (3 pannes distinctes) :
+#   incident-pending    → Pending       (nodeSelector inexistant)
+#   incident-crashloop  → CrashLoopBackOff (commande binaire inexistant)
+#   incident-imagepull  → ImagePullBackOff (image tag inexistant)
+#
+# 1. Déployer  : kubectl apply -f demo-incident-apps.yaml
+# 2. Vérifier  : kubectl get pods -n pfe | findstr incident
+# 3. Attendre ~2 min → 3 incidents dans l'UI (types distincts par l'IA)
+#
+# PARTIE 2 — Auto-résolution :
+# 4. Nettoyer  : kubectl delete -f demo-incident-apps.yaml
+# 5. Attendre ~3-4 min → 3 incidents RESOLVED automatiquement
+# ===================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-pending
+  namespace: pfe
+  labels:
+    app: incident-pending
+    helios-demo: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-pending
+  template:
+    metadata:
+      labels:
+        app: incident-pending
+        helios-demo: "true"
+    spec:
+      nodeSelector:
+        helios-noeud-inexistant: "true"   # aucun nœud → Pending permanent
+      containers:
+      - name: app
+        image: stefanprodan/podinfo:6.7.0
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-crashloop
+  namespace: pfe
+  labels:
+    app: incident-crashloop
+    helios-demo: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-crashloop
+  template:
+    metadata:
+      labels:
+        app: incident-crashloop
+        helios-demo: "true"
+    spec:
+      containers:
+      - name: app
+        image: stefanprodan/podinfo:6.7.0
+        command: ["/binaire-inexistant"]   # RunContainerError → CrashLoopBackOff
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-imagepull
+  namespace: pfe
+  labels:
+    app: incident-imagepull
+    helios-demo: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-imagepull
+  template:
+    metadata:
+      labels:
+        app: incident-imagepull
+        helios-demo: "true"
+    spec:
+      containers:
+      - name: app
+        image: stefanprodan/podinfo:99.99.99   # tag inexistant → ImagePullBackOff
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "32Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
