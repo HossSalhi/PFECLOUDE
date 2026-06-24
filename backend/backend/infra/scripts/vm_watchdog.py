@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -51,7 +52,12 @@ DEFAULT_CONFIG = {
     "grace_period_seconds": 120,
     "poll_interval_seconds": 30,
     "watchdog_port": 9099,
+    # The control-plane node is detected by DIRECT probe (its API/SSH), never via kubectl —
+    # because if the master is down, the API server is down and kubectl itself cannot answer.
+    "control_plane_node": "k8s-master",
+    "control_plane_api_port": 6443,
     "backend_api": "http://192.168.148.153:30808",
+    "backend_nodeport": 30808,
     "backend_user": "operator",
     "backend_password": "operator-change-me",
     "nodes": {
@@ -187,6 +193,27 @@ def get_node_statuses(cfg: dict) -> dict[str, str]:
         return {}
 
 
+def is_reachable(ip: str, port: int, timeout: float = 4.0) -> bool:
+    """Direct TCP probe — does NOT depend on the K8s API (used to detect the master itself)."""
+    if not ip:
+        return False
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def control_plane_alive(cfg: dict) -> bool:
+    """The master is alive if its API server (6443) OR SSH (22) answers a direct TCP probe.
+    This is independent of kubectl: when the master VM is down, the API is down too, so kubectl
+    cannot be the detector for the control-plane node itself."""
+    cp = cfg.get("control_plane_node", "k8s-master")
+    ip = cfg.get("nodes", {}).get(cp, {}).get("ip", "")
+    api_port = cfg.get("control_plane_api_port", 6443)
+    return is_reachable(ip, api_port) or is_reachable(ip, 22)
+
+
 # ── vmrun helpers ─────────────────────────────────────────────────────────────
 
 def start_vm(vmrun_path: str, vmx_path: str) -> bool:
@@ -245,36 +272,57 @@ def wait_for_ssh(ip: str, user: str, password: str, timeout: int = 180) -> bool:
 
 # ── Backend reporting ─────────────────────────────────────────────────────────
 
+def _candidate_apis(cfg: dict) -> list[str]:
+    """Backend NodePort base URLs to try, in order. The configured backend_api comes first, then
+    EVERY node IP at the NodePort — so a VM_DOWN incident still reaches the backend when the master
+    is down (its NodePort is unreachable, but a worker's NodePort serves the same Service)."""
+    apis: list[str] = []
+    primary = cfg.get("backend_api", "").rstrip("/")
+    if primary:
+        apis.append(primary)
+    port = cfg.get("backend_nodeport", 30808)
+    for ncfg in cfg.get("nodes", {}).values():
+        ip = ncfg.get("ip")
+        if ip:
+            url = f"http://{ip}:{port}"
+            if url not in apis:
+                apis.append(url)
+    return apis
+
+
 def report_to_backend(cfg: dict, node_name: str, success: bool, message: str):
-    api = cfg.get("backend_api", "")
     user = cfg.get("backend_user", "operator")
     pwd = cfg.get("backend_password", "operator-change-me")
-    if not api:
+    apis = _candidate_apis(cfg)
+    if not apis:
         return
-    try:
-        creds = base64.b64encode(f"{user}:{pwd}".encode()).decode()
-        status = "RESOLVED" if success else "OPEN"
-        body = json.dumps({
-            "title": f"VM_DOWN: {node_name}",
-            "description": f"type=VM_DOWN action=RESTART_VM executionMode=AUTO_EXECUTE_CANDIDATE "
-                           f"node={node_name} result={message}",
-            "severity": "CRITICAL",
-            "source": "AI",
-            "namespace": "pfe",
-            "app": node_name,
-            "incidentType": "VM_DOWN",
-            "status": status,
-        }).encode()
-        req = urllib.request.Request(
-            f"{api}/api/incidents",
-            data=body,
-            headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10)
-        log.info("Reported VM_DOWN incident for %s to backend", node_name)
-    except Exception as exc:
-        log.debug("Could not report to backend: %s", exc)
+    creds = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+    status = "RESOLVED" if success else "OPEN"
+    body = json.dumps({
+        "title": f"VM_DOWN: {node_name}",
+        "description": f"type=VM_DOWN action=RESTART_VM executionMode=AUTO_EXECUTE_CANDIDATE "
+                       f"node={node_name} result={message}",
+        "severity": "CRITICAL",
+        "source": "AI",
+        "namespace": "pfe",
+        "app": node_name,
+        "incidentType": "VM_DOWN",
+        "status": status,
+    }).encode()
+    for api in apis:
+        try:
+            req = urllib.request.Request(
+                f"{api}/api/incidents",
+                data=body,
+                headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+            log.info("Reported VM_DOWN incident for %s to backend via %s", node_name, api)
+            return
+        except Exception as exc:
+            log.debug("Report via %s failed: %s", api, exc)
+    log.debug("Could not report VM_DOWN for %s to any backend endpoint", node_name)
 
 
 # ── Restart logic ─────────────────────────────────────────────────────────────
@@ -313,28 +361,46 @@ def polling_loop(cfg: dict):
     grace = cfg.get("grace_period_seconds", 120)
     interval = cfg.get("poll_interval_seconds", 30)
     managed_nodes = set(cfg.get("nodes", {}).keys())
+    cp_node = cfg.get("control_plane_node", "k8s-master")
 
-    log.info("Watchdog started. Monitoring nodes: %s", list(managed_nodes))
+    log.info("Watchdog started. Monitoring nodes: %s (control-plane: %s)", list(managed_nodes), cp_node)
     log.info("Grace period: %ds | Poll interval: %ds", grace, interval)
+
+    def trigger_restart(node):
+        threading.Thread(target=handle_vm_restart, args=(cfg, node), daemon=True).start()
 
     while True:
         try:
-            statuses = get_node_statuses(cfg)
+            # 1) CONTROL-PLANE (master): detected by DIRECT probe, never via kubectl — because if
+            #    the master is down the API is down and kubectl cannot answer. This is also why we
+            #    must NOT mark the workers NotReady from an empty kubectl result (would false-restart
+            #    healthy workers whenever the master is merely unreachable).
+            cp_alive = control_plane_alive(cfg)
+            if cp_node in managed_nodes:
+                if cp_alive:
+                    STATE.mark_ready(cp_node)
+                else:
+                    secs = STATE.mark_not_ready(cp_node)
+                    log.warning("Control-plane %s unreachable for %.0fs (grace=%ds)", cp_node, secs, grace)
+                    if secs >= grace and STATE.should_restart(cp_node, grace):
+                        trigger_restart(cp_node)
+
+            # 2) WORKERS: assessed via kubectl, which is only trustworthy when the API is up.
+            statuses = get_node_statuses(cfg) if cp_alive else {}
             for node in managed_nodes:
+                if node == cp_node:
+                    continue
+                if not cp_alive:
+                    # API down -> we cannot judge worker health; skip (fix the master first).
+                    continue
                 status = statuses.get(node, "Unknown")
                 if status == "Ready":
                     STATE.mark_ready(node)
                 elif status in ("NotReady", "Unknown"):
                     not_ready_secs = STATE.mark_not_ready(node)
-                    log.debug("Node %s NotReady for %.0fs (grace=%ds)",
-                              node, not_ready_secs, grace)
+                    log.debug("Node %s NotReady for %.0fs (grace=%ds)", node, not_ready_secs, grace)
                     if not_ready_secs >= grace and STATE.should_restart(node, grace):
-                        thread = threading.Thread(
-                            target=handle_vm_restart,
-                            args=(cfg, node),
-                            daemon=True,
-                        )
-                        thread.start()
+                        trigger_restart(node)
         except Exception as exc:
             log.error("Polling error: %s", exc)
         time.sleep(interval)
