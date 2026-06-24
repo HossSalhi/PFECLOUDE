@@ -13,8 +13,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1       # allows a 3rd pod during rollout so both workers stay covered
-      maxUnavailable: 0 # never reduce below 2 running pods during rollout
+      maxSurge: 0       # air-gap: 2 workers + anti-affinity → no room for a 3rd pod; kill first
+      maxUnavailable: 1 # kill one old pod before starting new (no scheduling deadlock)
   selector:
     matchLabels:
       app: backend
@@ -69,10 +69,49 @@ spec:
         fsGroup: 1000
       containers:
         - name: backend
-          # 0.2.24 = image Jib (devtools exclu) buildée sans Docker et chargée sur les
-          # nœuds via ctr (cf. scripts/helios-ops/build-deploy-backend.sh). Contient
-          # L14/L15/L17 + pagination DIRECT (compteur frontend). 0.2.25 le 2026-06-11.
-          image: pfe-backend:0.2.38
+          # 0.2.82 = 14 types distincts : +4 marqueurs (PENDING/INIT/CONFIG/DEPLOYMENT_UNAVAILABLE),
+          #          http error/latency -> ROLLBACK, titres/rationale par type, cleanupBrokenPods etendu
+          #          (config/init/pending/evicted). Conserve 0.2.81 (suppr GENERAL_DEGRADATION + dedup +
+          #          rollback cible RS saine).
+          # 0.2.85 = disk fiable : hasEvictedPod ne se declenche que sur UNE seule revision Running
+          #          (pas pendant le rollout FORCE_RECREATE = 2 hash) -> la verif ne re-voit plus le
+          #          transient -> NODE_DISK_PRESSURE RESOLU de facon stable. + 0.2.84 (transient-rollout).
+          # 0.2.92 = RESOLUTION REELLE : auto-resolve ne court-circuite plus la remediation Camunda.
+          #          Tant que l'action est PENDING/IN_PROGRESS ou le workflow actif (incident <8min),
+          #          on laisse l'execute worker lancer la VRAIE commande kubectl (tracee "$ kubectl ...")
+          #          et le verify conclure -> plus d'incident "resolved" sans commande (action PENDING).
+          # 0.2.93 = DEBIT WORKER : execute maxJobsActive 2->16, verify 1->16, threads 8->24, verify
+          #          timeout 6min. 16 incidents simultanes -> les jobs execute ne restent plus ACTIVE
+          #          non-draines dans Zeebe (action PENDING bloquee). + reset annule TOUS les PIs (0 orphelin).
+          # 0.2.94 = VRAIE CAUSE : WorkflowNotFoundException = RACE de transaction (le PI Camunda est cree
+          #          DANS la tx qui ecrit workflow_instance -> le worker active le job execute AVANT le
+          #          commit -> faux "orphelin" droppe retries=0 -> action PENDING a vie). Fix: sur not-found,
+          #          on RETRY avec backoff 6s (le commit arrive), drop seulement apres epuisement (vrai orphelin).
+          # 0.2.95 = DISK = 16e type distinct : le pod evince (EmptyDir>sizeLimit) est remplace en <30s donc
+          #          l'etat pod (Evicted/Succeeded) est rate au polling -> on detecte aussi via l'EVENEMENT
+          #          kubelet "Evicted ... exceeds the limit" (persiste ~1h, fenetre 5min, detection seule)
+          #          -> disk_pressure_detected -> NODE_DISK_PRESSURE (au lieu de POD_CRASH_LOOP).
+          # 0.2.96 = 2 derniers fix : (a) NODE_DISK_PRESSURE+DELETE = action POD sure -> process AUTO (plus
+          #          le process node a approbation humaine qui timeout a 5min -> FAILED). (b) AUTOSCALING :
+          #          verify "scale mode" = succes quand les repliques sont pretes (la charge soutenue est
+          #          ATTENDUE, c'est la raison du scale-up) au lieu d'exiger que l'IA ne voie plus la charge.
+          # 0.2.97 = crashloop detecte tot (test manuel) : hasCrashLoopBackOff catch la fenetre RUNNING entre
+          #          deux crashs (lastState.terminated exit!=0 + restarts>=2 + pas Ready) -> POD_CRASH_LOOP +
+          #          ROLLBACK au lieu de DEPLOYMENT_UNAVAILABLE + FORCE_RECREATE (qui ne corrige pas le spec).
+          # 0.2.98 = ferme le trou restartCount==1 : un crash applicatif (exit code != 0/137/143) au PREMIER
+          #          redemarrage = POD_CRASH_LOOP des le 1er poll -> plus de doublon DEPLOYMENT_UNAVAILABLE
+          #          (RESOLUTION_FAILED) suivi de POD_CRASH_LOOP. Kills (137/143) et stop propre (0) exclus.
+          # 0.2.109 = trace noeud PRO : la trace Camunda de l'escalade affiche la commande de
+          #          recuperation equivalente ($ vmrun start <node>) + resultat d'action noeud explicite,
+          #          pour que l'incident NOEUD montre sa commande comme les apps montrent leur kubectl.
+          # 0.2.110 = anti-flood node-down BLINDE : (1) detection rapide via le Lease kube-node-lease
+          #          (renewTime fige ~25-30s avant le flip NotReady ~40s) -> pause per-app AVANT le flood
+          #          (fini le DEPLOYMENT_UNAVAILABLE RESOLUTION_FAILED cree pendant la course). (2) grace
+          #          post-recovery 180->300s. (3) suppression aussi si node_not_ready_count>0 (ceinture+bretelles).
+          # 0.2.111 = coherence severite : la description enrichie par l'IA affiche la severite AUTORITAIRE
+          #          de l'incident (severityFor: CRITICAL pour une panne noeud), plus la severite IA
+          #          degradee -> le detail affiche CRITICAL comme le tableau (fini HIGH vs CRITICAL).
+          image: pfe-backend:0.2.111
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

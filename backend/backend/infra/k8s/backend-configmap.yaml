@@ -24,28 +24,36 @@ data:
   CAMUNDA_WORKER_MAX_JOBS_ACTIVE: "4"
   LAB_HOST_IP: "192.168.148.161"
   REMEDIATION_AUTOMATION_ENABLED: "true"
-  REMEDIATION_ALLOWED_ACTIONS: "RESTART_POD,SCALE_DEPLOYMENT,DELETE_CRASHLOOPING_PODS"
+  REMEDIATION_ALLOWED_ACTIONS: "RESTART_POD,SCALE_DEPLOYMENT,DELETE_CRASHLOOPING_PODS,FORCE_RECREATE_DEPLOYMENT"
   REMEDIATION_RESTART_CONFIDENCE_THRESHOLD: "0.45"
   REMEDIATION_SCALE_CONFIDENCE_THRESHOLD: "0.44"
   REMEDIATION_VERIFICATION_INCIDENT_CONFIDENCE_THRESHOLD: "0.55"
-  REMEDIATION_COOLDOWN_MINUTES: "5"
-  REMEDIATION_VERIFY_DELAY_SECONDS: "120"
+  REMEDIATION_COOLDOWN_MINUTES: "2"
+  REMEDIATION_VERIFY_DELAY_SECONDS: "25"
   REMEDIATION_VERIFICATION_WINDOW_MINUTES: "1"
-  REMEDIATION_VERIFICATION_RETRY_ATTEMPTS: "10"
-  REMEDIATION_VERIFICATION_RETRY_DELAY_SECONDS: "30"
-  REMEDIATION_ALLOWLISTED_APPS: "backend,ai-service,podinfo"
+  # 7x15s = 105s max per verify (was 9x18=162s). Each verify Thread.sleep-blocks a worker thread;
+  # shorter loop = threads freed sooner + faster resolution. Demo faults stabilise in ~30-60s.
+  REMEDIATION_VERIFICATION_RETRY_ATTEMPTS: "7"
+  REMEDIATION_VERIFICATION_RETRY_DELAY_SECONDS: "15"
+  # Wildcard = toutes les apps pfe sont eligibles (demo) ; lister explicitement en prod
+  REMEDIATION_ALLOWLISTED_APPS: "*"
   REMEDIATION_ALLOWLISTED_NAMESPACES: "pfe"
   REMEDIATION_MAX_AUTO_SCALE_REPLICAS: "2"
   REMEDIATION_MAX_SCALE_STEP: "1"
   AIOPS_POLLING_ENABLED: "true"
-  AIOPS_POLLING_INTERVAL_MILLIS: "120000"
+  AIOPS_POLLING_INTERVAL_MILLIS: "30000"
   AIOPS_POLLING_NAMESPACE: "pfe"
   AIOPS_CLIENT_READ_TIMEOUT_MS: "30000"
   # HELIOS ne surveille PAS sa propre stack (backend/frontend/ai-service...).
-  # On poll les applications CLIENTES déployées (ex. podinfo). La découverte auto
-  # exclut tout deployment/service portant le label helios.io/monitor=false.
-  AIOPS_POLLING_APPS: "podinfo"
-  AIOPS_POLLING_WINDOW_MINUTES: "5"
+  # On poll explicitement les 7 apps demo dediees (1 type de panne distinct chacune).
+  # podinfo est EXCLU (baseline chaos a l'historique de revisions pollue -> rollbacks
+  # imprevisibles + bruit MEMORY_STRESS) : retire de la liste ET label helios.io/monitor=false.
+  # La decouverte auto exclut tout deployment portant le label helios.io/monitor=false.
+  AIOPS_POLLING_APPS: "helios-crashloop,helios-imagepull,helios-oom,helios-cpu,helios-service,helios-network,helios-dns"
+  AIOPS_POLLING_WINDOW_MINUTES: "1"
+  # Découverte auto réactivée : podinfo apparaît dans "Deployments Kubernetes".
+  # Les apps démo cassées (incident-*) + la stack HELIOS (backend/frontend) sont exclues
+  # via le label helios.io/monitor=false (sinon flood d'incidents permanents).
   AIOPS_POLLING_DISCOVERY_ENABLED: "true"
   INFRA_HEALTH_ENABLED: "true"
   # 60s (et non 300s) : l'auto-remédiation rallume un worker en ~2 min, donc une
@@ -78,7 +86,9 @@ data:
   NOTIFICATION_EMAIL_ENABLED: "true"
   NOTIFICATION_EMAIL_TO: "houssamsalhi972@gmail.com"
   NOTIFICATION_EMAIL_FROM: "helios-aiops@orange.tn"
-  NOTIFICATION_EMAIL_MIN_SEVERITY: "HIGH"
+  # LOW = email pour toutes severites (demo) ; HIGH = seulement HIGH/CRITICAL (prod)
+  NOTIFICATION_EMAIL_MIN_SEVERITY: "LOW"
+  NOTIFICATION_MIN_SEVERITY: "LOW"
   NOTIFICATION_EMAIL_DASHBOARD_URL: "http://192.168.148.153:30880"
   # Relais SMTP (plaintext, pas d'auth, pas de STARTTLS) — host-relay (Internet OK)
   MAIL_HOST: "192.168.148.1"

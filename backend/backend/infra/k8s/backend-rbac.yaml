@@ -18,10 +18,17 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list", "watch", "patch"]
+    verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
     verbs: ["get", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Remédiation réseau : identifier et supprimer la NetworkPolicy bloquante (partition/DNS/service)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -44,6 +51,12 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # Fast node-failure detection: a worker's node Lease (kube-node-lease) renewTime stops updating
+  # within ~25-30s of the node dying — faster + more reliable than the ~40s Ready-condition flip.
+  # Lets HELIOS pause per-app incident creation before a worker-down floods the table with collateral.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

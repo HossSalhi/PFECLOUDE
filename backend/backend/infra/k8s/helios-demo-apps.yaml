@@ -1,0 +1,298 @@
+# HELIOS demo : 14 apps SAINES (baseline correcte), 1 type d'incident distinct chacune.
+# Les pannes REPARABLES sont injectees apres par scripts/inject_demo_faults.py -> HELIOS detecte
+# le type distinct ET le resout (rollback / rollout restart / delete networkpolicy).
+# Image podinfo cachee (air-gap, :6.7.0). LimitRange pfe : min 10m/32Mi, max 2/2Gi par conteneur.
+# --- ConfigMap utilisee par helios-config (baseline saine) ---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: helios-config-cm, namespace: pfe }
+data: { GREETING: "hello-from-helios" }
+---
+# 1) POD_CRASH_LOOP  (inject: command exit 1 -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-crashloop, namespace: pfe, labels: { app: helios-crashloop } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-crashloop } }
+  template:
+    metadata: { labels: { app: helios-crashloop } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 2) POD_IMAGE_PULL_BACKOFF  (inject: bad image -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-imagepull, namespace: pfe, labels: { app: helios-imagepull } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-imagepull } }
+  template:
+    metadata: { labels: { app: helios-imagepull } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 3) MEMORY_STRESS / OOM  (inject: tail /dev/zero -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-oom, namespace: pfe, labels: { app: helios-oom } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-oom } }
+  template:
+    metadata: { labels: { app: helios-oom } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "128Mi" } } }
+---
+# 4) CPU_STRESS  (inject: exec hog -> rollout restart)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-cpu, namespace: pfe, labels: { app: helios-cpu } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-cpu } }
+  template:
+    metadata: { labels: { app: helios-cpu } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "50m", memory: "32Mi" }, limits: { cpu: "1200m", memory: "96Mi" } } }
+---
+# 5) SERVICE_UNAVAILABLE  (inject: NetworkPolicy deny ingress -> delete policy)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-service, namespace: pfe, labels: { app: helios-service } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-service } }
+  template:
+    metadata: { labels: { app: helios-service } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 6) NETWORK_PARTITION  (inject: NetworkPolicy deny ingress+egress -> delete policy)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-network, namespace: pfe, labels: { app: helios-network } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-network } }
+  template:
+    metadata: { labels: { app: helios-network } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 7) DNS_FAILURE  (inject: NetworkPolicy egress sans port 53 -> delete policy)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-dns, namespace: pfe, labels: { app: helios-dns } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-dns } }
+  template:
+    metadata: { labels: { app: helios-dns } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 8) NODE_DISK_PRESSURE  (inject: remplir emptyDir -> eviction -> rollout restart)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-disk, namespace: pfe, labels: { app: helios-disk } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-disk } }
+  template:
+    metadata: { labels: { app: helios-disk } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - name: app
+          image: stefanprodan/podinfo:6.7.0
+          imagePullPolicy: IfNotPresent
+          resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi", ephemeral-storage: "60Mi" } }
+          volumeMounts: [ { name: data, mountPath: /data } ]
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: "50Mi" }
+---
+# 9) HIGH_ERROR_RATE  (inject: ./podinfo --random-error=true -> rollback) + Service pour le load-gen
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-http5xx, namespace: pfe, labels: { app: helios-http5xx } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-http5xx } }
+  template:
+    metadata: { labels: { app: helios-http5xx } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, ports: [ { containerPort: 9898 } ], resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: helios-http5xx, namespace: pfe }
+spec: { selector: { app: helios-http5xx }, ports: [ { port: 9898, targetPort: 9898 } ] }
+---
+# 10) LATENCY_DEGRADATION  (inject: ./podinfo --random-delay=true -> rollback) + Service pour le load-gen
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-latency, namespace: pfe, labels: { app: helios-latency } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-latency } }
+  template:
+    metadata: { labels: { app: helios-latency } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, ports: [ { containerPort: 9898 } ], resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: helios-latency, namespace: pfe }
+spec: { selector: { app: helios-latency }, ports: [ { port: 9898, targetPort: 9898 } ] }
+---
+# 11) POD_PENDING_INSUFFICIENT_RESOURCES  (inject: request cpu 2 + mem 2Gi -> Unschedulable -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-pending, namespace: pfe, labels: { app: helios-pending } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-pending } }
+  template:
+    metadata: { labels: { app: helios-pending } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 12) POD_INIT_CONTAINER_FAILURE  (inject: init command exit 1 -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-init, namespace: pfe, labels: { app: helios-init } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-init } }
+  template:
+    metadata: { labels: { app: helios-init } }
+    spec:
+      nodeSelector: { node-type: worker }
+      initContainers:
+        - { name: init, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, command: ["sh","-c","exit 0"], resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "64Mi" } } }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 13) POD_CONFIG_ERROR  (inject: envFrom configMap inexistant -> CreateContainerConfigError -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-config, namespace: pfe, labels: { app: helios-config } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-config } }
+  template:
+    metadata: { labels: { app: helios-config } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - name: app
+          image: stefanprodan/podinfo:6.7.0
+          imagePullPolicy: IfNotPresent
+          envFrom: [ { configMapRef: { name: helios-config-cm } } ]
+          resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } }
+---
+# 14) DEPLOYMENT_UNAVAILABLE  (inject: readiness probe vers chemin 404 -> NotReady -> rollback)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-unavailable, namespace: pfe, labels: { app: helios-unavailable } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-unavailable } }
+  template:
+    metadata: { labels: { app: helios-unavailable } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - name: app
+          image: stefanprodan/podinfo:6.7.0
+          imagePullPolicy: IfNotPresent
+          ports: [ { containerPort: 9898 } ]
+          readinessProbe: { httpGet: { path: /healthz, port: 9898 }, initialDelaySeconds: 3, periodSeconds: 5 }
+          resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } }
+---
+# 15) DATABASE_CONNECTIVITY  (inject: NetworkPolicy egress autorise DNS:53 mais bloque DB:5432 -> delete policy)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-db, namespace: pfe, labels: { app: helios-db } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-db } }
+  template:
+    metadata: { labels: { app: helios-db } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "96Mi" } } }
+---
+# 16) AUTOSCALING / HPA  (inject: hog CPU -> HELIOS detecte la montee en charge -> SCALE_DEPLOYMENT 1->N)
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-hpa, namespace: pfe, labels: { app: helios-hpa } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector: { matchLabels: { app: helios-hpa } }
+  template:
+    metadata:
+      labels: { app: helios-hpa }
+      annotations: { helios.io/autoscale: "true" }   # opt-in : sous charge CPU -> scale up (pas restart)
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - { name: app, image: stefanprodan/podinfo:6.7.0, imagePullPolicy: IfNotPresent, resources: { requests: { cpu: "50m", memory: "32Mi" }, limits: { cpu: "1000m", memory: "96Mi" } } }
+---
+# Load-gen : trafic continu vers les services http5xx + latency pour que /metrics expose 5xx/latence
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: helios-loadgen, namespace: pfe, labels: { app: helios-loadgen, helios.io/monitor: "false" } }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector: { matchLabels: { app: helios-loadgen } }
+  template:
+    metadata: { labels: { app: helios-loadgen, helios.io/monitor: "false" } }
+    spec:
+      nodeSelector: { node-type: worker }
+      containers:
+        - name: loadgen
+          image: stefanprodan/podinfo:6.7.0
+          imagePullPolicy: IfNotPresent
+          command: ["sh","-c","(while true; do wget -q -T 8 -O /dev/null http://helios-http5xx:9898/ 2>/dev/null; sleep 0.2; done) & (while true; do wget -q -T 8 -O /dev/null http://helios-latency:9898/ 2>/dev/null; sleep 0.2; done) & wait"]
+          resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "200m", memory: "64Mi" } }
