@@ -97,3 +97,26 @@ python backend/backend/infra/scripts/vm_watchdog.py
 ## 6. Quoi dire au jury
 
 > « Le control-plane est un SPOF. La solution correcte est un HA 3-masters (etcd quorum impair) + VIP keepalived à priorités, qui réalise exactement le basculement master→worker1→worker2. Mais le sizing actuel des VMs (1,6–2,4 Go, master déjà en OOM-thrashing) ne le supporte pas : ce serait une perte de quorum etcd. J'ai donc (a) documenté l'archi cible + prérequis matériel, et (b) implémenté une mitigation réaliste : le watchdog hôte redémarre la VM master de façon autonome (~1–2 min), avec détection directe hors-cluster et sans impacter les workers. C'est un choix d'ingénierie assumé : ne pas casser un système qui marche pour une archi que le matériel ne peut pas soutenir. »
+
+## 7. Runbook d'exécution du vrai HA (à faire AVEC RAM + snapshots)
+
+> ⚠️ Opération à **haut risque**. Prérequis absolus : **snapshots VMware des 5 VMs** + **backup etcd** + **backup CNPG** AVANT toute étape. Réservée au jour où (a) l'hôte a ≥32 Go, OU (b) l'IA (aiCamunda) est coupée pour libérer la RAM (AIOps OFF pendant ce mode).
+
+**Choix de VIP :** une IP libre du sous-réseau, ex. `192.168.148.150`. Priorités keepalived : master=150, worker1=100, worker2=90.
+
+**RECOMMANDATION D'INGÉNIEUR (importante) :** vu l'état de CE cluster — `kubeadm-config` configmap **absente**, etcd à **1 seul membre**, et les workers hébergent des **workloads stateful** (postgres CNPG, backend) qu'il faudrait évincer pour les `reset`+`join --control-plane` — la conversion **en place** est tellement risquée qu'un **REBUILD planifié en HA dès le départ** (3 nœuds control-plane à 4 Go, init avec `--control-plane-endpoint=VIP:6443 --upload-certs`, puis restauration des données depuis backups CNPG `pg_dump`) est **plus sûr** que la chirurgie en place. Le rebuild est déjà documenté dans la mémoire projet.
+
+**Étapes (in-place, si rebuild non souhaité) :**
+0. Snapshots VMware (5 VMs) + `kubectl -n kube-system exec etcd-k8s-master -- etcdctl snapshot save /var/lib/etcd-backup.db --cacert ... --cert ... --key ...` + `pg_dump` CNPG.
+1. **Libérer la RAM :** power-off `k8s-aiCamunda` (et au besoin `k8s-monitoring`).
+2. **Agrandir les VMs :** pour master/worker1/worker2 → power off, `memsize="4096"` dans le `.vmx`, power on. (Master en dernier.)
+3. **VIP sur les 3 nœuds :** installer `keepalived` (VRRP, VIP, priorités) + `haproxy` (LB `VIP:6443` → master:6443, worker1:6443, worker2:6443).
+4. **Recréer la config kubeadm + certs avec la VIP :** `kubeadm init phase upload-config all` ; régénérer les certs apiserver avec la VIP + tous les IPs dans `certSANs` (`kubeadm init phase certs apiserver --apiserver-cert-extra-sans=192.168.148.150,...`) ; définir `controlPlaneEndpoint=VIP:6443` ; redémarrer le control-plane du master.
+5. **Promouvoir les workers :** `kubeadm init phase upload-certs --upload-certs` (note la certificate-key) + `kubeadm token create --print-join-command`. Sur worker1 puis worker2 : `kubeadm reset` (évince ses pods — d'où l'importance des backups) puis `kubeadm join 192.168.148.150:6443 --control-plane --certificate-key <key> ...`.
+6. **Retirer le taint** `node-role.kubernetes.io/control-plane:NoSchedule` des 3 nœuds (pour que HELIOS schedule partout).
+7. **Vérifier :** `etcdctl member list` = 3 *started* ; `kubectl get nodes` = 3 `control-plane` ; tester la VIP.
+8. **Test final :** couper le master → la VIP bascule sur worker1 → `kubectl` continue de répondre (via worker1) → **worker1 joue le master**. C'est la démo voulue.
+
+**Rollback :** si étape KO → restaurer les snapshots VMware (retour à l'état mono-master fonctionnel).
+
+**Limite :** 3 nœuds = **1 panne tolérée** (master+worker1 simultanés = quorum 1/3 perdu → 5 nœuds pour 2 pannes).
