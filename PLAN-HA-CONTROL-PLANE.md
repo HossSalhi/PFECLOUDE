@@ -47,7 +47,19 @@ VIP = ex. 192.168.148.150  (= controlPlaneEndpoint, dans les certSANs de l'apise
 - etcd à 3 membres tolère **la perte d'1 nœud**.
 - On retire le taint `node-role.kubernetes.io/control-plane:NoSchedule` → HELIOS tourne sur n'importe quel nœud.
 
-**Prérequis matériel (bloquant aujourd'hui) :** chaque VM ≥ **4 Go** (idéalement 6). L'hôte étant sur-engagé (~24 Go pour 5 VMs, dont la VM IA ~12 Go), il faut **libérer de la RAM** (réduire/éteindre la VM IA) avant.
+**Prérequis matériel (BLOQUANT — chiffres mesurés le 25/06/2026) :**
+
+Hôte : **23,8 Go total, 1,1 Go libre → saturé.** Allocation actuelle des 5 VMs :
+
+| VM | RAM | Note |
+|---|---|---|
+| k8s-aiCamunda | **8 Go** | Camunda/Zeebe + IA (Ollama) — **indispensable au cœur de HELIOS** |
+| k8s-monitoring | 2 Go | supervision |
+| k8s-worker2 | 2,5 Go | |
+| k8s-worker1 | 2 Go | (déjà ~14 Mo libres en run — saturé) |
+| k8s-master | 1,75 Go | (apiserver/etcd en OOM-thrashing : 100+ restarts) |
+
+Pour le HA il faut **master/worker1/worker2 ≥ 4 Go chacun** → besoin de **~+6 Go**. Or il n'y a que 1,1 Go libre, et le seul gros réservoir (aiCamunda 8 Go) est **essentiel** (le réduire casse Camunda+IA). **Conclusion : le vrai HA est IMPOSSIBLE sur 23,8 Go sans casser HELIOS.** Il faut **un hôte ≥ 32 Go** (puis agrandir les 3 nœuds à 4 Go). Tant que ce n'est pas le cas → rester sur le watchdog (§5).
 
 **Procédure (résumé, à exécuter avec snapshots) :**
 1. Snapshots VMware des 3 VMs + `etcdctl snapshot save`.
