@@ -36,6 +36,7 @@ import org.springframework.stereotype.Service;
 import com.orange.pfe.backend.dto.WorkflowLogDTO;
 import com.orange.pfe.backend.model.human.HumanTask;
 import com.orange.pfe.backend.model.human.TaskDecision;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -69,6 +70,11 @@ public class CamundaJobWorkerLifecycle {
 
     private final AIOpsClientService aiOpsClientService;
     private final NotificationService notificationService;
+
+    // Watchdog hôte (sur l'hyperviseur) qui exécute le vmrun. Camunda l'APPELLE pour rallumer un nœud :
+    // le rallumage worker dépend donc de Camunda (s'il est down, le watchdog n'est jamais sollicité).
+    @Value("${helios.host-watchdog.url:http://192.168.148.1:9099}")
+    private String hostWatchdogUrl;
 
     private JobWorker executeWorker;
     private JobWorker verifyWorker;
@@ -258,11 +264,13 @@ public class CamundaJobWorkerLifecycle {
                                 "🔍 Décision IA : panne nœud — aucune action kubectl ne peut réparer un nœud "
                                 + "injoignable (redémarrer ses pods n'aide pas).");
                         workflowService.addWorkflowLog(workflowId,
-                                "↗ Escalade : power-on de la VM " + action.getTargetName()
-                                + " délégué au watchdog hôte (hors cluster) + rééquilibrage des charges.");
+                                "▶ Camunda déclenche le power-on de la VM " + action.getTargetName()
+                                + " via le watchdog hôte (hors cluster).");
+                        // C'EST ICI que Camunda pilote le rallumage : appel HTTP au watchdog hôte.
+                        String wdResult = triggerHostWatchdogRestart(action.getTargetName());
                         workflowService.addWorkflowLog(workflowId,
                                 "$ vmrun start " + action.getTargetName()
-                                + "   (équivalent — power-on VM exécuté par le watchdog hôte)");
+                                + "   (déclenché par Camunda via le watchdog hôte → " + wdResult + ")");
                         workflowService.addWorkflowLog(workflowId,
                                 "⏳ HELIOS surveille le retour du nœud à l'état Ready avant de conclure.");
                     } else {
@@ -406,7 +414,14 @@ public class CamundaJobWorkerLifecycle {
                 );
                 WorkflowInstance completed = workflowService.completeWorkflow(workflowId);
                 try {
-                    notificationService.notifyIncidentResolved(completed.getIncident());
+                    // Rapport COMPLET au superuser : détection + décision IA + trace Camunda/kubectl + résolution.
+                    List<WorkflowLogDTO> resolvedLogs = Collections.emptyList();
+                    try {
+                        resolvedLogs = workflowService.getWorkflowLogsForIncident(completed.getIncident().getId());
+                    } catch (Exception logEx) {
+                        logger.warn("Could not load workflow logs for resolved email: {}", logEx.getMessage());
+                    }
+                    notificationService.notifyIncidentResolvedWithTrace(completed.getIncident(), resolvedLogs);
                 } catch (Exception ex) {
                     logger.warn("Resolved notification failed for incident #{}: {}",
                             completed.getIncident().getId(), ex.getMessage());
@@ -788,6 +803,33 @@ public class CamundaJobWorkerLifecycle {
     private String stringValueOrDefault(Object value, String fallback) {
         String resolved = stringValue(value);
         return resolved == null || resolved.isBlank() ? fallback : resolved;
+    }
+
+    /**
+     * Demande au watchdog hôte de rallumer la VM d'un nœud (vmrun), via son API HTTP.
+     * C'est l'étape qui rend le rallumage worker DÉPENDANT de Camunda : c'est Camunda (ce worker de job)
+     * qui déclenche le power-on. Si Camunda est down, cet appel n'a jamais lieu -> nœud non rallumé.
+     * Retourne une chaîne lisible pour la trace (OK / échec).
+     */
+    private String triggerHostWatchdogRestart(String node) {
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5)).build();
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(hostWatchdogUrl + "/restart/" + node))
+                    .timeout(Duration.ofSeconds(12))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.noBody())
+                    .build();
+            java.net.http.HttpResponse<String> resp =
+                    client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+            boolean ok = resp.statusCode() >= 200 && resp.statusCode() < 300;
+            logger.info("Watchdog hôte /restart/{} -> HTTP {} ({})", node, resp.statusCode(), resp.body());
+            return ok ? "déclenché (HTTP " + resp.statusCode() + ")"
+                      : "ÉCHEC (HTTP " + resp.statusCode() + ")";
+        } catch (Exception e) {
+            logger.warn("Appel watchdog hôte /restart/{} échoué: {}", node, e.getMessage());
+            return "ÉCHEC (watchdog injoignable : " + e.getMessage() + ")";
+        }
     }
 
     /** Returns the kubectl-equivalent command string, or {@code null} for non-K8s actions (e.g. INVESTIGATION). */

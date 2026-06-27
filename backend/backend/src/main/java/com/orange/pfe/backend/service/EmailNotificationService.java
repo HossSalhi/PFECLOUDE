@@ -1,12 +1,18 @@
 package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.dto.WorkflowLogDTO;
+import com.orange.pfe.backend.model.action.IncidentAction;
 import com.orange.pfe.backend.model.core.Incident;
+import com.orange.pfe.backend.model.core.IncidentHistory;
 import com.orange.pfe.backend.model.enums.IncidentSeverity;
 import com.orange.pfe.backend.model.human.HumanTask;
 import com.orange.pfe.backend.model.user.AppUser;
 import com.orange.pfe.backend.model.user.UserRole;
 import com.orange.pfe.backend.repository.AppUserRepository;
+import com.orange.pfe.backend.repository.IncidentActionRepository;
+import com.orange.pfe.backend.repository.IncidentHistoryRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
@@ -38,6 +44,8 @@ public class EmailNotificationService {
     private JavaMailSender mailSender;
 
     private final AppUserRepository userRepository;
+    private final IncidentActionRepository actionRepository;
+    private final IncidentHistoryRepository historyRepository;
 
     @Value("${notification.email.to:}")
     private String fallbackEmailTo;
@@ -51,8 +59,12 @@ public class EmailNotificationService {
     @Value("${notification.email.dashboard-url:http://192.168.148.153:30880}")
     private String dashboardUrl;
 
-    public EmailNotificationService(AppUserRepository userRepository) {
+    public EmailNotificationService(AppUserRepository userRepository,
+                                    IncidentActionRepository actionRepository,
+                                    IncidentHistoryRepository historyRepository) {
         this.userRepository = userRepository;
+        this.actionRepository = actionRepository;
+        this.historyRepository = historyRepository;
     }
 
     // ── Incidents ─────────────────────────────────────────────────────────────
@@ -157,6 +169,46 @@ public class EmailNotificationService {
         sendToOperators(subject, body);
     }
 
+    /**
+     * Rapport COMPLET de résolution automatique : ce que HELIOS a détecté, ce que l'IA a décidé,
+     * ce que Camunda a exécuté précisément (avec la commande kubectl, dans la chronologie), et la
+     * confirmation de résolution vérifiée. Envoyé aux opérateurs (dont le SUPER_ADMIN) à la clôture.
+     */
+    @Async
+    public void sendIncidentResolvedWithTrace(Incident incident, List<WorkflowLogDTO> workflowLogs) {
+        if (!shouldNotify(incident.getSeverity())) return;
+        String subject = String.format("[HELIOS] ✅ Incident résolu (rapport complet) — #%d | %s",
+                incident.getId(), incident.getApp() != null ? incident.getApp() : incident.getTitle());
+
+        String incidentDetails = buildIncidentDetailsTable(incident);
+        String aiSection       = buildAIAnalysisSection(incident);
+        String camundaSection  = buildCamundaTraceSection(workflowLogs);
+        String actionsSection  = buildActionsSection(incident.getId());
+        String historySection  = buildHistorySection(incident.getId());
+        String resolvedAt      = java.time.LocalDateTime.now().format(FMT);
+        String resolutionSection = String.format("""
+            <div style="margin-top:20px;padding:14px;background:#d4edda;border-left:4px solid #28a745;border-radius:4px;">
+              <p style="margin:0;color:#155724;"><strong>✅ Incident résolu automatiquement par HELIOS</strong> le %s,
+              sans intervention humaine. Le rétablissement a été <strong>vérifié en boucle fermée</strong>
+              (pods sains + l'IA ne détecte plus l'anomalie) avant la clôture.</p>
+            </div>""", escapeHtml(resolvedAt));
+        String linkSection = String.format("""
+            <div style="margin:24px 0;text-align:center;">
+              <a href="%s/incidents/%d" style="background:#28a745;color:white;padding:10px 28px;border-radius:4px;text-decoration:none;font-weight:bold;">
+                Voir le rapport complet
+              </a>
+            </div>""", dashboardUrl, incident.getId());
+
+        String content = """
+            <p style="color:#555;">HELIOS a <strong>détecté, analysé et résolu</strong> cet incident de bout en bout.
+            Voici le rapport complet : ce qui a été détecté, la décision de l'IA, ce que Camunda a exécuté précisément,
+            les actions de remédiation et l'historique.</p>
+            """ + incidentDetails + aiSection + camundaSection + actionsSection + historySection + resolutionSection + linkSection;
+
+        String body = buildSystemHtml("✅ Incident résolu — Rapport complet", "#28a745", content);
+        sendToOperators(subject, body);
+    }
+
     @Async
     public void sendRemediationFailed(Incident incident, String reason) {
         String subject = String.format("[HELIOS] Remédiation échouée — Incident #%d", incident.getId());
@@ -197,6 +249,7 @@ public class EmailNotificationService {
 
     private String buildIncidentDetailsTable(Incident incident) {
         String createdAt = incident.getCreatedAt() != null ? incident.getCreatedAt().format(FMT) : "N/A";
+        String updatedAt = incident.getUpdatedAt() != null ? incident.getUpdatedAt().format(FMT) : "N/A";
         return String.format("""
             <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Résumé de l'incident</h3>
             <table style="width:100%%;border-collapse:collapse;">
@@ -209,13 +262,14 @@ public class EmailNotificationService {
               <tr><td style="padding:7px 10px;font-weight:bold;">Application</td><td style="padding:7px 10px;">%s</td></tr>
               <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;">Namespace</td><td style="padding:7px 10px;">%s</td></tr>
               <tr><td style="padding:7px 10px;font-weight:bold;">Détecté le</td><td style="padding:7px 10px;">%s</td></tr>
+              <tr style="background:#f8f9fa;"><td style="padding:7px 10px;font-weight:bold;">Mis à jour le</td><td style="padding:7px 10px;">%s</td></tr>
             </table>""",
                 incident.getId(), escapeHtml(incident.getTitle()),
                 incident.getIncidentType() != null ? escapeHtml(incident.getIncidentType()) : "N/A",
                 severityColor(incident.getSeverity()), incident.getSeverity() != null ? incident.getSeverity().name() : "N/A",
                 incident.getApp() != null ? escapeHtml(incident.getApp()) : "N/A",
                 incident.getNamespace() != null ? escapeHtml(incident.getNamespace()) : "N/A",
-                createdAt
+                createdAt, updatedAt
         );
     }
 
@@ -258,6 +312,103 @@ public class EmailNotificationService {
               </tr></thead>
               <tbody>%s</tbody>
             </table>""", logs.size(), rows.toString());
+    }
+
+    /** Tableau "Actions de Remédiation" (Type / Statut / Mode / Date + Résultat) — comme la page détail. */
+    private String buildActionsSection(Long incidentId) {
+        java.util.List<IncidentAction> actions;
+        try {
+            actions = actionRepository.findByIncidentId(incidentId,
+                    PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "createdAt"))).getContent();
+        } catch (Exception e) {
+            return "";
+        }
+        if (actions == null || actions.isEmpty()) return "";
+        StringBuilder rows = new StringBuilder();
+        int i = 0;
+        for (IncidentAction a : actions) {
+            String bg = (i++ % 2 == 0) ? "" : "background:#f8f9fa;";
+            String date = a.getCreatedAt() != null ? a.getCreatedAt().format(FMT) : "—";
+            String result = a.getExecutorResult() != null && !a.getExecutorResult().isBlank()
+                    ? a.getExecutorResult()
+                    : (a.getDescription() != null ? a.getDescription() : "—");
+            rows.append(String.format("""
+                <tr style="%s">
+                  <td style="padding:7px 10px;font-size:12px;"><code style="background:#e9ecef;padding:2px 6px;border-radius:3px;">%s</code></td>
+                  <td style="padding:7px 10px;font-size:12px;"><span style="color:%s;font-weight:bold;">%s</span></td>
+                  <td style="padding:7px 10px;font-size:12px;">%s</td>
+                  <td style="padding:7px 10px;font-size:12px;color:#888;white-space:nowrap;">%s</td>
+                </tr>
+                <tr style="%s"><td colspan="4" style="padding:0 10px 8px;font-size:12px;color:#555;"><strong>Résultat :</strong> %s</td></tr>""",
+                    bg, escapeHtml(a.getType() != null ? a.getType().name() : "N/A"),
+                    actionStatusColor(a.getStatus()), escapeHtml(a.getStatus() != null ? a.getStatus().name() : "N/A"),
+                    escapeHtml(a.getAutomationMode() != null ? a.getAutomationMode().name() : "N/A"),
+                    escapeHtml(date), bg, escapeHtml(result)));
+        }
+        return String.format("""
+            <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Actions de Remédiation (%d)</h3>
+            <table style="width:100%%;border-collapse:collapse;border:1px solid #dee2e6;">
+              <thead><tr style="background:#343a40;color:white;">
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Type</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Statut</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Mode</th>
+                <th style="padding:8px 10px;text-align:left;font-size:12px;">Date</th>
+              </tr></thead>
+              <tbody>%s</tbody>
+            </table>""", actions.size(), rows.toString());
+    }
+
+    /** "Historique & Timeline" (transitions de statut) — comme la page détail. */
+    private String buildHistorySection(Long incidentId) {
+        java.util.List<IncidentHistory> hist;
+        try {
+            hist = new java.util.ArrayList<>(historyRepository.findByIncidentId(incidentId));
+        } catch (Exception e) {
+            return "";
+        }
+        if (hist.isEmpty()) return "";
+        hist.sort(java.util.Comparator.comparing(h ->
+                h.getCreatedAt() != null ? h.getCreatedAt() : java.time.LocalDateTime.MIN));
+        StringBuilder rows = new StringBuilder();
+        int i = 0;
+        for (IncidentHistory h : hist) {
+            String bg = (i++ % 2 == 0) ? "" : "background:#f8f9fa;";
+            String date = h.getCreatedAt() != null ? h.getCreatedAt().format(FMT) : "—";
+            String st = h.getStatus() != null ? h.getStatus().name() : "";
+            rows.append(String.format("""
+                <tr style="%s">
+                  <td style="padding:6px 10px;font-size:11px;color:#888;white-space:nowrap;width:150px;vertical-align:top;">%s</td>
+                  <td style="padding:6px 10px;font-size:12px;"><span style="color:%s;font-weight:bold;">%s</span><br><span style="color:#555;">%s</span></td>
+                </tr>""",
+                    bg, escapeHtml(date), statusColor(h.getStatus()), escapeHtml(st),
+                    escapeHtml(h.getComment() != null ? h.getComment() : "")));
+        }
+        return String.format("""
+            <h3 style="color:#343a40;font-size:15px;margin:20px 0 8px;">Historique &amp; Timeline (%d événement(s))</h3>
+            <table style="width:100%%;border-collapse:collapse;border:1px solid #dee2e6;"><tbody>%s</tbody></table>""",
+                hist.size(), rows.toString());
+    }
+
+    private String actionStatusColor(Object s) {
+        if (s == null) return "#6c757d";
+        return switch (s.toString()) {
+            case "COMPLETED"   -> "#28a745";
+            case "FAILED"      -> "#dc3545";
+            case "IN_PROGRESS" -> "#17a2b8";
+            case "PENDING"     -> "#FF7900";
+            default            -> "#6c757d";
+        };
+    }
+
+    private String statusColor(Object s) {
+        if (s == null) return "#6c757d";
+        return switch (s.toString()) {
+            case "RESOLVED", "CLOSED"   -> "#28a745";
+            case "NEW", "OPEN"          -> "#dc3545";
+            case "IN_PROGRESS"          -> "#FF7900";
+            case "RESOLUTION_FAILED"    -> "#dc3545";
+            default                     -> "#6c757d";
+        };
     }
 
     @Async

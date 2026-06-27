@@ -99,6 +99,17 @@ public class NotificationService {
         emailService.ifPresent(e -> e.sendIncidentResolved(incident));
     }
 
+    /** Résolution avec rapport COMPLET (détection + décision IA + trace Camunda/kubectl). */
+    public void notifyIncidentResolvedWithTrace(Incident incident, List<WorkflowLogDTO> workflowLogs) {
+        sseEventService.broadcast("incident_resolved", Map.of(
+                "id",     incident.getId(),
+                "title",  incident.getTitle(),
+                "status", "RESOLVED"
+        ));
+        sendWebhook(buildTypedWebhookPayload(incident, "✅ Incident résolu"));
+        emailService.ifPresent(e -> e.sendIncidentResolvedWithTrace(incident, workflowLogs));
+    }
+
     public void notifyRemediationFailed(Incident incident, String reason) {
         sseEventService.broadcast("remediation_failed", Map.of(
                 "id",     incident.getId(),

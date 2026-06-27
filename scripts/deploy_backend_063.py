@@ -6,7 +6,7 @@ import paramiko, os
 SSH_USER = "kube"
 KEY_PATH = "C:/Users/houss/.ssh/id_ed25519"
 SUDO_PASS = "kube"
-VER = "0.2.111"
+VER = "0.2.114"
 
 NODES = [
     ("192.168.148.153", "master"),

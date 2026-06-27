@@ -111,7 +111,13 @@ spec:
           # 0.2.111 = coherence severite : la description enrichie par l'IA affiche la severite AUTORITAIRE
           #          de l'incident (severityFor: CRITICAL pour une panne noeud), plus la severite IA
           #          degradee -> le detail affiche CRITICAL comme le tableau (fini HIGH vs CRITICAL).
-          image: pfe-backend:0.2.111
+          # 0.2.112 = email RESOLUTION detaille au superuser : a la cloture Camunda, HELIOS envoie un
+          #          rapport complet (detection + decision IA + trace Camunda/kubectl + verif resolution)
+          #          via sendIncidentResolvedWithTrace (reutilise les sections du rapport d'echec).
+          # 0.2.113 = email RESOLUTION = replique complete de la page detail (design Orange) : ajoute la
+          #          table "Actions de Remediation" (Type/Statut/Mode/Date/Resultat) + "Historique &
+          #          Timeline" (transitions de statut) + "Mis a jour le". Repos action/history injectes.
+          image: pfe-backend:0.2.114
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
