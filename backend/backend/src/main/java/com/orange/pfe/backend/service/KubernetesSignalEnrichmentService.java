@@ -1002,6 +1002,14 @@ public class KubernetesSignalEnrichmentService {
         }
 
         Map<String, String> labels = node.getMetadata().getLabels();
+        // HA control-plane : worker1/worker2 sont devenus control-plane -> l'absence du role
+        // control-plane ne suffit plus a les distinguer (les 3 noeuds sont control-plane). On
+        // identifie les VRAIS workers (ceux qui hebergent les apps) par le label custom
+        // node-type=worker (le master ne l'a pas). Sans ca, la coupure d'un worker n'active plus
+        // la grace d'outage -> faux incidents applicatifs collateraux (ex. HIGH_ERROR_RATE).
+        if ("worker".equalsIgnoreCase(labels.get("node-type"))) {
+            return true;
+        }
         return !labels.containsKey("node-role.kubernetes.io/control-plane")
                 && !labels.containsKey("node-role.kubernetes.io/master");
     }
