@@ -25,7 +25,12 @@ def root(c,chain,t=80):
     i,o,e=c.exec_command("sudo -S -p '' bash -c "+shlex.quote(chain),timeout=t); i.write("kube\n"); i.flush()
     return (o.read().decode(errors="replace")+e.read().decode(errors="replace")).strip()
 def vmrun(*a,t=120):
-    return subprocess.run([VMRUN,*a],capture_output=True,text=True,timeout=t)
+    # ne JAMAIS crasher sur un timeout vmrun (stop soft peut pendre) -> on retourne None
+    # et la logique appelante bascule sur stop hard via is_running().
+    try:
+        return subprocess.run([VMRUN,*a],capture_output=True,text=True,timeout=t)
+    except Exception:
+        return None
 def is_running():
     return VMX.lower() in vmrun("list").stdout.lower()
 

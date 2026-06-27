@@ -1,0 +1,17 @@
+# Worker-down HA : sous pression RAM (un worker tombe -> tout se reporte sur le worker
+# survivant), le kubelet doit evincer les apps de DEMO en PREMIER pour preserver les apps
+# ESSENTIELLES (backend / postgres / frontend / coredns) -> HELIOS reste en ligne et peut
+# auto-rallumer le worker tombe via Camunda.
+#
+# Appliquer :  kubectl apply -f helios-demo-priorityclass.yaml
+# Puis taguer chaque demo :  kubectl patch deploy helios-<x> -n pfe --type=merge \
+#   -p '{"spec":{"template":{"spec":{"priorityClassName":"helios-demo-low"}}}}'
+# (les essentiels restent en priorite par defaut = 0, donc > -10).
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: helios-demo-low
+value: -10
+globalDefault: false
+preemptionPolicy: Never
+description: demo apps low priority evicted first under memory pressure (worker-down HA)
