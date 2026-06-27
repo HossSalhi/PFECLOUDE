@@ -1,0 +1,10 @@
+node_modules
+.angular
+.git
+.gitignore
+e2e
+src
+*.md
+build_output.txt
+Dockerfile
+Dockerfile.prebuilt

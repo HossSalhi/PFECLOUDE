@@ -65,8 +65,8 @@
         </a>
 
         <a routerLink="/tasks" class="nav-item" [class.active]="isActive('/tasks')">
-          <i class="fas fa-user-check nav-icon"></i>
-          <span class="nav-label">Tâches Humaines</span>
+          <i class="fas fa-circle-xmark nav-icon"></i>
+          <span class="nav-label">Remédiations Échouées</span>
           <span *ngIf="taskBadge > 0" class="nav-badge">{{ taskBadge }}</span>
         </a>
       </ng-container>

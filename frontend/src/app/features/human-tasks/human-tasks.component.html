@@ -4,189 +4,83 @@
     <div class="breadcrumb">
       <i class="fas fa-house"></i>
       <span class="bc-sep">/</span>
-      <span class="bc-current">Tâches Humaines</span>
+      <span class="bc-current">Remédiations Échouées</span>
     </div>
-    <h1>Tâches <span>Humaines</span></h1>
-    <div class="page-subtitle">Incidents nécessitant une intervention humaine ou dont la remédiation a échoué</div>
+    <h1>Remédiations <span>Échouées</span></h1>
+    <div class="page-subtitle">Incidents que HELIOS n'a pas pu réparer automatiquement — à reprendre manuellement (hors HELIOS)</div>
   </div>
   <div class="page-actions">
-    <button class="btn btn-ghost btn-sm" (click)="loadTasks()" [disabled]="loading">
+    <button class="btn btn-ghost btn-sm" (click)="load()" [disabled]="loading">
       <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i> Actualiser
     </button>
-  </div>
-</div>
-
-<!-- ── Alerts ── -->
-<div *ngIf="successMsg" class="alert-banner success mb-20">
-  <i class="fas fa-circle-check alert-icon"></i>
-  <div class="alert-text">{{ successMsg }}</div>
-</div>
-<div *ngIf="errorMsg" class="alert-banner danger mb-20">
-  <i class="fas fa-circle-xmark alert-icon"></i>
-  <div class="alert-text">{{ errorMsg }}</div>
-</div>
-
-<!-- ── Tabs ── -->
-<div class="tab-bar">
-  <div class="tab-item" [class.active]="activeTab === 'pending'" (click)="activeTab = 'pending'">
-    <i class="fas fa-hourglass-half"></i>
-    En Attente
-    <span class="tab-count" *ngIf="pendingTasks.length > 0">{{ pendingTasks.length }}</span>
-  </div>
-  <div class="tab-item" [class.active]="activeTab === 'all'" (click)="activeTab = 'all'">
-    <i class="fas fa-list"></i>
-    Toutes les Tâches
-    <span class="tab-count">{{ allTasks.length }}</span>
   </div>
 </div>
 
 <!-- ── Loading ── -->
 <div *ngIf="loading" style="padding:60px;text-align:center;">
   <div class="spinner-orange"></div>
-  <div class="text-muted" style="margin-top:14px;">Chargement des tâches…</div>
+  <div class="text-muted" style="margin-top:14px;">Chargement…</div>
 </div>
 
-<!-- ── Pending Tasks ── -->
-<div *ngIf="!loading && activeTab === 'pending'">
-
-  <div *ngIf="pendingTasks.length === 0" class="card">
-    <div class="empty-state">
-      <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
-      <div class="empty-title">Aucune tâche en attente</div>
-      <div class="empty-text">Toutes les tâches ont été traitées. Les nouvelles tâches apparaîtront ici.</div>
-    </div>
-  </div>
-
-  <div *ngIf="pendingTasks.length > 0" class="card">
-    <div class="card-header">
-      <div class="card-title">
-        <div class="card-title-icon"><i class="fas fa-user-check"></i></div>
-        Tâches en Attente d'Intervention
-      </div>
-      <span class="badge-status warning">{{ pendingTasks.length }} tâche(s)</span>
-    </div>
-
-    <div class="data-table-wrapper">
-      <table class="orange-table">
-        <thead>
-          <tr>
-            <th>Incident</th>
-            <th>Tâche</th>
-            <th>Statut incident</th>
-            <th>Créée le</th>
-            <th style="text-align:right;">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let task of pendingTasks"
-              [style.background]="task.incidentStatus === 'RESOLUTION_FAILED' ? 'rgba(220,53,69,0.04)' : ''">
-            <!-- Incident column -->
-            <td>
-              <div style="display:flex;align-items:center;gap:10px;">
-                <div [style]="task.incidentStatus === 'RESOLUTION_FAILED'
-                      ? 'width:32px;height:32px;background:#fde8ea;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#dc3545;font-size:14px;flex-shrink:0;'
-                      : 'width:32px;height:32px;background:var(--color-warning-bg);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--color-warning);font-size:14px;flex-shrink:0;'">
-                  <i [class]="task.incidentStatus === 'RESOLUTION_FAILED' ? 'fas fa-circle-xmark' : 'fas fa-user-clock'"></i>
-                </div>
-                <div>
-                  <span style="font-weight:600;color:var(--gray-900);">
-                    #{{ task.incidentId || '—' }}
-                  </span>
-                  <div *ngIf="task.incidentTitle" style="font-size:12px;color:var(--gray-500);margin-top:2px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    {{ task.incidentTitle }}
-                  </div>
-                </div>
-              </div>
-            </td>
-            <!-- Task name -->
-            <td style="font-size:13px;color:var(--gray-600);">{{ task.name }}</td>
-            <!-- Incident status badge -->
-            <td>
-              <span *ngIf="task.incidentStatus === 'RESOLUTION_FAILED'"
-                    class="badge-status danger" style="font-size:11px;">
-                RESOLUTION_FAILED
-              </span>
-              <span *ngIf="task.incidentStatus !== 'RESOLUTION_FAILED'"
-                    class="badge-status pending" style="font-size:11px;">
-                {{ task.incidentStatus || task.status }}
-              </span>
-            </td>
-            <td class="col-meta">{{ task.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
-            <!-- Actions column -->
-            <td>
-              <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <a *ngIf="task.incidentId" [routerLink]="['/incidents', task.incidentId]"
-                   class="btn btn-ghost btn-sm" style="text-decoration:none;">
-                  <i class="fas fa-file-lines"></i>
-                  Voir le rapport
-                </a>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+<!-- ── Empty (tout est résolu automatiquement) ── -->
+<div *ngIf="!loading && failedIncidents.length === 0" class="card">
+  <div class="empty-state">
+    <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
+    <div class="empty-title">Aucune remédiation échouée</div>
+    <div class="empty-text">HELIOS a réparé tous les incidents automatiquement. Ceux qu'il ne parvient pas à résoudre apparaîtront ici pour intervention manuelle.</div>
   </div>
 </div>
 
-<!-- ── All Tasks ── -->
-<div *ngIf="!loading && activeTab === 'all'">
-
-  <div *ngIf="allTasks.length === 0" class="card">
-    <div class="empty-state">
-      <div class="empty-icon"><i class="fas fa-clipboard-list"></i></div>
-      <div class="empty-title">Aucune tâche</div>
-      <div class="empty-text">Aucune tâche humaine n'a encore été créée.</div>
+<!-- ── Liste des incidents RESOLUTION_FAILED ── -->
+<div *ngIf="!loading && failedIncidents.length > 0" class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <div class="card-title-icon"><i class="fas fa-circle-xmark"></i></div>
+      Incidents à reprendre manuellement
     </div>
+    <span class="badge-status danger">{{ failedIncidents.length }} incident(s)</span>
   </div>
 
-  <div *ngIf="allTasks.length > 0" class="card">
-    <div class="card-header">
-      <div class="card-title">
-        <div class="card-title-icon"><i class="fas fa-list"></i></div>
-        Toutes les Tâches
-      </div>
-      <span class="text-muted" style="font-size:13px;">{{ allTasks.length }} tâche(s)</span>
-    </div>
-
-    <div class="data-table-wrapper">
-      <table class="orange-table">
-        <thead>
-          <tr>
-            <th>Incident</th>
-            <th>Tâche</th>
-            <th>Statut incident</th>
-            <th>Décision</th>
-            <th>Créée le</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let task of allTasks">
-            <td>
-              <span style="font-weight:600;">#{{ task.incidentId || '—' }}</span>
-              <div *ngIf="task.incidentTitle" style="font-size:12px;color:var(--gray-500);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ task.incidentTitle }}</div>
-            </td>
-            <td style="font-size:13px;color:var(--gray-600);">{{ task.name }}</td>
-            <td>
-              <span class="badge-status"
-                    [ngClass]="task.incidentStatus === 'RESOLUTION_FAILED' ? 'danger' : getStatusClass(task.incidentStatus || '')">
-                {{ task.incidentStatus || '—' }}
-              </span>
-            </td>
-            <td>
-              <span class="badge-status" [ngClass]="getStatusClass(task.status)">{{ task.status }}</span>
-            </td>
-            <td class="col-meta">{{ task.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
-            <td>
-              <a *ngIf="task.incidentId" [routerLink]="['/incidents', task.incidentId]"
-                 class="btn btn-ghost btn-sm" style="text-decoration:none;">
-                <i class="fas fa-arrow-right"></i>
+  <div class="data-table-wrapper">
+    <table class="orange-table">
+      <thead>
+        <tr>
+          <th>Incident</th>
+          <th>Application</th>
+          <th>Type</th>
+          <th>Sévérité</th>
+          <th>Détecté le</th>
+          <th style="text-align:right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let inc of failedIncidents; trackBy: trackById" style="background:rgba(220,53,69,0.04);">
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:32px;height:32px;background:#fde8ea;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#dc3545;font-size:14px;flex-shrink:0;">
+                <i class="fas fa-circle-xmark"></i>
+              </div>
+              <div>
+                <span style="font-weight:600;color:var(--gray-900);">#{{ inc.id }}</span>
+                <div *ngIf="inc.title" style="font-size:12px;color:var(--gray-500);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  {{ inc.title }}
+                </div>
+              </div>
+            </div>
+          </td>
+          <td style="font-size:13px;color:var(--gray-700);">{{ inc.app || '—' }}</td>
+          <td style="font-size:12px;color:var(--gray-600);">{{ inc.incidentType || '—' }}</td>
+          <td><span class="badge-status" [ngClass]="sevClass(inc.severity)">{{ inc.severity }}</span></td>
+          <td class="col-meta">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
+          <td>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+              <a [routerLink]="['/incidents', inc.id]" class="btn btn-ghost btn-sm" style="text-decoration:none;">
+                <i class="fas fa-file-lines"></i> Voir le rapport
               </a>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>

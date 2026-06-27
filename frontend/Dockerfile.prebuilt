@@ -1,0 +1,19 @@
+# Prebuilt image : la dist Angular est deja construite localement (npm run build)
+# -> on ne refait que l'etage nginx (rapide, pas de npm dans Docker).
+FROM nginx:1.27-alpine
+
+# nginx non-root sur le port 8080 (identique au Dockerfile multi-stage)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && mkdir -p /var/cache/nginx/client_temp /var/run \
+    && chown -R appuser:appgroup /var/cache/nginx /var/run /usr/share/nginx/html \
+    && sed -i 's|user  nginx;||g' /etc/nginx/nginx.conf \
+    && sed -i 's|/var/run/nginx.pid|/tmp/nginx.pid|g' /etc/nginx/nginx.conf
+
+COPY dist/frontend /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+USER appuser
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/ > /dev/null || exit 1
+CMD ["nginx", "-g", "daemon off;"]

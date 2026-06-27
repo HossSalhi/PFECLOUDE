@@ -1,94 +1,44 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { ApiService, Task } from '../../core/services/api.service';
+import { ApiService, Incident } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
 
+/**
+ * "Remédiations Échouées" — dans le modèle 100% autonome, l'humain n'intervient QUE
+ * sur les incidents que HELIOS n'a pas pu réparer (statut RESOLUTION_FAILED). Cette
+ * page est le bureau de l'opérateur : la liste de ce qu'il doit reprendre à la main
+ * (hors HELIOS). Plus de tâches d'approbation (supprimées avec le mode autonome).
+ */
 @Component({
   selector: 'app-human-tasks',
   templateUrl: './human-tasks.component.html'
 })
 export class HumanTasksComponent implements OnInit, OnDestroy {
-  pendingTasks: Task[] = [];
-  allTasks: Task[] = [];
+  failedIncidents: Incident[] = [];
   loading = true;
-  processingId: string | null = null;
-  activeTab: 'pending' | 'all' = 'pending';
-  successMsg = '';
-  errorMsg = '';
   private subs: Subscription[] = [];
 
   constructor(private api: ApiService, private sse: SseService) {}
 
   ngOnInit(): void {
-    this.loadTasks();
-    // Real-time: a new human task appears when an incident is remediated.
-    this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.loadTasks()));
-    this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.loadTasks()));
+    this.load();
+    // Temps réel : un incident peut basculer en RESOLUTION_FAILED après l'échec de la remédiation auto.
+    this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.load()));
+    this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.load()));
   }
 
-  loadTasks(): void {
+  load(): void {
     this.loading = true;
     this.subs.push(
-      this.api.getPendingTasks().subscribe({
-        next: tasks => {
-          this.pendingTasks = (tasks || []).filter(t =>
-            t.incidentStatus !== 'RESOLVED' && t.incidentStatus !== 'CLOSED'
-          );
-          this.loading = false;
-        },
+      this.api.getIncidents(0, 100, 'RESOLUTION_FAILED').subscribe({
+        next: res => { this.failedIncidents = res?.content || []; this.loading = false; },
         error: () => { this.loading = false; }
-      }),
-      this.api.getTasks().subscribe({
-        next: tasks => { this.allTasks = tasks || []; },
-        error: () => {}
       })
     );
   }
 
-  approve(task: Task): void {
-    this.processingId = task.id;
-    this.clearMessages();
-    this.api.approveTask(task.id).subscribe({
-      next: () => {
-        this.processingId = null;
-        this.successMsg = `Task "${task.name}" approved successfully.`;
-        this.loadTasks();
-        setTimeout(() => this.successMsg = '', 4000);
-      },
-      error: (err) => {
-        this.processingId = null;
-        this.errorMsg = `Failed to approve task: ${err?.message || 'Unknown error'}`;
-        setTimeout(() => this.errorMsg = '', 4000);
-      }
-    });
-  }
-
-  reject(task: Task): void {
-    this.processingId = task.id;
-    this.clearMessages();
-    this.api.rejectTask(task.id).subscribe({
-      next: () => {
-        this.processingId = null;
-        this.successMsg = `Task "${task.name}" rejected.`;
-        this.loadTasks();
-        setTimeout(() => this.successMsg = '', 4000);
-      },
-      error: (err) => {
-        this.processingId = null;
-        this.errorMsg = `Failed to reject task: ${err?.message || 'Unknown error'}`;
-        setTimeout(() => this.errorMsg = '', 4000);
-      }
-    });
-  }
-
-  clearMessages(): void {
-    this.successMsg = '';
-    this.errorMsg = '';
-  }
-
-  trackByTask(_: number, task: Task): string { return task.id; }
-
-  getStatusClass(s: string): string { return s?.toLowerCase() || ''; }
+  trackById(_: number, inc: Incident): number { return inc.id; }
+  sevClass(s: string): string { return (s || '').toLowerCase(); }
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());
