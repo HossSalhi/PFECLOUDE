@@ -115,6 +115,15 @@ public class InfrastructureHealthScheduler {
             log.debug("Incident already open for {}/{}, skipping", status.namespace(), status.app());
             return false;
         }
+        // Anti-doublon (flapping) : si un incident pour CE composant a deja ete cree il y a moins
+        // de 5 min (meme deja resolu), on n'en recree pas -> evite la rafale quand une VM infra
+        // clignote (down/up/down) sur plusieurs cycles de detection.
+        if (incidentRepository.existsBySourceAndNamespaceAndAppAndCreatedAtAfter(
+                IncidentSource.AI, status.namespace(), status.app(),
+                java.time.LocalDateTime.now().minusMinutes(5))) {
+            log.debug("Incident recent (<5min) pour {}/{} — skip (anti-doublon)", status.namespace(), status.app());
+            return false;
+        }
 
         Incident incident = new Incident();
         incident.setSource(IncidentSource.AI);
@@ -271,11 +280,11 @@ public class InfrastructureHealthScheduler {
                 incident.setExplanation(aiExplanation);
             }
 
-            // Override the type only if AI returned something more specific.
-            if (prediction.getIncidentType() != null && !prediction.getIncidentType().isBlank()
-                    && !"unknown".equalsIgnoreCase(prediction.getIncidentType())) {
-                incident.setIncidentType(prediction.getIncidentType());
-            }
+            // NE PAS ecraser le type : le health-check infra est la SOURCE DE VERITE
+            // (VM_DOWN / NODE_*_PRESSURE / DNS_FAILURE, deja pose par incidentTypeFor). Le
+            // classifieur IA tourne sur les signaux CLUSTER (normaux quand seule une VM infra
+            // est down) -> il renverrait un POD_PENDING/NODE_NOT_READY ERRONE (risque 0.00).
+            // L'IA ne sert qu'a l'explication + la reco (dans la description ci-dessous).
 
             // Rich description with the AI metadata, same format the AIOps
             // pipeline uses so the UI shows action / executionMode / confidence.
