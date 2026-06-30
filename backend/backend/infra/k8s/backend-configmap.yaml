@@ -31,9 +31,10 @@ data:
   REMEDIATION_COOLDOWN_MINUTES: "2"
   REMEDIATION_VERIFY_DELAY_SECONDS: "25"
   REMEDIATION_VERIFICATION_WINDOW_MINUTES: "1"
-  # 7x15s = 105s max per verify (was 9x18=162s). Each verify Thread.sleep-blocks a worker thread;
-  # shorter loop = threads freed sooner + faster resolution. Demo faults stabilise in ~30-60s.
-  REMEDIATION_VERIFICATION_RETRY_ATTEMPTS: "7"
+  # 12x15s = 180s max per verify. Augmente de 7 a 12 : sous pression RAM (worker tombe, ou
+  # eviction des demos basse-priorite), une app peut mettre >2 min a redevenir schedulable ;
+  # 7 essais (~105s) la marquaient en FAUX RESOLUTION_FAILED alors qu'elle recuperait juste apres.
+  REMEDIATION_VERIFICATION_RETRY_ATTEMPTS: "12"
   REMEDIATION_VERIFICATION_RETRY_DELAY_SECONDS: "15"
   # Wildcard = toutes les apps pfe sont eligibles (demo) ; lister explicitement en prod
   REMEDIATION_ALLOWLISTED_APPS: "*"
