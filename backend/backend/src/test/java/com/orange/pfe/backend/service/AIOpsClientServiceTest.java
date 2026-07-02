@@ -20,7 +20,7 @@ class AIOpsClientServiceTest {
         factory.setConnectTimeout(1000);
         factory.setReadTimeout(1000);
         RestClient.Builder builder = RestClient.builder().requestFactory(factory);
-        service = new AIOpsClientService(builder, "http://localhost:9999");
+        service = new AIOpsClientService(builder, "http://localhost:9999", "", false);
         ReflectionTestUtils.setField(service, "circuitBreakerThreshold", 3);
         ReflectionTestUtils.setField(service, "circuitBreakerOpenMs", 60000L);
     }
