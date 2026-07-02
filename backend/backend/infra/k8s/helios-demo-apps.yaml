@@ -15,6 +15,10 @@ metadata: { name: helios-crashloop, namespace: pfe, labels: { app: helios-crashl
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-crashloop } }
   template:
     metadata: { labels: { app: helios-crashloop } }
@@ -30,6 +34,10 @@ metadata: { name: helios-imagepull, namespace: pfe, labels: { app: helios-imagep
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-imagepull } }
   template:
     metadata: { labels: { app: helios-imagepull } }
@@ -45,6 +53,10 @@ metadata: { name: helios-oom, namespace: pfe, labels: { app: helios-oom } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-oom } }
   template:
     metadata: { labels: { app: helios-oom } }
@@ -60,6 +72,10 @@ metadata: { name: helios-cpu, namespace: pfe, labels: { app: helios-cpu } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-cpu } }
   template:
     metadata: { labels: { app: helios-cpu } }
@@ -75,6 +91,10 @@ metadata: { name: helios-service, namespace: pfe, labels: { app: helios-service 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-service } }
   template:
     metadata: { labels: { app: helios-service } }
@@ -90,6 +110,10 @@ metadata: { name: helios-network, namespace: pfe, labels: { app: helios-network 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-network } }
   template:
     metadata: { labels: { app: helios-network } }
@@ -105,6 +129,10 @@ metadata: { name: helios-dns, namespace: pfe, labels: { app: helios-dns } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-dns } }
   template:
     metadata: { labels: { app: helios-dns } }
@@ -120,6 +148,10 @@ metadata: { name: helios-disk, namespace: pfe, labels: { app: helios-disk } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-disk } }
   template:
     metadata: { labels: { app: helios-disk } }
@@ -142,6 +174,10 @@ metadata: { name: helios-http5xx, namespace: pfe, labels: { app: helios-http5xx 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-http5xx } }
   template:
     metadata: { labels: { app: helios-http5xx } }
@@ -162,6 +198,10 @@ metadata: { name: helios-latency, namespace: pfe, labels: { app: helios-latency 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-latency } }
   template:
     metadata: { labels: { app: helios-latency } }
@@ -182,6 +222,10 @@ metadata: { name: helios-pending, namespace: pfe, labels: { app: helios-pending 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-pending } }
   template:
     metadata: { labels: { app: helios-pending } }
@@ -197,6 +241,10 @@ metadata: { name: helios-init, namespace: pfe, labels: { app: helios-init } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-init } }
   template:
     metadata: { labels: { app: helios-init } }
@@ -214,6 +262,10 @@ metadata: { name: helios-config, namespace: pfe, labels: { app: helios-config } 
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-config } }
   template:
     metadata: { labels: { app: helios-config } }
@@ -233,6 +285,10 @@ metadata: { name: helios-unavailable, namespace: pfe, labels: { app: helios-unav
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-unavailable } }
   template:
     metadata: { labels: { app: helios-unavailable } }
@@ -253,6 +309,10 @@ metadata: { name: helios-db, namespace: pfe, labels: { app: helios-db } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-db } }
   template:
     metadata: { labels: { app: helios-db } }
@@ -268,6 +328,10 @@ metadata: { name: helios-hpa, namespace: pfe, labels: { app: helios-hpa } }
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # maxSurge:0 => la remediation (rollback / rollout restart) REMPLACE le pod SUR PLACE
+  # (tue l'ancien puis cree le neuf, jamais de pod transitoire EN PLUS) -> immunise contre
+  # la saturation du ResourceQuota (plus de "exceeded quota" qui bloquait la guerison en boucle).
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
   selector: { matchLabels: { app: helios-hpa } }
   template:
     metadata:

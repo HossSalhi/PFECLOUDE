@@ -2,6 +2,7 @@ package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.config.RemediationProperties;
 import com.orange.pfe.backend.dto.AILearnRequest;
+import com.orange.pfe.backend.dto.AIOpsAnalyzeRequest;
 import com.orange.pfe.backend.model.action.ActionStatus;
 import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.model.action.AutomationMode;
@@ -26,6 +27,7 @@ import io.camunda.client.api.worker.JobWorker;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -70,16 +72,27 @@ public class CamundaJobWorkerLifecycle {
 
     private final AIOpsClientService aiOpsClientService;
     private final NotificationService notificationService;
+    // Lazy (ObjectProvider) : évite un cycle de beans (AIOpsOrchestrationService -> CamundaWorkflowService).
+    // C'est ICI que Camunda devient l'intermédiaire monitoring -> IA : le worker `ai-classify` appelle
+    // l'IA via orchestrationService.analyze().
+    private final ObjectProvider<AIOpsOrchestrationService> orchestrationProvider;
+    // Branche INFRA du worker ai-classify : Camunda oriente aussi la création des incidents infra/nœud
+    // (déterministe). Lazy pour éviter tout cycle de beans.
+    private final ObjectProvider<InfrastructureHealthScheduler> infraProvider;
 
     // Watchdog hôte (sur l'hyperviseur) qui exécute le vmrun. Camunda l'APPELLE pour rallumer un nœud :
     // le rallumage worker dépend donc de Camunda (s'il est down, le watchdog n'est jamais sollicité).
     @Value("${helios.host-watchdog.url:http://192.168.148.1:9099}")
     private String hostWatchdogUrl;
 
+    @Value("${aiops.polling.window-minutes:1}")
+    private int detectionWindowMinutes;
+
     private JobWorker executeWorker;
     private JobWorker verifyWorker;
     private JobWorker autoEscalateWorker;
     private JobWorker rejectionWorker;
+    private JobWorker classifyWorker;
 
     public CamundaJobWorkerLifecycle(
             CamundaClient camundaClient,
@@ -95,8 +108,12 @@ public class CamundaJobWorkerLifecycle {
             RemediationProperties remediationProperties,
             IncidentHistoryService incidentHistoryService,
             AIOpsClientService aiOpsClientService,
-            NotificationService notificationService
+            NotificationService notificationService,
+            ObjectProvider<AIOpsOrchestrationService> orchestrationProvider,
+            ObjectProvider<InfrastructureHealthScheduler> infraProvider
     ) {
+        this.orchestrationProvider = orchestrationProvider;
+        this.infraProvider = infraProvider;
         this.camundaClient = camundaClient;
         this.camundaWorkflowService = camundaWorkflowService;
         this.workflowService = workflowService;
@@ -172,6 +189,18 @@ public class CamundaJobWorkerLifecycle {
                                    "targetNamespace", "targetName")
                     .open();
 
+            // Pipeline « Camunda orchestre monitoring -> IA » : ce worker est appelé par le process
+            // incident-detection. C'est LUI qui appelle l'IA (analyze/predict), crée l'incident classé
+            // et déclenche la remédiation. Timeout large : predict peut prendre quelques secondes (LLM).
+            classifyWorker = camundaClient.newWorker()
+                    .jobType("ai-classify")
+                    .handler(this::handleAiClassify)
+                    .name("backend-ai-classify")
+                    .maxJobsActive(8)
+                    .timeout(Duration.ofSeconds(60))
+                    .fetchVariables("namespace", "app", "kind", "detail")
+                    .open();
+
             logger.info("Camunda remediation workers started");
         } catch (Exception ex) {
             logger.error("Unable to start Camunda remediation workers", ex);
@@ -188,6 +217,7 @@ public class CamundaJobWorkerLifecycle {
         closeQuietly(verifyWorker);
         closeQuietly(autoEscalateWorker);
         closeQuietly(rejectionWorker);
+        closeQuietly(classifyWorker);
     }
 
     /**
@@ -201,7 +231,8 @@ public class CamundaJobWorkerLifecycle {
         boolean anyDown = (executeWorker == null || !executeWorker.isOpen())
                 || (verifyWorker == null || !verifyWorker.isOpen())
                 || (autoEscalateWorker == null || !autoEscalateWorker.isOpen())
-                || (rejectionWorker == null || !rejectionWorker.isOpen());
+                || (rejectionWorker == null || !rejectionWorker.isOpen())
+                || (classifyWorker == null || !classifyWorker.isOpen());
         if (!anyDown) return;
 
         logger.warn("One or more Camunda job workers are closed — attempting reconnect...");
@@ -210,11 +241,55 @@ public class CamundaJobWorkerLifecycle {
         verifyWorker  = null;
         autoEscalateWorker = null;
         rejectionWorker    = null;
+        classifyWorker     = null;
         try {
             startWorkers();
             logger.info("Camunda workers successfully reconnected");
         } catch (Exception ex) {
             logger.error("Camunda worker reconnect failed — will retry in 30s", ex);
+        }
+    }
+
+    /**
+     * Pipeline « Camunda orchestre monitoring -> IA ». Appelé par le process incident-detection
+     * (démarré par le backend sur ALARME BRUTE). C'est ICI que Camunda appelle l'IA : analyze()
+     * fait le predict, crée l'incident classé (type/titre/explication/action) et déclenche la
+     * remédiation (process incident-remediation). Camunda devient donc l'intermédiaire monitoring->IA.
+     */
+    private void handleAiClassify(JobClient jobClient, ActivatedJob job) {
+        Map<String, Object> variables = job.getVariablesAsMap();
+        String namespace = variables.get("namespace") != null ? variables.get("namespace").toString() : null;
+        String app = variables.get("app") != null ? variables.get("app").toString() : null;
+        String kind = variables.get("kind") != null ? variables.get("kind").toString() : "app";
+        String detail = variables.get("detail") != null ? variables.get("detail").toString() : "";
+        boolean incidentCreated = false;
+        try {
+            if ("infra".equalsIgnoreCase(kind)) {
+                // Branche INFRA/NŒUD : classification DÉTERMINISTE (un nœud/VM mort n'a pas de métriques
+                // pour l'IA). Camunda orchestre quand même la création via ce worker.
+                logger.info("[ai-classify] Camunda oriente l'incident INFRA {}/{} (déterministe, sans IA)", namespace, app);
+                incidentCreated = infraProvider.getObject().openInfraIncidentFromCamunda(namespace, app, detail);
+                logger.info("[ai-classify] INFRA {}/{} -> incidentCreated={}", namespace, app, incidentCreated);
+            } else {
+                logger.info("[ai-classify] Camunda appelle l'IA pour {}/{}", namespace, app);
+                AIOpsAnalyzeRequest request = new AIOpsAnalyzeRequest();
+                request.setNamespace(namespace);
+                request.setApp(app);
+                request.setWindowMinutes(detectionWindowMinutes);
+                request.setCreateIncident(true);
+                var response = orchestrationProvider.getObject().analyze(request);
+                incidentCreated = response != null && response.isIncidentCreated();
+                logger.info("[ai-classify] {}/{} -> incidentCreated={}", namespace, app, incidentCreated);
+            }
+        } catch (Exception ex) {
+            logger.error("[ai-classify] échec de la classification IA pour {}/{}: {}", namespace, app, ex.getMessage());
+        }
+        try {
+            completeJobWithRetry(jobClient, job,
+                    Map.of("incidentCreated", incidentCreated), "ai-classify");
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            logger.warn("[ai-classify] complétion du job interrompue pour {}/{}", namespace, app);
         }
     }
 

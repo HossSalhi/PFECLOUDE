@@ -46,11 +46,18 @@ public class AIOpsOrchestrationService {
 
     private static final Logger log = LoggerFactory.getLogger(AIOpsOrchestrationService.class);
 
+    // RESOLUTION_FAILED est inclus VOLONTAIREMENT : un incident dont la remediation a echoue reste
+    // "non resolu" -> autoResolveIfCleared doit pouvoir le CLORE automatiquement des que l'app
+    // redevient saine (predict() = plus d'incident). Sinon un RESOLUTION_FAILED resterait ouvert a vie
+    // ET (cote scheduler) un nouvel incident du meme type reapparaitrait a chaque fenetre de dedup
+    // = BOUCLE de fausses resolutions. Avec RESOLUTION_FAILED ici + dans AIOpsPollingScheduler : 1 seul
+    // incident par panne persistante (jamais de boucle), auto-clos des la guerison (aucune action manuelle).
     private static final List<IncidentStatus> ACTIVE_STATUSES = List.of(
             IncidentStatus.NEW,
             IncidentStatus.OPEN,
             IncidentStatus.IN_PROGRESS,
-            IncidentStatus.WAITING_FOR_APPROVAL
+            IncidentStatus.WAITING_FOR_APPROVAL,
+            IncidentStatus.RESOLUTION_FAILED
     );
 
     private final AIOpsClientService aiOpsClientService;
@@ -108,6 +115,19 @@ public class AIOpsOrchestrationService {
         MDC.put("app", request.getApp());
         try {
             log.info("AIOps analyze started ns={} app={}", request.getNamespace(), request.getApp());
+
+            // Camunda = ORCHESTRATEUR CENTRAL du projet : AUCUNE détection (création d'incident) si
+            // Camunda est injoignable. Point de contrôle UNIQUE couvrant TOUS les déclencheurs qui
+            // passent par analyze() — le polling scheduler ET le watcher K8s de déploiements ET le
+            // webhook d'alerte. Camunda arrêté => 0 incident détecté (l'IA n'est même pas sollicitée).
+            if (request.isCreateIncident() && !camundaWorkflowService.isReachable()) {
+                log.warn("Détection ignorée pour {}/{} — Camunda injoignable (orchestrateur central requis)",
+                        request.getNamespace(), request.getApp());
+                AIOpsAnalyzeResponse camundaDownResp = new AIOpsAnalyzeResponse();
+                camundaDownResp.setIncidentCreated(false);
+                camundaDownResp.setMessage("Camunda injoignable — détection suspendue (orchestrateur central)");
+                return camundaDownResp;
+            }
 
             AIPredictRequest predictRequest = new AIPredictRequest();
             predictRequest.setNamespace(request.getNamespace());
@@ -428,6 +448,41 @@ public class AIOpsOrchestrationService {
             MDC.remove("namespace");
             MDC.remove("app");
             MDC.remove("incidentId");
+        }
+    }
+
+    /**
+     * ALARME BRUTE (déterministe, SANS IA) : cette app présente-t-elle un signal de panne ?
+     * Utilisé par le pipeline « Camunda orchestre monitoring -> IA » : le backend/monitoring lève
+     * l'alarme ici (sans classifier), PUIS Camunda (process incident-detection) appelle l'IA pour
+     * classifier. On se base sur les marqueurs déterministes d'état Kubernetes (crashloop, OOM,
+     * imagepull, config, init, pending, deployment-unavailable, network, dns, db, disk + 5xx/latence)
+     * et la charge CPU soutenue (CPU_STRESS / AUTOSCALING). Les marqueurs NŒUD sont ignorés
+     * (l'outage nœud est géré par InfrastructureHealthScheduler, pas par le per-app).
+     */
+    public boolean hasRawAlarm(String namespace, String app) {
+        try {
+            Map<String, Double> ov =
+                    kubernetesSignalEnrichmentService.collectFeatureOverrides(namespace, app);
+            for (String key : ov.keySet()) {
+                if (key.contains("node")) {
+                    continue;
+                }
+                if (key.endsWith("_detected")
+                        || key.equals("dns_blocked")
+                        || key.equals("db_blocked")
+                        || key.equals("network_partition")) {
+                    return true;
+                }
+            }
+            // Pannes CPU (CPU_STRESS / AUTOSCALING) : AUCUN marqueur d'état K8s. La charge CPU est une
+            // MÉTRIQUE (metrics-server) -> phase Monitor. Seuil 0.30 core : bien au-dessus de l'idle
+            // (~1-10m) et sous le hog (~1000m). C'est ce qui manquait pour détecter cpu/hpa via Camunda.
+            double cpuCores = kubernetesSignalEnrichmentService.maxPodCpuCores(namespace, app);
+            return cpuCores >= 0.30;
+        } catch (Exception ex) {
+            log.debug("hasRawAlarm: lecture des signaux impossible pour {}/{}: {}", namespace, app, ex.getMessage());
+            return false;
         }
     }
 

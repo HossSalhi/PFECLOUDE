@@ -5,12 +5,19 @@ metadata:
   name: pfe-quota
   namespace: pfe
 spec:
+  # Elargi (01/07/2026) : 17 apps demo (souvent 2 replicas) + stack HELIOS saturaient
+  # l'ancien quota (limits.cpu 15,2/16, pods 37/40). Sous saturation, toute REMEDIATION
+  # (rollback / FORCE_RECREATE / scale) doit creer un pod TRANSITOIRE en plus -> "exceeded
+  # quota: pfe-quota" -> le deploiement ne guerit jamais -> RESOLUTION_FAILED / boucle de
+  # fausses resolutions. NB : limits.cpu/limits.memory sont des PLAFONDS (throttling / OOM),
+  # pas des reservations ; la vraie reservation = requests.* (usage reel ~1,3 CPU / 2,4Gi) ->
+  # elargir les plafonds est sans danger pour les noeuds (le scheduler protege via requests).
   hard:
-    requests.cpu: "4"
-    requests.memory: "4Gi"
-    limits.cpu: "8"
-    limits.memory: "8Gi"
-    pods: "20"
+    requests.cpu: "8"
+    requests.memory: "8Gi"
+    limits.cpu: "32"
+    limits.memory: "24Gi"
+    pods: "80"
     persistentvolumeclaims: "10"
 ---
 apiVersion: v1

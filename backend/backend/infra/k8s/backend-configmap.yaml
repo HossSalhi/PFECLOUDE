@@ -14,6 +14,10 @@ data:
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
   AIOPS_SERVICE_BASE_URL: "http://192.168.148.161:8000"
   CAMUNDA_ENABLED: "true"
+  # Pipeline de détection : "camunda" = Camunda est l'intermédiaire monitoring -> IA (le backend
+  # lève l'alarme brute, puis le process Camunda incident-detection appelle l'IA via le worker
+  # ai-classify). "backend" = historique (le backend appelle l'IA directement). Flag réversible.
+  HELIOS_DETECTION_PIPELINE: "camunda"
   CAMUNDA_AUTO_DEPLOY_BPMN: "true"
   CAMUNDA_PROCESS_ID: "incident-remediation"
   CAMUNDA_REST_ADDRESS: "http://192.168.148.161:8080"

@@ -554,18 +554,173 @@ public class KubernetesSignalEnrichmentService {
         }).count();
     }
 
-    /** True if any container was last terminated by the kernel OOM killer (memory test). */
+    /**
+     * True if any container was terminated by the kernel OOM killer (memory test).
+     * containerd n'expose PAS toujours reason="OOMKilled" : quand l'OOM-killer fauche un PROCESSUS
+     * ENFANT (ici `tail /dev/zero`, lance par `sh -c "./podinfo & tail /dev/zero"`), PID 1 (sh) sort
+     * en 137 (128+SIGKILL) avec reason="Error". On traite donc AUSSI exitCode 137 comme un OOM, sinon
+     * le marqueur rate et l'incident retombe a tort en DEPLOYMENT_UNAVAILABLE (via l'IA). Les pods en
+     * cours de suppression (deletionTimestamp) sont ignores : un pod qui s'en va n'est pas un OOM actif
+     * (evite de bloquer la verification post-remediation avec l'ancien pod OOM en train de mourir).
+     */
     private boolean hasOOMKilled(List<V1Pod> pods) {
-        return pods.stream().anyMatch(pod -> {
-            if (pod.getStatus() == null || pod.getStatus().getContainerStatuses() == null) return false;
-            return pod.getStatus().getContainerStatuses().stream().anyMatch(cs -> {
-                boolean cur = cs.getState() != null && cs.getState().getTerminated() != null
-                        && "OOMKilled".equals(cs.getState().getTerminated().getReason());
-                boolean last = cs.getLastState() != null && cs.getLastState().getTerminated() != null
-                        && "OOMKilled".equals(cs.getLastState().getTerminated().getReason());
-                return cur || last;
-            });
-        });
+        return pods.stream()
+                .filter(p -> p.getMetadata() == null || p.getMetadata().getDeletionTimestamp() == null)
+                .anyMatch(pod -> {
+                    if (pod.getStatus() == null || pod.getStatus().getContainerStatuses() == null) return false;
+                    return pod.getStatus().getContainerStatuses().stream().anyMatch(cs ->
+                            isOomTerminated(cs.getState() != null ? cs.getState().getTerminated() : null)
+                         || isOomTerminated(cs.getLastState() != null ? cs.getLastState().getTerminated() : null));
+                });
+    }
+
+    /**
+     * Charge CPU MAX (en cores) parmi les pods de l'app, via metrics-server (phase Monitor, SANS IA).
+     * Sert à lever l'ALARME BRUTE pour les pannes CPU (CPU_STRESS / AUTOSCALING) qui n'ont AUCUN
+     * marqueur d'état Kubernetes (la charge CPU est une métrique du monitoring, pas un état K8s).
+     * Renvoie 0 si metrics-server est indisponible (dégradation propre — pas d'alarme fantôme).
+     */
+    public double maxPodCpuCores(String namespace, String app) {
+        try {
+            if (coreV1Api == null) {
+                return 0.0;
+            }
+            io.kubernetes.client.Metrics metrics = new io.kubernetes.client.Metrics(coreV1Api.getApiClient());
+            io.kubernetes.client.custom.PodMetricsList list = metrics.getPodMetrics(namespace);
+            double max = 0.0;
+            String prefix = app + "-";
+            for (io.kubernetes.client.custom.PodMetrics pm : list.getItems()) {
+                if (pm.getMetadata() == null || pm.getMetadata().getName() == null
+                        || !pm.getMetadata().getName().startsWith(prefix)) {
+                    continue;
+                }
+                double sum = 0.0;
+                if (pm.getContainers() != null) {
+                    for (io.kubernetes.client.custom.ContainerMetrics cm : pm.getContainers()) {
+                        if (cm.getUsage() != null && cm.getUsage().get("cpu") != null) {
+                            sum += cm.getUsage().get("cpu").getNumber().doubleValue();
+                        }
+                    }
+                }
+                if (sum > max) {
+                    max = sum;
+                }
+            }
+            return max;
+        } catch (Exception ex) {
+            logger.debug("metrics-server CPU indisponible pour {}/{}: {}", namespace, app, ex.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * Collecte le CONTEXTE d'une panne de nœud pour que l'IA puisse ANALYSER l'incident même quand le
+     * nœud MORT ne produit plus de métriques propres. Un nœud éteint reste présent dans l'API (objet
+     * Node marqué NotReady, lease figé) et le monitoring .160 a scrapé ses conditions jusqu'à la bascule
+     * — l'IA dispose donc de : nœud injoignable (node_not_ready_count, LE déclencheur du chemin NODE du
+     * classifieur ET de la collecte de cause racine côté Prometheus .160), durée de la panne (lease
+     * figé), rayon d'impact (pods hébergés + pods maintenant en attente de replanification), charge CPU
+     * des nœuds SURVIVANTS (metrics-server, ils absorbent les pods du nœud mort), et pression
+     * mémoire/disque/PID relevée sur le nœud. L'IA en tire sévérité + explication + action.
+     * Le TYPE reste déterministe (VM_DOWN) — ce vecteur nourrit l'ANALYSE, pas la vérité du fait.
+     */
+    public Map<String, Double> collectNodeOutageFeatures(String nodeName) {
+        Map<String, Double> f = new LinkedHashMap<>();
+        // Déclencheur principal : le classifieur route sur le chemin NODE dès node_not_ready_count>=1
+        // (et le predictor lance alors la collecte de cause racine Prometheus .160 = pressions du nœud).
+        f.put("node_not_ready_count", 1.0);
+        if (nodeName == null || nodeName.isBlank()) {
+            return f;
+        }
+        try {
+            ensureApi();
+            List<V1Node> nodes = coreV1Api.listNode().execute().getItems();
+            V1Node target = nodes.stream()
+                    .filter(n -> n.getMetadata() != null && nodeName.equals(n.getMetadata().getName()))
+                    .findFirst().orElse(null);
+
+            // Durée de la panne : renewTime du lease kube-node-lease figé depuis la mort du kubelet.
+            double downSeconds = nodeDownSeconds(nodeName);
+            if (downSeconds > 0) f.put("node_down_seconds", downSeconds);
+
+            // Conditions du nœud (encore lisibles sur l'objet Node) — pression = cause probable de la panne.
+            if (target != null && target.getStatus() != null && target.getStatus().getConditions() != null) {
+                for (V1NodeCondition c : target.getStatus().getConditions()) {
+                    boolean active = "True".equalsIgnoreCase(String.valueOf(c.getStatus()));
+                    if (!active || c.getType() == null) continue;
+                    switch (c.getType()) {
+                        case "MemoryPressure" -> f.put("node_memory_pressure", 1.0);
+                        case "DiskPressure"   -> f.put("node_disk_pressure", 1.0);
+                        case "PIDPressure"    -> f.put("node_pid_pressure", 1.0);
+                        default -> { }
+                    }
+                }
+            }
+
+            // Rayon d'impact : pods hébergés par le nœud + pods maintenant Pending (replanification).
+            List<V1Pod> allPods = coreV1Api.listPodForAllNamespaces().execute().getItems();
+            long podsAffected = allPods.stream()
+                    .filter(p -> p.getSpec() != null && nodeName.equals(p.getSpec().getNodeName()))
+                    .count();
+            long podsPending = allPods.stream()
+                    .filter(p -> p.getStatus() != null && "Pending".equalsIgnoreCase(p.getStatus().getPhase()))
+                    .count();
+            f.put("pods_affected", (double) podsAffected);
+            f.put("pods_pending_now", (double) podsPending);
+
+            // Charge CPU des nœuds SURVIVANTS : ils absorbent les pods du nœud mort (via metrics-server).
+            double survivingCpu = survivingNodesCpuCores(nodeName);
+            if (survivingCpu > 0) f.put("surviving_nodes_cpu_cores", survivingCpu);
+
+        } catch (Exception ex) {
+            logger.debug("collectNodeOutageFeatures indisponible pour {}: {}", nodeName, ex.getMessage());
+        }
+        return f;
+    }
+
+    /** Secondes depuis le dernier renewTime du lease du nœud (figé quand le kubelet meurt). 0 si inconnu. */
+    public double nodeDownSeconds(String nodeName) {
+        try {
+            ensureApi();
+            if (coordinationV1Api == null) return 0.0;
+            for (V1Lease l : coordinationV1Api.listNamespacedLease("kube-node-lease").execute().getItems()) {
+                if (l.getMetadata() != null && nodeName.equals(l.getMetadata().getName())
+                        && l.getSpec() != null && l.getSpec().getRenewTime() != null) {
+                    long ageMs = System.currentTimeMillis() - l.getSpec().getRenewTime().toInstant().toEpochMilli();
+                    return Math.max(0.0, ageMs / 1000.0);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("nodeDownSeconds indisponible pour {}: {}", nodeName, e.getMessage());
+        }
+        return 0.0;
+    }
+
+    /** Somme CPU (cores) des nœuds AUTRES que le nœud mort, via metrics-server. 0 si indisponible. */
+    private double survivingNodesCpuCores(String deadNode) {
+        try {
+            if (coreV1Api == null) return 0.0;
+            io.kubernetes.client.Metrics metrics = new io.kubernetes.client.Metrics(coreV1Api.getApiClient());
+            io.kubernetes.client.custom.NodeMetricsList list = metrics.getNodeMetrics();
+            double sum = 0.0;
+            for (io.kubernetes.client.custom.NodeMetrics nm : list.getItems()) {
+                if (nm.getMetadata() == null || deadNode.equals(nm.getMetadata().getName())) continue;
+                if (nm.getUsage() != null && nm.getUsage().get("cpu") != null) {
+                    sum += nm.getUsage().get("cpu").getNumber().doubleValue();
+                }
+            }
+            return sum;
+        } catch (Exception ex) {
+            logger.debug("survivingNodesCpuCores indisponible: {}", ex.getMessage());
+            return 0.0;
+        }
+    }
+
+    /** Signature OOM : reason explicite "OOMKilled" OU exitCode 137 (SIGKILL de l'OOM-killer). */
+    private boolean isOomTerminated(io.kubernetes.client.openapi.models.V1ContainerStateTerminated t) {
+        if (t == null) return false;
+        return "OOMKilled".equals(t.getReason())
+                || (t.getExitCode() != null && t.getExitCode() == 137);
     }
 
     /**

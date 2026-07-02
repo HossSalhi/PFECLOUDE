@@ -24,11 +24,15 @@ public class AIOpsPollingScheduler {
 
     private static final Logger logger = LoggerFactory.getLogger(AIOpsPollingScheduler.class);
 
+    // RESOLUTION_FAILED inclus : tant qu'un incident en echec reste ouvert pour cette app, on NE
+    // recree PAS un nouvel incident du meme type a chaque fenetre de dedup (= plus de BOUCLE). A la
+    // place, pollTarget appelle autoResolveIfCleared qui le CLOT automatiquement des que l'app est saine.
     private static final List<IncidentStatus> ACTIVE_STATUSES = List.of(
             IncidentStatus.NEW,
             IncidentStatus.OPEN,
             IncidentStatus.IN_PROGRESS,
-            IncidentStatus.WAITING_FOR_APPROVAL
+            IncidentStatus.WAITING_FOR_APPROVAL,
+            IncidentStatus.RESOLUTION_FAILED
     );
 
     private final AIOpsOrchestrationService orchestrationService;
@@ -37,6 +41,11 @@ public class AIOpsPollingScheduler {
     private final RemediationProperties remediationProperties;
     private final KubernetesDiscoveryService discoveryService;
     private final LeaderElectionService leaderElectionService;
+    private final CamundaWorkflowService camundaWorkflowService;
+    // "camunda" = Camunda orchestre monitoring -> IA (le backend lève l'alarme brute, Camunda appelle
+    // l'IA via le process incident-detection). "backend" = historique (le backend appelle l'IA direct).
+    @org.springframework.beans.factory.annotation.Value("${helios.detection.pipeline:backend}")
+    private String detectionPipeline;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public AIOpsPollingScheduler(
@@ -45,8 +54,10 @@ public class AIOpsPollingScheduler {
             AiopsPollingProperties pollingProperties,
             RemediationProperties remediationProperties,
             KubernetesDiscoveryService discoveryService,
-            LeaderElectionService leaderElectionService
+            LeaderElectionService leaderElectionService,
+            CamundaWorkflowService camundaWorkflowService
     ) {
+        this.camundaWorkflowService = camundaWorkflowService;
         this.orchestrationService = orchestrationService;
         this.incidentRepository = incidentRepository;
         this.pollingProperties = pollingProperties;
@@ -63,6 +74,12 @@ public class AIOpsPollingScheduler {
         // HA: only the leader replica polls, so incidents are not created in duplicate.
         if (!leaderElectionService.isLeader()) {
             logger.debug("AIOps polling: not the leader replica, skipping this cycle");
+            return;
+        }
+        // Camunda = orchestrateur CENTRAL : si Camunda/Zeebe est injoignable, HELIOS ne détecte
+        // AUCUN incident (pas d'appel IA, pas de création). Camunda arrêté => 0 détection.
+        if (!camundaWorkflowService.isReachable()) {
+            logger.warn("AIOps polling: Camunda injoignable — détection SUSPENDUE (0 incident tant que Camunda est arrêté)");
             return;
         }
         if (!running.compareAndSet(false, true)) {
@@ -108,6 +125,19 @@ public class AIOpsPollingScheduler {
                 return;
             }
 
+            // Pipeline « Camunda orchestre monitoring -> IA » : le backend lève l'ALARME BRUTE
+            // (déterministe, sans IA) puis DÉMARRE le process Camunda incident-detection, dont la
+            // tâche ai-classify appelle l'IA. Camunda devient l'intermédiaire monitoring -> IA.
+            if ("camunda".equalsIgnoreCase(detectionPipeline)) {
+                if (orchestrationService.hasRawAlarm(namespace, app)) {
+                    logger.info("AIOps polling: alarme brute {}/{} -> démarrage du process de détection Camunda", namespace, app);
+                    camundaWorkflowService.startDetectionWorkflow(namespace, app);
+                } else {
+                    logger.debug("AIOps polling: pas d'alarme brute pour {}/{}", namespace, app);
+                }
+                return;
+            }
+
             logger.info("AIOps polling: analyzing namespace={} app={}", namespace, app);
             AIOpsAnalyzeRequest request = new AIOpsAnalyzeRequest();
             request.setNamespace(namespace);
@@ -133,9 +163,9 @@ public class AIOpsPollingScheduler {
      * - Statuts actifs (NEW/OPEN/IN_PROGRESS) : bloque toujours.
      * - RESOLVED récent (< fenêtre + 1 min) : bloque pour éviter de re-détecter les
      *   métriques de panne encore visibles dans la fenêtre Prometheus.
-     * - RESOLUTION_FAILED récent (< cooldown) : bloque pour éviter le spam. L'incident RESTE ouvert
-     *   (jamais auto-fermé) pour que l'ingénieur le traite ; après le cooldown, si la panne persiste,
-     *   un nouvel incident peut être créé (la dédup exclut RESOLUTION_FAILED).
+     * - RESOLUTION_FAILED (ouvert) : bloque TOUJOURS la creation d'un nouvel incident pour cette app
+     *   (il fait partie d'ACTIVE_STATUSES) -> JAMAIS de boucle de fausses resolutions. Il est auto-clos
+     *   par autoResolveIfCleared des que l'app redevient saine (donc pas d'incident bloque a vie).
      */
     private boolean hasActiveAiIncidentFor(String namespace, String app) {
         if (incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(

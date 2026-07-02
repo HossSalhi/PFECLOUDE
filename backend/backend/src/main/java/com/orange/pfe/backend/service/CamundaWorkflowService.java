@@ -29,6 +29,9 @@ public class CamundaWorkflowService {
     // L15 — workflow spécialisé nœud (drain/cordon/escalade VM = toujours approbation humaine)
     public static final String NODE_BPMN_RESOURCE_PATH = "camunda/node-remediation.bpmn";
     public static final String NODE_PROCESS_ID = "node-remediation";
+    // Process de DÉTECTION : Camunda appelle l'IA (intermédiaire monitoring -> IA)
+    public static final String DETECTION_BPMN_RESOURCE_PATH = "camunda/incident-detection.bpmn";
+    public static final String DETECTION_PROCESS_ID = "incident-detection";
 
     private static final Logger logger = LoggerFactory.getLogger(CamundaWorkflowService.class);
 
@@ -56,6 +59,79 @@ public class CamundaWorkflowService {
         return camundaProperties.isEnabled() && camundaClientProvider.getIfAvailable() != null;
     }
 
+    /**
+     * Disponibilité RÉELLE de Camunda/Zeebe (pas seulement le flag de config) : sonde 'topology'
+     * avec timeout court. Camunda est l'ORCHESTRATEUR CENTRAL du projet -> cette porte est utilisée
+     * par les schedulers de détection : si Camunda est arrêté, HELIOS ne détecte AUCUN incident.
+     * NB : isEnabled() ne suffit pas — le bean CamundaClient survit à l'arrêt de la VM .161 (Zeebe),
+     * donc isEnabled() resterait 'true' alors que Zeebe est injoignable. La sonde topology, elle,
+     * échoue tout de suite si Zeebe ne répond pas.
+     */
+    public boolean isReachable() {
+        if (!camundaProperties.isEnabled()) {
+            return false;
+        }
+        CamundaClient client = camundaClientProvider.getIfAvailable();
+        if (client == null) {
+            return false;
+        }
+        try {
+            client.newTopologyRequest()
+                    .requestTimeout(java.time.Duration.ofSeconds(2))
+                    .send()
+                    .join();
+            return true;
+        } catch (Exception ex) {
+            logger.debug("Camunda injoignable (sonde topology) : {}", ex.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Démarre le process Camunda de DÉTECTION (`incident-detection`) suite à une ALARME BRUTE du
+     * monitoring. C'est le point d'entrée où Camunda devient l'intermédiaire monitoring -> IA :
+     * l'unique tâche `ai-classify` appellera l'IA. No-op si Camunda injoignable (=> 0 détection,
+     * cohérent avec « Camunda = orchestrateur central »). Retourne true si le process a démarré.
+     */
+    public boolean startDetectionWorkflow(String namespace, String app) {
+        return startDetectionWorkflow(namespace, app, "app", null);
+    }
+
+    /**
+     * kind="app" -> le worker ai-classify appelle l'IA (classification). kind="infra" -> le worker
+     * crée l'incident infra/nœud de façon DÉTERMINISTE (un nœud/VM mort n'a pas de métriques pour l'IA).
+     * Dans les deux cas, c'est CAMUNDA qui orchestre la création de l'incident (point d'entrée unique).
+     */
+    public boolean startDetectionWorkflow(String namespace, String app, String kind, String detail) {
+        if (!isReachable()) {
+            logger.warn("Détection non démarrée pour {}/{} — Camunda injoignable (orchestrateur central requis)", namespace, app);
+            return false;
+        }
+        try {
+            Map<String, Object> vars = new HashMap<>();
+            vars.put("namespace", namespace);
+            vars.put("app", app);
+            vars.put("kind", kind == null ? "app" : kind);
+            if (detail != null) {
+                vars.put("detail", detail);
+            }
+            ProcessInstanceEvent evt = requireClient()
+                    .newCreateInstanceCommand()
+                    .bpmnProcessId(DETECTION_PROCESS_ID)
+                    .latestVersion()
+                    .variables(vars)
+                    .send()
+                    .join();
+            logger.info("Camunda: process de détection démarré pour {}/{} (PI {})",
+                    namespace, app, evt.getProcessInstanceKey());
+            return true;
+        } catch (Exception ex) {
+            logger.error("Impossible de démarrer le process de détection Camunda pour {}/{}: {}",
+                    namespace, app, ex.getMessage());
+            return false;
+        }
+    }
+
     public void deployProcessIfNeeded() {
         if (!isEnabled() || !camundaProperties.isAutoDeployBpmn()) {
             return;
@@ -66,9 +142,10 @@ public class CamundaWorkflowService {
                     .newDeployResourceCommand()
                     .addResourceFromClasspath(BPMN_RESOURCE_PATH)
                     .addResourceFromClasspath(NODE_BPMN_RESOURCE_PATH)
+                    .addResourceFromClasspath(DETECTION_BPMN_RESOURCE_PATH)
                     .send()
                     .join();
-            logger.info("Camunda BPMN deployed: {}, {}", BPMN_RESOURCE_PATH, NODE_BPMN_RESOURCE_PATH);
+            logger.info("Camunda BPMN deployed: {}, {}, {}", BPMN_RESOURCE_PATH, NODE_BPMN_RESOURCE_PATH, DETECTION_BPMN_RESOURCE_PATH);
         } catch (Exception ex) {
             logger.error("Unable to deploy Camunda BPMN resources", ex);
         }

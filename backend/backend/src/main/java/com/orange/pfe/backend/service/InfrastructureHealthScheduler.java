@@ -52,6 +52,11 @@ public class InfrastructureHealthScheduler {
     private final WorkflowService workflowService;
     private final CamundaWorkflowService camundaWorkflowService;
     private final NotificationService notificationService;
+    private final KubernetesSignalEnrichmentService signalEnrichmentService;
+    // "camunda" = Camunda orchestre AUSSI la création des incidents infra/nœud (via le process
+    // incident-detection → worker ai-classify, branche infra déterministe). "backend" = création directe.
+    @org.springframework.beans.factory.annotation.Value("${helios.detection.pipeline:backend}")
+    private String detectionPipeline;
 
     public InfrastructureHealthScheduler(
             InfraHealthProperties props,
@@ -63,7 +68,8 @@ public class InfrastructureHealthScheduler {
             LeaderElectionService leaderElectionService,
             WorkflowService workflowService,
             CamundaWorkflowService camundaWorkflowService,
-            NotificationService notificationService
+            NotificationService notificationService,
+            KubernetesSignalEnrichmentService signalEnrichmentService
     ) {
         this.props = props;
         this.healthService = healthService;
@@ -75,6 +81,7 @@ public class InfrastructureHealthScheduler {
         this.workflowService = workflowService;
         this.camundaWorkflowService = camundaWorkflowService;
         this.notificationService = notificationService;
+        this.signalEnrichmentService = signalEnrichmentService;
     }
 
     @Scheduled(fixedDelayString = "${infra.health.interval-seconds:300}000")
@@ -83,15 +90,32 @@ public class InfrastructureHealthScheduler {
         if (!props.isEnabled()) return;
         // HA: only the leader replica runs infra health checks (avoids duplicate incidents).
         if (!leaderElectionService.isLeader()) return;
+        // Camunda = orchestrateur CENTRAL : Camunda arrêté => AUCUNE détection (ni app, ni infra/nœud).
+        if (!camundaWorkflowService.isReachable()) {
+            log.warn("Infra health check: Camunda injoignable — détection infra/nœud SUSPENDUE (0 incident tant que Camunda est arrêté)");
+            return;
+        }
 
         log.info("Infrastructure health check started");
         List<ComponentStatus> statuses = healthService.checkAll();
 
         long totalDown = statuses.stream().filter(s -> !s.up()).count();
         int newIncidents = 0, resolved = 0;
+        boolean viaCamunda = "camunda".equalsIgnoreCase(detectionPipeline);
         for (ComponentStatus status : statuses) {
             if (!status.up()) {
-                if (openIncidentIfNeeded(status)) newIncidents++;
+                if (viaCamunda) {
+                    // Camunda orchestre AUSSI la création des incidents infra/nœud : on lui délègue
+                    // (sauf si un incident est déjà ouvert -> évite de démarrer un process par cycle).
+                    boolean alreadyOpen = incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
+                            ACTIVE_STATUSES, IncidentSource.AI, status.namespace(), status.app());
+                    if (!alreadyOpen && camundaWorkflowService.startDetectionWorkflow(
+                            status.namespace(), status.app(), "infra", status.detail())) {
+                        newIncidents++;
+                    }
+                } else if (openIncidentIfNeeded(status)) {
+                    newIncidents++;
+                }
             } else {
                 if (resolveIncidentIfExists(status)) resolved++;
             }
@@ -106,6 +130,17 @@ public class InfrastructureHealthScheduler {
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Point d'entrée appelé PAR CAMUNDA (worker ai-classify, branche infra) pour créer un incident
+     * infra/nœud. C'est ainsi que Camunda orchestre AUSSI les incidents infra. @Transactional car
+     * appelé hors du cycle checkInfrastructure. Classification déterministe (un nœud/VM mort n'a
+     * pas de métriques exploitables par l'IA) — la logique nœud (handleNodeOutageRecovery) est INCHANGÉE.
+     */
+    @Transactional
+    public boolean openInfraIncidentFromCamunda(String namespace, String app, String detail) {
+        return openIncidentIfNeeded(new ComponentStatus(namespace, app, false, detail));
+    }
 
     private boolean openIncidentIfNeeded(ComponentStatus status) {
         boolean alreadyOpen = incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
@@ -269,6 +304,20 @@ public class InfrastructureHealthScheduler {
             req.setApp(status.app());
             req.setWindowMinutes(10);
 
+            // NŒUD/VM MORT : le nœud lui-même ne produit plus de métriques, mais l'IA peut ANALYSER le
+            // CONTEXTE de la panne (nœud injoignable, durée, rayon d'impact, charge des nœuds survivants,
+            // pression avant bascule + cause racine via Prometheus .160). On lui fournit ce vecteur : le
+            // classifieur route alors sur le chemin NODE (NODE_NOT_READY) et l'explication/action/sévérité
+            // deviennent réelles au lieu d'un NO_INCIDENT sur un espace de noms « k8s-nodes » vide.
+            if ("k8s-nodes".equals(status.namespace())) {
+                java.util.Map<String, Double> nodeFeatures =
+                        signalEnrichmentService.collectNodeOutageFeatures(status.app());
+                nodeFeatures.put("node_flap_count", (double) recentNodeFlapCount(status.namespace(), status.app()));
+                req.setFeatureOverrides(nodeFeatures);
+                req.getRemediationContext().put("scenario", "node_outage");
+                req.getRemediationContext().put("node", status.app());
+            }
+
             AIPredictResponse prediction = aiOpsClientService.predict(req);
             if (prediction == null) return;
 
@@ -280,17 +329,31 @@ public class InfrastructureHealthScheduler {
                 incident.setExplanation(aiExplanation);
             }
 
-            // NE PAS ecraser le type : le health-check infra est la SOURCE DE VERITE
-            // (VM_DOWN / NODE_*_PRESSURE / DNS_FAILURE, deja pose par incidentTypeFor). Le
-            // classifieur IA tourne sur les signaux CLUSTER (normaux quand seule une VM infra
-            // est down) -> il renverrait un POD_PENDING/NODE_NOT_READY ERRONE (risque 0.00).
-            // L'IA ne sert qu'a l'explication + la reco (dans la description ci-dessous).
+            // CLASSIFICATION PAR L'IA pour les nœuds (master + workers), dans le cycle HELIOS : le TYPE
+            // et la SÉVÉRITÉ de l'incident nœud proviennent désormais de l'IA (plus de type figé en dur).
+            // Le VM_DOWN posé par incidentTypeFor ne sert QUE de repli si l'IA est injoignable ou muette
+            // (résilience : on ne perd jamais l'incident d'un nœud réellement tombé — la DÉTECTION reste
+            // sûre/déterministe, seule la CLASSIFICATION est confiée à l'IA). Les autres composants infra
+            // (VM monitoring/IA, DNS, pressions nœud) gardent leur type déterministe (non concernés ici).
+            String aiType = prediction.getIncidentType();
+            boolean usableAiClass = prediction.isIncident()
+                    && aiType != null && !aiType.isBlank() && !"NO_INCIDENT".equalsIgnoreCase(aiType);
+            if ("k8s-nodes".equals(status.namespace()) && usableAiClass) {
+                incident.setIncidentType(aiType);
+                IncidentSeverity aiSeverity = mapSeverity(prediction.getSeverity());
+                if (aiSeverity != null) {
+                    incident.setSeverity(aiSeverity);
+                }
+                incident.setTitle("Panne nœud (IA: " + aiType + ") — " + status.app());
+                log.info("Incident {} CLASSÉ PAR L'IA (nœud {}): type={} severity={} action={} confidence={}",
+                        incident.getId(), status.app(), aiType, prediction.getSeverity(),
+                        prediction.getRecommendedAction(), prediction.getConfidence());
+            }
 
-            // Rich description with the AI metadata, same format the AIOps
-            // pipeline uses so the UI shows action / executionMode / confidence.
-            // Severity shown = the AUTHORITATIVE incident severity (severityFor: CRITICAL for a node
-            // outage), NOT the AI's per-prediction severity — otherwise the detail panel showed HIGH
-            // while the table showed CRITICAL. The incident severity is the single source of truth.
+            // Rich description with the AI metadata, same format the AIOps pipeline uses so the UI shows
+            // action / executionMode / confidence. Severity shown = the incident's severity field, which
+            // for a NODE incident now reflects the AI classification set just above (and for the other
+            // infra components stays the deterministic severityFor) — single source of truth either way.
             String authoritativeSeverity = incident.getSeverity() != null
                     ? incident.getSeverity().name()
                     : safe(prediction.getSeverity());
@@ -328,6 +391,35 @@ public class InfrastructureHealthScheduler {
 
     private String safe(String value) {
         return value == null ? "unknown" : value;
+    }
+
+    /** Mappe la sévérité renvoyée par l'IA (LOW/MEDIUM/HIGH/CRITICAL) vers l'enum ; null si inexploitable. */
+    private IncidentSeverity mapSeverity(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return IncidentSeverity.valueOf(s.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * Nombre d'incidents ouverts pour CE nœud sur les 24 dernières heures = signal de "flapping"
+     * (nœud instable qui retombe). Fourni à l'IA (feature node_flap_count) pour qu'elle module sa
+     * sévérité/analyse : un nœud qui claque plusieurs fois évoque un défaut matériel/hôte persistant
+     * plutôt qu'un reboot transitoire. Dégradation propre à 0 en cas d'erreur.
+     */
+    private long recentNodeFlapCount(String namespace, String app) {
+        try {
+            return incidentRepository.findBySource(IncidentSource.AI).stream()
+                    .filter(i -> namespace.equals(i.getNamespace()) && app.equals(i.getApp()))
+                    .filter(i -> i.getCreatedAt() != null
+                            && i.getCreatedAt().isAfter(java.time.LocalDateTime.now().minusHours(24)))
+                    .count();
+        } catch (Exception e) {
+            log.debug("recentNodeFlapCount indisponible pour {}/{}: {}", namespace, app, e.getMessage());
+            return 0L;
+        }
     }
 
     private boolean resolveIncidentIfExists(ComponentStatus status) {

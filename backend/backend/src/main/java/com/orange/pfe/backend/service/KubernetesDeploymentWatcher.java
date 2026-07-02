@@ -64,6 +64,10 @@ public class KubernetesDeploymentWatcher {
     private final AIOpsOrchestrationService orchestrationService;
     private final IncidentRepository incidentRepository;
     private final LeaderElectionService leaderElectionService;
+    // "camunda" = détection pilotée par Camunda (process incident-detection déclenché par le polling) :
+    // ce watcher direct est alors désactivé pour que TOUTE la détection passe par Camunda.
+    @org.springframework.beans.factory.annotation.Value("${helios.detection.pipeline:backend}")
+    private String detectionPipeline;
 
     /** Exécuteur pour les analyses planifiées post-délai. */
     private final ScheduledExecutorService analysisExecutor =
@@ -270,6 +274,12 @@ public class KubernetesDeploymentWatcher {
             // Ne lance pas d'analyse si un incident AI est déjà actif pour ce target
             if (hasActiveAiIncident(namespace, app)) {
                 logger.debug("[WATCH] Incident AI actif pour {}/{} — analyse ignorée", namespace, app);
+                return;
+            }
+            // Pipeline « Camunda orchestre » : la détection passe par le process Camunda (déclenché par
+            // le polling sur alarme brute). On désactive donc l'appel IA direct du watcher.
+            if ("camunda".equalsIgnoreCase(detectionPipeline)) {
+                logger.debug("[WATCH] pipeline=camunda -> détection via Camunda (polling), watcher direct ignoré pour {}/{}", namespace, app);
                 return;
             }
 

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="Definitions_IncidentDetection"
+                  targetNamespace="http://orange.pfe/backend/camunda">
+  <!--
+    Process de DÉTECTION piloté par Camunda (l'orchestrateur central du projet).
+    Déclenché par le backend/monitoring dès qu'une ALARME BRUTE est levée (app anormale).
+    L'unique tâche "Classifier (IA)" fait appeler l'IA PAR Camunda -> Camunda devient
+    l'intermédiaire monitoring -> IA. Le worker `ai-classify` exécute l'analyse (predict),
+    crée l'incident classé et déclenche la remédiation (process incident-remediation).
+  -->
+  <bpmn:process id="incident-detection" name="Incident detection (Camunda orchestre monitoring -> IA)" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_Alarm" name="Alarme monitoring">
+      <bpmn:outgoing>Flow_Start_To_Classify</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_AiClassify" name="Classifier (IA)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="ai-classify" retries="2" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Start_To_Classify</bpmn:incoming>
+      <bpmn:outgoing>Flow_Classify_To_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="EndEvent_Classified" name="Classifié">
+      <bpmn:incoming>Flow_Classify_To_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Start_To_Classify" sourceRef="StartEvent_Alarm" targetRef="Task_AiClassify" />
+    <bpmn:sequenceFlow id="Flow_Classify_To_End" sourceRef="Task_AiClassify" targetRef="EndEvent_Classified" />
+  </bpmn:process>
+</bpmn:definitions>
