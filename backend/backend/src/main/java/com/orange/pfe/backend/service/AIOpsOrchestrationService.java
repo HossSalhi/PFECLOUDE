@@ -128,6 +128,17 @@ public class AIOpsOrchestrationService {
                 camundaDownResp.setMessage("Camunda injoignable — détection suspendue (orchestrateur central)");
                 return camundaDownResp;
             }
+            // L'IA = CERVEAU du projet : AUCUNE détection si le service IA est injoignable (même règle que
+            // Camunda). Le cerveau absent => HELIOS ne classe ni ne remédie rien. Gate au point UNIQUE
+            // analyze() (polling + watcher + webhook). IA arrêtée => 0 incident applicatif détecté.
+            if (request.isCreateIncident() && !aiOpsClientService.isReachable()) {
+                log.warn("Détection ignorée pour {}/{} — service IA injoignable (cerveau requis)",
+                        request.getNamespace(), request.getApp());
+                AIOpsAnalyzeResponse aiDownResp = new AIOpsAnalyzeResponse();
+                aiDownResp.setIncidentCreated(false);
+                aiDownResp.setMessage("Service IA injoignable — détection suspendue (cerveau du projet)");
+                return aiDownResp;
+            }
 
             AIPredictRequest predictRequest = new AIPredictRequest();
             predictRequest.setNamespace(request.getNamespace());

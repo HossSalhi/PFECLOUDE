@@ -42,6 +42,7 @@ public class AIOpsPollingScheduler {
     private final KubernetesDiscoveryService discoveryService;
     private final LeaderElectionService leaderElectionService;
     private final CamundaWorkflowService camundaWorkflowService;
+    private final AIOpsClientService aiOpsClientService;
     // "camunda" = Camunda orchestre monitoring -> IA (le backend lève l'alarme brute, Camunda appelle
     // l'IA via le process incident-detection). "backend" = historique (le backend appelle l'IA direct).
     @org.springframework.beans.factory.annotation.Value("${helios.detection.pipeline:backend}")
@@ -55,9 +56,11 @@ public class AIOpsPollingScheduler {
             RemediationProperties remediationProperties,
             KubernetesDiscoveryService discoveryService,
             LeaderElectionService leaderElectionService,
-            CamundaWorkflowService camundaWorkflowService
+            CamundaWorkflowService camundaWorkflowService,
+            AIOpsClientService aiOpsClientService
     ) {
         this.camundaWorkflowService = camundaWorkflowService;
+        this.aiOpsClientService = aiOpsClientService;
         this.orchestrationService = orchestrationService;
         this.incidentRepository = incidentRepository;
         this.pollingProperties = pollingProperties;
@@ -80,6 +83,12 @@ public class AIOpsPollingScheduler {
         // AUCUN incident (pas d'appel IA, pas de création). Camunda arrêté => 0 détection.
         if (!camundaWorkflowService.isReachable()) {
             logger.warn("AIOps polling: Camunda injoignable — détection SUSPENDUE (0 incident tant que Camunda est arrêté)");
+            return;
+        }
+        // L'IA = CERVEAU : si le service IA est injoignable, on ne démarre même pas le process de
+        // détection (le cerveau absent => rien à classer). IA arrêtée => 0 détection applicative.
+        if (!aiOpsClientService.isReachable()) {
+            logger.warn("AIOps polling: service IA injoignable — détection SUSPENDUE (0 incident tant que l'IA est arrêtée)");
             return;
         }
         if (!running.compareAndSet(false, true)) {

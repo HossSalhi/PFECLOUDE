@@ -36,6 +36,7 @@ public class AIOpsClientService {
     private static final Logger log = LoggerFactory.getLogger(AIOpsClientService.class);
 
     private final RestClient restClient;
+    private final String baseUrl;
 
     @Value("${aiops.client.circuit-breaker-threshold:3}")
     private int circuitBreakerThreshold;
@@ -87,6 +88,34 @@ public class AIOpsClientService {
             }
         }
         this.restClient = b.build();
+        this.baseUrl = baseUrl;
+    }
+
+    /**
+     * Sonde de disponibilité RÉELLE du service IA (GET /health, timeout 2s). Utilisée comme GATE :
+     * l'IA est le CERVEAU du projet — si elle est injoignable, HELIOS suspend la détection ET la
+     * remédiation (apps ET nœuds), exactement comme la garde Camunda. Distincte de {@link #isAvailable()}
+     * (état du circuit-breaker, qui ne bascule qu'après {@code circuitBreakerThreshold} échecs) : ici
+     * c'est IMMÉDIAT. Renvoie false sur toute erreur (connexion refusée, timeout) = fail-safe.
+     */
+    public boolean isReachable() {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(2)).build();
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(baseUrl.replaceAll("/+$", "") + "/health"))
+                    .timeout(java.time.Duration.ofSeconds(2))
+                    .GET().build();
+            java.net.http.HttpResponse<Void> resp =
+                    client.send(req, java.net.http.HttpResponse.BodyHandlers.discarding());
+            return resp.statusCode() >= 200 && resp.statusCode() < 300;
+        } catch (Exception ex) {
+            log.debug("AI service health probe failed ({}): {}", baseUrl, ex.getMessage());
+            return false;
+        }
     }
 
     private boolean isCircuitOpen() {
