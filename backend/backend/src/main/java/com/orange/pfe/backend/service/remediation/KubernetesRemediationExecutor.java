@@ -327,7 +327,23 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         V1Deployment deployment = appsV1Api.readNamespacedDeployment(deploymentName, namespace).execute();
         int currentReplicas = deployment.getSpec() != null && deployment.getSpec().getReplicas() != null
                 ? deployment.getSpec().getReplicas() : 1;
+        // SATURATION de replicas : si des pods sont Pending (le cluster ne peut pas tous les planifier),
+        // on réduit DIRECTEMENT au nombre de pods qui TIENNENT (Running) au lieu de -1 (sinon il faudrait
+        // N cycles). Sinon (scale-down "normal" recommandé par l'IA) on garde le comportement -1.
         int desiredReplicas = Math.max(1, currentReplicas - 1);
+        try {
+            List<V1Pod> pods = coreV1Api.listNamespacedPod(namespace)
+                    .labelSelector("app=" + deploymentName).execute().getItems();
+            long running = pods.stream().filter(p -> p.getStatus() != null
+                    && "Running".equalsIgnoreCase(p.getStatus().getPhase())).count();
+            long pending = pods.stream().filter(p -> p.getStatus() != null
+                    && "Pending".equalsIgnoreCase(p.getStatus().getPhase())).count();
+            if (pending > 0) {
+                desiredReplicas = (int) Math.max(1, running); // réduire au nombre planifiable
+            }
+        } catch (Exception ex) {
+            logger.debug("scaleDown: comptage des pods indisponible pour {}/{}: {}", namespace, deploymentName, ex.getMessage());
+        }
 
         if (desiredReplicas >= currentReplicas) {
             return new RemediationExecutionResult(false, deploymentName,

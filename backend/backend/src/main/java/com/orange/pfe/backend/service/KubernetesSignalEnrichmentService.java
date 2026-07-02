@@ -219,6 +219,18 @@ public class KubernetesSignalEnrichmentService {
                 logger.info("Running-but-NotReady pod(s) for {}/{} — DEPLOYMENT_UNAVAILABLE, rollback", namespace, app);
             }
 
+            // SATURATION DE REPLICAS : BEAUCOUP de pods Pending/Unschedulable (>=3) = le déploiement a
+            // trop de replicas pour la capacité du cluster (≠ POD_PENDING #5 = UN SEUL pod Pending à cause
+            // d'une requête trop grosse). La bonne remédiation PRO = SCALE_DOWN (réduire au nombre qui
+            // tient), pas un rollback (qui ne change pas le nombre de replicas). Marqueur dédié.
+            double pendingCount = countPendingUnschedulable(pods);
+            if (pendingCount >= 3) {
+                overrides.put("replica_saturation_detected", 1.0);
+                overrides.put("unavailable_replicas", pendingCount);
+                logger.info("Replica saturation for {}/{}: {} pod(s) Pending/Unschedulable — SCALE_DOWN",
+                        namespace, app, (int) pendingCount);
+            }
+
             // Active /metrics scrape (http503 + latency tests): podinfo is NOT a Prometheus scrape
             // target, so the AI never sees its HTTP signals. We scrape podinfo's own /metrics and
             // compute the RATE (delta vs the previous cycle) — the cumulative ratio is diluted by
@@ -804,6 +816,18 @@ public class KubernetesSignalEnrichmentService {
                     "PodScheduled".equals(cond.getType()) && "False".equalsIgnoreCase(cond.getStatus())
                             && cond.getReason() != null && cond.getReason().contains("Unschedulable"));
         });
+    }
+
+    /** Nombre de pods Pending ET explicitement Unschedulable (>=3 = saturation de replicas). */
+    private double countPendingUnschedulable(List<V1Pod> pods) {
+        return pods.stream().filter(pod -> {
+            if (pod.getStatus() == null || !"Pending".equalsIgnoreCase(pod.getStatus().getPhase())) return false;
+            if (pod.getMetadata() != null && pod.getMetadata().getDeletionTimestamp() != null) return false;
+            if (pod.getStatus().getConditions() == null) return false;
+            return pod.getStatus().getConditions().stream().anyMatch(cond ->
+                    "PodScheduled".equals(cond.getType()) && "False".equalsIgnoreCase(cond.getStatus())
+                            && cond.getReason() != null && cond.getReason().contains("Unschedulable"));
+        }).count();
     }
 
     /** True if any pod's INIT container is failing (CrashLoopBackOff, or terminated with a non-zero code). */

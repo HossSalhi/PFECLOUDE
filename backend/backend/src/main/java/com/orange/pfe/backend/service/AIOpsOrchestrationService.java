@@ -162,6 +162,7 @@ public class AIOpsOrchestrationService {
             final boolean forceConfig = featureOverrides.remove("config_error_detected") != null;
             final boolean forceInit = featureOverrides.remove("init_container_failure_detected") != null;
             final boolean forcePending = featureOverrides.remove("pod_pending_unschedulable_detected") != null;
+            final boolean forceSaturation = featureOverrides.remove("replica_saturation_detected") != null;
             final boolean forceDeployUnavail = featureOverrides.remove("deployment_unavailable_detected") != null;
             final boolean transientRollout = featureOverrides.remove("transient_rollout_detected") != null;
             final boolean autoscaleEnabled = featureOverrides.remove("autoscale_enabled") != null;
@@ -270,6 +271,18 @@ public class AIOpsOrchestrationService {
                     prediction.setIncident(true);
                     prediction.setSeverity("HIGH");
                     prediction.setConfidence(0.94);
+                }
+            } else if (forceSaturation) {
+                // SATURATION DE REPLICAS : beaucoup de pods Pending car TROP de replicas pour la capacité.
+                // La bonne remédiation = SCALE_DOWN (réduire au nombre planifiable), PAS un rollback (qui
+                // ne change pas le nombre de replicas). Plan SCALE_DOWN construit en bypass (voir plus bas).
+                prediction.setIncidentType("REPLICA_SATURATION");
+                prediction.setRecommendedAction("SCALE_DOWN");
+                prediction.setFinalExecutableAction("SCALE_DOWN");
+                if (!prediction.isIncident()) {
+                    prediction.setIncident(true);
+                    prediction.setSeverity("HIGH");
+                    prediction.setConfidence(0.92);
                 }
             } else if (forcePending) {
                 // Pod stuck Pending/Unschedulable (oversized resource request) -> rollback reverts the request.
@@ -439,12 +452,15 @@ public class AIOpsOrchestrationService {
             final String predictedType = safe(prediction.getIncidentType());
             final boolean rollbackByType = "POD_CRASH_LOOP".equals(predictedType)
                     || "DEPLOYMENT_UNAVAILABLE".equals(predictedType);
-            final boolean useRollbackPlan = !forceNetwork && (forceRollback || forceCrashLoop || forceOOM
+            // Saturation de replicas : SCALE_DOWN, jamais rollback (le rollback ne réduit pas les replicas).
+            // forcePending est aussi vrai (des pods sont Pending) -> on EXCLUT la saturation du rollback.
+            final boolean useScaleDownPlan = forceSaturation;
+            final boolean useRollbackPlan = !forceNetwork && !forceSaturation && (forceRollback || forceCrashLoop || forceOOM
                     || forceHttpError || forceLatency || forceConfig || forceInit || forcePending
                     || forceDeployUnavail || rollbackByType);
 
             AIOpsAnalyzeResponse result =
-                    transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response, useRollbackPlan));
+                    transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response, useRollbackPlan, useScaleDownPlan));
             // Email "incident détecté" AFTER commit (avoids holding the DB tx during SMTP).
             if (result != null && result.isIncidentCreated() && result.getIncidentId() != null) {
                 try {
@@ -518,7 +534,8 @@ public class AIOpsOrchestrationService {
             AIOpsAnalyzeRequest request,
             AIPredictResponse prediction,
             AIOpsAnalyzeResponse response,
-            boolean useRollbackPlan
+            boolean useRollbackPlan,
+            boolean useScaleDownPlan
     ) {
         Incident incident = createIncidentFromPrediction(prediction, request.getNamespace(), request.getApp());
         MDC.put("incidentId", String.valueOf(incident.getId()));
@@ -567,6 +584,18 @@ public class AIOpsOrchestrationService {
                     com.orange.pfe.backend.model.action.RemediationTargetKind.DEPLOYMENT,
                     request.getApp(),
                     rollbackReason
+            );
+        } else if (useScaleDownPlan) {
+            // SATURATION de replicas : SCALE_DOWN construit en bypass (même mécanisme que le rollback) ->
+            // auto-exécutable sans passer par l'allowlist. L'exécuteur réduit au nombre de pods planifiables.
+            plan = new com.orange.pfe.backend.service.remediation.RemediationPlan(
+                    ActionType.SCALE_DOWN,
+                    com.orange.pfe.backend.model.action.AutomationMode.AUTO,
+                    false, true, false, false, false,
+                    request.getNamespace(),
+                    com.orange.pfe.backend.model.action.RemediationTargetKind.DEPLOYMENT,
+                    request.getApp(),
+                    "Saturation de replicas — SCALE_DOWN auto vers le nombre de pods planifiables"
             );
         } else {
             plan = remediationPolicyService.buildPlan(request, prediction);
