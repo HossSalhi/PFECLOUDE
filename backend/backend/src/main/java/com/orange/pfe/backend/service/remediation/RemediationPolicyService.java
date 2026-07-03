@@ -198,6 +198,13 @@ public class RemediationPolicyService {
             case "SYNC_TIME_ON_NODE":
                 return ActionType.HOST_SYNC_TIME;
 
+            // ── Récupération nœud/VM (watchdog vmrun) : nœud NotReady/kernel-panic/kubelet-down/… ──
+            case "RESTART_NODE_VM":
+            case "RESTART_VM":
+            case "REBOOT_VM":
+            case "POWER_ON_VM":
+                return ActionType.RESTART_VM;
+
             // ── Rollback actions ──────────────────────────────────────────────
             case "ROLLBACK_RECENT_CHANGE_AND_RESTART":
             case "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC":
