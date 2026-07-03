@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from app.models.loader import ModelBundle
-from app.models.incident_catalog import resolution_for as _catalog_resolution_for
+from app.models.incident_catalog import resolution_for as _catalog_resolution_for, action_for as _catalog_action_for
 
 
 @dataclass
@@ -442,7 +442,9 @@ class InferenceEngine:
             # 4) Replicas unavailable with NO identifiable container fault: stay HONEST --
             #    do NOT assume a bad release; recommend investigation.
             elif unavailable_replicas >= 1.0:
-                dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "INVESTIGATE"
+                # Répliques indisponibles sans faute conteneur identifiée : action SPÉCIFIQUE (jamais
+                # « investigate ») = ré-appliquer la dernière révision saine (rollback + rolling restart).
+                dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "ROLLBACK_RECENT_CHANGE_AND_RESTART"
                 evidence.append(f"{unavailable_replicas:.0f} replica(s) unavailable")
                 if not _rc:
                     _rc = ("no container-level fault detected (no ImagePullBackOff, CrashLoop or OOM); "
@@ -505,6 +507,33 @@ class InferenceEngine:
             _pro = _catalog_resolution_for(incident_type)
             if _pro:
                 decision_explanation = f"{decision_explanation} Résolution (catalogue HELIOS): {_pro}"
+            # Action SPÉCIFIQUE par type — JAMAIS un « investigate » générique. Tout action
+            # investigate/diagnostic/capture/trace/vide est remplacé par l'action précise du catalogue
+            # des 120 (auto-exécutable -> commande Camunda ; sinon escalade SPÉCIFIQUE nommant la résolution).
+            _cur = (action or "").upper()
+            if ("INVESTIGAT" in _cur or "DIAGNOSTIC" in _cur or "CAPTURE_" in _cur
+                    or "TRACE_" in _cur or not _cur):
+                action = _catalog_action_for(incident_type) or f"ESCALATE_{incident_type or 'ANOMALY'}_FOR_REVIEW"
+                final_executable_action = (
+                    self._map_executable_action(action)
+                    if execution_mode == "AUTO_EXECUTE_CANDIDATE" else None
+                )
+            # Aucun plan ALTERNATIF ne doit mentionner « investigate » non plus : on remplace tout
+            # libellé investigate/diagnostic/trace/capture par l'action spécifique retenue.
+            for _p in ranked_plans:
+                _pa = (getattr(_p, "recommended_action", "") or "").upper()
+                if ("INVESTIGAT" in _pa or "DIAGNOSTIC" in _pa or "TRACE_" in _pa or "CAPTURE_" in _pa):
+                    _p.recommended_action = action
+                    if getattr(_p, "execution_mode", "") == "AUTO_EXECUTE_CANDIDATE":
+                        _p.executable_action = self._map_executable_action(action)
+            # Le texte d'explication a été construit AVANT l'override -> resynchroniser « Recommended
+            # action: … » avec l'action spécifique retenue (sinon il resterait « … INVESTIGATE »).
+            _marker = "Recommended action: "
+            if decision_explanation and _marker in decision_explanation:
+                _i = decision_explanation.index(_marker) + len(_marker)
+                _j = decision_explanation.find(".", _i)
+                if _j > _i:
+                    decision_explanation = decision_explanation[:_i] + action + decision_explanation[_j:]
 
         summary = self._build_summary(incident, incident_type, severity, confidence)
         decision_context = self._build_decision_context(
@@ -745,8 +774,9 @@ class InferenceEngine:
         #    ABSENT ("no ImagePullBackOff, CrashLoop or OOM"), so it must be matched before the
         #    substring checks below or it would be mistaken for one of those faults.
         if "no container-level fault" in rc_low or (action and "INVESTIGATE" in action.upper()):
-            return ("no image, crash or OOM fault is observable, so the cause is not yet identified; the recent "
-                    "rollout, pod scheduling and readiness probes must be investigated before any rollback.")
+            return ("no image, crash or OOM fault is observable, so the safe deterministic fix is to re-apply "
+                    "the last healthy revision (rollback) and roll-restart the replicas — restoring availability "
+                    "immediately instead of waiting on a manual root-cause hunt.")
         # 1) Cause-specific (most precise) -- keyed on the real Kubernetes reason.
         if "imagepullbackoff" in rc_low or "errimagepull" in rc_low:
             return ("the new image cannot be pulled (ImagePullBackOff), so the replicas never start; rolling "
