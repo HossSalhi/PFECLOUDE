@@ -12,8 +12,13 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    # update/patch = retirer les finalizers d'un pod bloqué en Terminating (POD_STUCK_TERMINATING)
-    verbs: ["get", "list", "watch", "delete", "update", "patch"]
+    # update/patch = retirer les finalizers d'un pod bloqué (POD_STUCK_TERMINATING) ;
+    # create = pod privilégié éphémère (HOST_EXEC) qui lance une commande hôte via nsenter sur le nœud
+    verbs: ["get", "list", "watch", "delete", "update", "patch", "create"]
+  # Lire la sortie du pod host-exec (résultat de la commande hôte)
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]

@@ -15,5 +15,7 @@ public enum ActionType {
     DRAIN_NODE,
     FORCE_RECREATE_DEPLOYMENT,
     RESTART_VM,
+    HOST_SYNC_TIME,
+    HOST_IMAGE_GC,
     ESCALATION
 }

@@ -88,7 +88,13 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
             return new RemediationExecutionResult(true, plan.targetName(),
                     "Escaladé à l'opérateur humain — aucune action Kubernetes automatique requise");
         }
-        if (!isNamespaceAllowlisted(plan.targetNamespace())) {
+        // Actions ciblant un NŒUD (RESTART_VM = power-on VM ; HOST_* = commande hôte via pod privilégié
+        // créé dans `pfe`) : elles n'opèrent PAS dans le namespace cible "k8s-nodes" (virtuel) -> exemptées
+        // du contrôle d'allowlist de namespace (sinon elles échouent sur "not allowlisted").
+        boolean nodeTargetingAction = plan.actionType() == ActionType.RESTART_VM
+                || plan.actionType() == ActionType.HOST_SYNC_TIME
+                || plan.actionType() == ActionType.HOST_IMAGE_GC;
+        if (!nodeTargetingAction && !isNamespaceAllowlisted(plan.targetNamespace())) {
             return new RemediationExecutionResult(
                     false,
                     plan.targetName(),
@@ -113,6 +119,10 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                     case CORDON_NODE              -> cordonNode(plan.targetName(), dryRun);
                     case DRAIN_NODE               -> drainNode(plan.targetNamespace(), plan.targetName(), dryRun);
                     case RESTART_VM               -> restartVm(plan.targetName());
+                    case HOST_SYNC_TIME           -> runHostCommand(plan.targetName(), "sync-time",
+                            "chronyc makestep || systemctl restart chronyd || systemctl restart systemd-timesyncd", dryRun);
+                    case HOST_IMAGE_GC            -> runHostCommand(plan.targetName(), "image-gc",
+                            "crictl -r unix:///run/containerd/containerd.sock rmi --prune", dryRun);
                     default -> new RemediationExecutionResult(
                             false,
                             plan.targetName(),
@@ -172,6 +182,70 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
             // node not found / unreachable = not ready
             logger.debug("Node readiness check failed for {}: {}", nodeName, ex.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Exécute une commande HÔTE sur un nœud, 100% DANS LE CLUSTER : crée un pod PRIVILÉGIÉ éphémère sur
+     * le nœud cible (nodeName + hostPID) qui, via `nsenter -t 1`, entre dans l'espace hôte du nœud et
+     * lance la commande whitelistée (busybox déjà en cache air-gap). Attend la fin, récupère la sortie,
+     * supprime le pod. Aucun Windows / SSH / pare-feu : c'est un pod Kubernetes ordinaire — conforme à
+     * « la remédiation se fait dans les VMs du cluster ». (Ne marche que si le nœud est Ready = kubelet up.)
+     */
+    private RemediationExecutionResult runHostCommand(String node, String label, String shellCmd, boolean dryRun)
+            throws ApiException, IOException {
+        ensureApis();
+        if (node == null || node.isBlank()) {
+            return new RemediationExecutionResult(false, "?", "host command '" + label + "': aucun nœud cible");
+        }
+        if (dryRun) {
+            return new RemediationExecutionResult(true, node, "[DRY-RUN] commande hôte '" + label + "' sur " + node);
+        }
+        String ns = "pfe";
+        String podName = "helios-hostexec-" + label.replaceAll("[^a-z0-9-]", "") + "-" + (System.currentTimeMillis() % 100000);
+        // POST du pod en JSON BRUT (DynamicKubernetesApi) plutôt que via le modèle V1Pod : le modèle du
+        // client Java sérialise un champ `overhead` parasite -> l'admission rejette ("Pod Overhead set
+        // without RuntimeClass"), alors que le MÊME pod via kubectl (y compris en tant que le SA backend)
+        // passe. Le JSON brut envoie exactement le spec voulu, sans overhead.
+        String escaped = shellCmd.replace("\\", "\\\\").replace("\"", "\\\"");
+        String podJson = "{"
+                + "\"apiVersion\":\"v1\",\"kind\":\"Pod\","
+                + "\"metadata\":{\"name\":\"" + podName + "\",\"namespace\":\"" + ns + "\",\"labels\":{\"app\":\"helios-hostexec\"}},"
+                + "\"spec\":{\"nodeName\":\"" + node + "\",\"hostPID\":true,\"restartPolicy\":\"Never\","
+                + "\"containers\":[{\"name\":\"exec\",\"image\":\"busybox:1.36\",\"securityContext\":{\"privileged\":true},"
+                + "\"command\":[\"nsenter\",\"-t\",\"1\",\"-m\",\"-u\",\"-i\",\"-n\",\"-p\",\"--\",\"sh\",\"-c\",\"" + escaped + "\"]}]}}";
+        try {
+            io.kubernetes.client.util.generic.dynamic.DynamicKubernetesApi podApi =
+                    new io.kubernetes.client.util.generic.dynamic.DynamicKubernetesApi("", "v1", "pods", coreV1Api.getApiClient());
+            podApi.create(new io.kubernetes.client.util.generic.dynamic.DynamicKubernetesObject(
+                    com.google.gson.JsonParser.parseString(podJson).getAsJsonObject())).throwsApiException();
+            logger.info("host-exec: pod privilégié {} créé sur {} (op={})", podName, node, label);
+            String phase = "Pending";
+            for (int i = 0; i < 25; i++) { // ~75s max
+                Thread.sleep(3000);
+                try {
+                    V1Pod p = coreV1Api.readNamespacedPod(podName, ns).execute();
+                    phase = (p.getStatus() != null && p.getStatus().getPhase() != null) ? p.getStatus().getPhase() : "Unknown";
+                } catch (ApiException transientRead) {
+                    continue;
+                }
+                if ("Succeeded".equals(phase) || "Failed".equals(phase)) break;
+            }
+            String out = "";
+            try { out = coreV1Api.readNamespacedPodLog(podName, ns).execute(); } catch (Exception ignore) {}
+            boolean ok = "Succeeded".equals(phase);
+            logger.info("host-exec: op={} sur {} -> {} ({})", label, node, phase, out.strip());
+            return new RemediationExecutionResult(ok, node,
+                    "Commande hôte '" + label + "' exécutée DANS LE CLUSTER sur " + node + " -> " + phase
+                            + (out.isBlank() ? "" : " | " + out.strip()));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return new RemediationExecutionResult(false, node, "commande hôte '" + label + "' interrompue");
+        } finally {
+            try {
+                coreV1Api.deleteNamespacedPod(podName, ns).gracePeriodSeconds(0)
+                        .propagationPolicy("Background").body(new V1DeleteOptions()).execute();
+            } catch (Exception ignore) {}
         }
     }
 
