@@ -92,6 +92,7 @@ class PredictResponse(BaseModel):
     confidence: float
     summary: str
     decision_explanation: str
+    catalog_resolution: str | None = None
     chosen_plan_id: str | None = None
     final_executable_action: str | None = None
     execution_mode: Literal["AUTO_EXECUTE_CANDIDATE", "RECOMMEND_ONLY"] = "RECOMMEND_ONLY"

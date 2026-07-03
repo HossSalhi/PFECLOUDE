@@ -95,14 +95,11 @@ public class InfrastructureHealthScheduler {
             log.warn("Infra health check: Camunda injoignable — détection infra/nœud SUSPENDUE (0 incident tant que Camunda est arrêté)");
             return;
         }
-        // L'IA = CERVEAU du projet : IA injoignable => AUCUNE détection infra/nœud ET AUCUN auto-heal.
-        // Comme la détection est ici la porte d'entrée qui déclenche handleNodeOutageRecovery (donc le
-        // power-on via watchdog), suspendre la détection suspend AUSSI la remédiation du nœud. IA arrêtée
-        // => le nœud tombé n'est ni détecté ni rallumé (même contrat que la garde Camunda).
-        if (!aiOpsClientService.isReachable()) {
-            log.warn("Infra health check: service IA injoignable — détection infra/nœud + auto-heal SUSPENDUS (0 incident, 0 power-on tant que l'IA est arrêtée)");
-            return;
-        }
+        // DÉTECTION NŒUD = CAMUNDA + MONITORING (pas l'IA). La classification du nœud est DÉTERMINISTE
+        // (un nœud/VM mort n'a pas de métriques exploitables par l'IA) ; l'IA ne fait qu'ENRICHIR le type
+        // quand elle est joignable (repli VM_DOWN sinon, voir enrichIncidentWithAi). L'IA injoignable ne
+        // suspend donc NI la détection nœud NI l'auto-heal (power-on via Camunda -> watchdog). Seule
+        // Camunda (orchestrateur central) reste une garde bloquante.
 
         log.info("Infrastructure health check started");
         List<ComponentStatus> statuses = healthService.checkAll();

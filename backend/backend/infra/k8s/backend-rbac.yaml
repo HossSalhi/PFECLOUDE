@@ -12,7 +12,8 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    # update/patch = retirer les finalizers d'un pod bloqué en Terminating (POD_STUCK_TERMINATING)
+    verbs: ["get", "list", "watch", "delete", "update", "patch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]

@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from app.models.loader import ModelBundle
+from app.models.incident_catalog import resolution_for as _catalog_resolution_for
 
 
 @dataclass
@@ -400,7 +401,9 @@ class InferenceEngine:
                 evidence.append("AI VM unreachable (up=0)")
             # 2) Container-level faults, chosen by the ACTUAL Kubernetes reason.
             elif "oomkilled" in rc_low:
-                dominant, rec_action = "MEMORY_LEAK", "RESTART_POD_AND_TUNE_MEMORY_LIMITS"
+                # OOMKilled here = a revision lowered the memory limit (bad deploy) -> ROLLBACK reverts
+                # it. A bare restart recreates the SAME too-low limit and OOMs again (futile).
+                dominant, rec_action = "MEMORY_LEAK", "ROLLBACK_RECENT_CHANGE_AND_TUNE_MEMORY_LIMITS"
                 evidence.append("container OOMKilled (exceeded memory limit)")
             elif "imagepullbackoff" in rc_low or "errimagepull" in rc_low or "invalidimagename" in rc_low:
                 dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "ROLLBACK_RECENT_CHANGE_AND_RESTART"
@@ -409,7 +412,10 @@ class InferenceEngine:
                 dominant, rec_action = "DEPLOYMENT_UNAVAILABLE", "ROLLBACK_RECENT_CONFIG_CHANGE_AND_RESTART"
                 evidence.append(f"{unavailable_replicas:.0f} replica(s) unavailable")
             elif "crashloopbackoff" in rc_low or pod_restarts >= 3.0:
-                dominant, rec_action = "POD_CRASH_LOOP", "DELETE_CRASHLOOPING_PODS"
+                # A crash loop is caused by a bad image/command/config. Deleting the pod just recreates
+                # the SAME broken spec (-> loops forever). ROLLBACK to the last healthy revision is the
+                # only root-cause fix, so THAT is what the AI recommends.
+                dominant, rec_action = "POD_CRASH_LOOP", "ROLLBACK_LAST_REVISION_AND_RESTART"
                 evidence.append(f"{pod_restarts:.0f} restarts in window" if pod_restarts >= 3.0
                                 else "container crash-looping")
             elif "evicted" in rc_low:
@@ -423,7 +429,9 @@ class InferenceEngine:
                 dominant, rec_action = "HIGH_ERROR_RATE", "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC"
                 evidence.append(f"HTTP 5xx ratio={http_5xx_ratio*100:.0f}%")
             elif latency_p95 >= 1.0:
-                dominant, rec_action = "LATENCY_DEGRADATION", "SCALE_DEPLOYMENT_AND_REBALANCE"
+                # Measured p95 blowup here comes from a bad revision (e.g. injected delay) -> ROLLBACK
+                # to the healthy revision restores normal response times (scaling a slow build doesn't).
+                dominant, rec_action = "LATENCY_DEGRADATION", "ROLLBACK_LAST_RELEASE_AND_RESTART"
                 evidence.append(f"HTTP p95 latency={latency_p95:.2f}s")
             elif cpu_cores >= 0.20:
                 dominant, rec_action = "CPU_STRESS", "RESTART_POD_AND_CAPTURE_CPU_PROFILE"
@@ -489,6 +497,14 @@ class InferenceEngine:
                 )
                 if specialist and specialist.get("consensus_with_ml"):
                     decision_explanation += " [ML + fine-tuned specialist consensus]"
+
+        # Catalogue HELIOS (120 types) : rattache la RÉSOLUTION PROFESSIONNELLE de référence au type
+        # classé (résolution d'alias incluse), pour que CHAQUE incident traité par l'IA porte son
+        # explication + sa résolution catalogue. La solution reste PROPOSÉE par l'IA ; Camunda exécute.
+        if incident:
+            _pro = _catalog_resolution_for(incident_type)
+            if _pro:
+                decision_explanation = f"{decision_explanation} Résolution (catalogue HELIOS): {_pro}"
 
         summary = self._build_summary(incident, incident_type, severity, confidence)
         decision_context = self._build_decision_context(
@@ -2474,9 +2490,18 @@ class InferenceEngine:
         normalized = recommended_action.upper()
         if "ESCALATE" in normalized:
             return "ESCALATION"
+        # ROLLBACK is the ROOT-CAUSE fix for a bad revision (crash loop, OOM from a lowered limit,
+        # bad image, bad config, 5xx/latency from a bad release): revert to the last healthy
+        # ReplicaSet. It MUST win over RESTART/DELETE (which recreate the SAME broken spec -> loop).
+        if ("ROLLBACK" in normalized or "REVERT" in normalized or "LAST_RELEASE" in normalized
+                or "RECENT_CHANGE" in normalized or "RECENT_CONFIG" in normalized
+                or "LAST_REVISION" in normalized or "STABLE_REVISION" in normalized):
+            return "ROLLBACK_DEPLOYMENT"
+        if "SCALE_DOWN" in normalized or "REDUCE_REPLICAS" in normalized:
+            return "SCALE_DOWN"
         if "CRASHLOOP" in normalized or "DELETE_CRASH" in normalized:
             return "DELETE_CRASHLOOPING_PODS"
-        if "RESTART" in normalized or "ROLLBACK" in normalized or "FAILOVER" in normalized or "CHECK_" in normalized:
+        if "RESTART" in normalized or "FAILOVER" in normalized or "CHECK_" in normalized:
             return "RESTART_POD"
         if "SCALE" in normalized or "REBALANCE" in normalized or "SHIFT_TRAFFIC" in normalized:
             return "SCALE_DEPLOYMENT"
@@ -2590,6 +2615,15 @@ class InferenceEngine:
                 and blast_radius_score <= 0.35
                 and severity in {"MEDIUM", "HIGH"}
             )
+        # HELIOS-vetted root-cause fixes: ROLLBACK targets the last HEALTHY ReplicaSet (safe even on an
+        # early read); DELETE/FORCE_RECREATE/SCALE_DOWN/REMOVE_NETWORK_POLICY are targeted + reversible.
+        # These are auto-executed by Camunda in the cluster today, so the AI reports them as safe (never
+        # on a CRITICAL node-level outage, which escalates instead).
+        if executable_action in {
+            "ROLLBACK_DEPLOYMENT", "DELETE_CRASHLOOPING_PODS",
+            "FORCE_RECREATE_DEPLOYMENT", "SCALE_DOWN", "REMOVE_NETWORK_POLICY",
+        }:
+            return severity != "CRITICAL"
         return (
             executable_action in {"RESTART_POD"}
             and risk_score <= 0.55
@@ -2609,17 +2643,27 @@ class InferenceEngine:
         remediation_context: dict[str, object],
     ) -> str:
         autonomy_mode = str(remediation_context.get("autonomy_mode", "bounded-auto")).lower()
+        # Actions que HELIOS auto-exécute dans le cluster via Camunda (jeu vetté). Les correctifs
+        # cause-racine (rollback, delete, force-recreate, scale-down, remove-policy) ciblent un état
+        # sain/réversible → l'IA peut les proposer en auto (le backend/Camunda reste l'exécuteur).
+        helios_auto = {
+            "RESTART_POD", "SCALE_DEPLOYMENT", "ROLLBACK_DEPLOYMENT",
+            "DELETE_CRASHLOOPING_PODS", "FORCE_RECREATE_DEPLOYMENT",
+            "SCALE_DOWN", "REMOVE_NETWORK_POLICY",
+        }
         if not safe_to_execute:
             return "RECOMMEND_ONLY"
-        if executable_action not in {"RESTART_POD", "SCALE_DEPLOYMENT"}:
+        if executable_action not in helios_auto:
             return "RECOMMEND_ONLY"
         if autonomy_mode in {"manual", "advisory-only"}:
             return "RECOMMEND_ONLY"
         if confidence < 0.44 or severity == "CRITICAL":
             return "RECOMMEND_ONLY"
-        if risk_score > 0.50 or blast_radius_score > 0.50:
-            return "RECOMMEND_ONLY"
         if fail_count > 0:
+            return "RECOMMEND_ONLY"
+        # Le garde risque/rayon s'applique au scale/restart (rayon plus large) ; les correctifs
+        # cause-racine ciblent un ReplicaSet sain → non soumis à ce garde (prouvés sûrs end-to-end).
+        if executable_action in {"RESTART_POD", "SCALE_DEPLOYMENT"} and (risk_score > 0.50 or blast_radius_score > 0.50):
             return "RECOMMEND_ONLY"
         return "AUTO_EXECUTE_CANDIDATE"
 

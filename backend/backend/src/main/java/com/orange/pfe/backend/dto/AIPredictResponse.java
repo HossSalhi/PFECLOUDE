@@ -27,6 +27,9 @@ public class AIPredictResponse {
     @JsonProperty("decision_explanation")
     private String decisionExplanation;
 
+    @JsonProperty("catalog_resolution")
+    private String catalogResolution;
+
     @JsonProperty("chosen_plan_id")
     private String chosenPlanId;
 
@@ -116,6 +119,14 @@ public class AIPredictResponse {
 
     public void setDecisionExplanation(String decisionExplanation) {
         this.decisionExplanation = decisionExplanation;
+    }
+
+    public String getCatalogResolution() {
+        return catalogResolution;
+    }
+
+    public void setCatalogResolution(String catalogResolution) {
+        this.catalogResolution = catalogResolution;
     }
 
     public String getChosenPlanId() {

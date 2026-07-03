@@ -231,6 +231,14 @@ public class KubernetesSignalEnrichmentService {
                         namespace, app, (int) pendingCount);
             }
 
+            // POD BLOQUÉ EN TERMINATING : un pod dont la suppression a été demandée mais qui reste présent
+            // bien après sa grace period = coincé par un FINALIZER qui ne se libère pas. La remédiation PRO =
+            // suppression forcée (retrait du finalizer), pas un rollback/restart. Marqueur déterministe dédié.
+            if (hasStuckTerminating(pods)) {
+                overrides.put("pod_stuck_terminating_detected", 1.0);
+                logger.info("Pod stuck Terminating for {}/{} — force delete (remove finalizer)", namespace, app);
+            }
+
             // Active /metrics scrape (http503 + latency tests): podinfo is NOT a Prometheus scrape
             // target, so the AI never sees its HTTP signals. We scrape podinfo's own /metrics and
             // compute the RATE (delta vs the previous cycle) — the cumulative ratio is diluted by
@@ -828,6 +836,23 @@ public class KubernetesSignalEnrichmentService {
                     "PodScheduled".equals(cond.getType()) && "False".equalsIgnoreCase(cond.getStatus())
                             && cond.getReason() != null && cond.getReason().contains("Unschedulable"));
         }).count();
+    }
+
+    /**
+     * True si un pod est BLOQUÉ en Terminating : sa suppression a été demandée (deletionTimestamp posé)
+     * mais il est toujours là bien après l'échéance (grace period + marge) — typiquement un finalizer
+     * qui ne se libère pas. On ne compte PAS un pod en cours de terminaison normale (marge de 45s).
+     */
+    private boolean hasStuckTerminating(List<V1Pod> pods) {
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now();
+        for (V1Pod pod : pods) {
+            if (pod.getMetadata() == null) continue;
+            java.time.OffsetDateTime del = pod.getMetadata().getDeletionTimestamp();
+            if (del == null) continue;
+            // deletionTimestamp = échéance (requête + grace). Bloqué si dépassée de > 45s.
+            if (del.plusSeconds(45).isBefore(now)) return true;
+        }
+        return false;
     }
 
     /** True if any pod's INIT container is failing (CrashLoopBackOff, or terminated with a non-zero code). */

@@ -35,12 +35,20 @@ ssh kube@192.168.148.161 "echo kube | sudo -S systemctl stop camunda8.service"
 ssh kube@192.168.148.161 "echo kube | sudo -S systemctl --no-block start camunda8.service"   # Zeebe boot ~60-90s
 ```
 
-### 1b. Garde IA (IA down ⇒ 0 détection + 0 auto-heal, apps ET nœud)
+### 1b. L'IA RECOMMANDE, elle ne DÉTECTE pas (IA down ⇒ Camunda détecte quand même, repli DÉTERMINISTE)
+> **Exigence encadrant** : la détection doit être faisable par **Camunda + monitoring**, PAS par l'IA. L'IA
+> est le **cerveau qui recommande** ; si elle tombe, Camunda **continue de détecter** et HELIOS remédie en
+> **repli déterministe** (marqueurs d'état K8s certain). Seule **Camunda** est une garde bloquante.
 ```bash
 # ARRÊT (sur .161)
 ssh kube@192.168.148.161 "echo kube | sudo -S systemctl stop pfe-ai-service.service"
-# -> panne app OU worker coupé : AUCUN incident, AUCUN auto-heal (logs: 'service IA injoignable — SUSPENDU')
-# REDÉMARRAGE  (health revient en ~10-20s -> la détection reprend, les pannes persistantes sont rattrapées)
+# -> panne à ÉTAT K8s certain (crashloop, oom, imagepull, config, init, pending, saturation, network,
+#    dns, db, disk, 5xx, latence, deploy-unavailable) : DÉTECTÉE + REMÉDIÉE en repli déterministe
+#    (logs: 'Service IA injoignable ... repli DÉTERMINISTE (marqueurs K8s)').
+# -> worker coupé : NŒUD DÉTECTÉ (VM_DOWN) + AUTO-HEAL (power-on via Camunda->watchdog) — inchangé.
+# -> SEULS les cas qui EXIGENT le cerveau (CPU_STRESS / AUTOSCALING = pas de marqueur d'état) attendent
+#    le retour de l'IA (on n'invente pas de classification).
+# REDÉMARRAGE  (health revient en ~10-20s -> l'IA reclasse/recommande de nouveau finement)
 ssh kube@192.168.148.161 "echo kube | sudo -S systemctl start pfe-ai-service.service"
 # vérifier: curl -s -o /dev/null -w '%{http_code}' http://192.168.148.161:8000/health   (200 = up)
 ```
@@ -172,4 +180,5 @@ kubectl -n pfe logs -l app=backend --tail=50 | grep -iE 'analyze|prediction|inci
 - **App faults = kubectl sur le master (via SSH) = dans le cluster** (pas depuis Windows/C:). C'est ainsi qu'une vraie panne K8s se produit — il n'y a pas de commande hôte pour un ImagePullBackOff.
 - **Node faults = vraies commandes hôte en SSH dans worker1/worker2** (kubelet).
 - Le **master n'héberge pas d'app** (par design) → seules les pannes nœud le concernent.
-- HELIOS **détecte** (marqueur K8s), **l'IA classe/explique/propose**, **Camunda exécute**, puis **vérifie → RESOLVED**.
+- **Détection = Camunda + monitoring** (alarme brute sur l'état K8s / métriques, SANS IA) → **Camunda orchestre** (process `incident-detection`) → **l'IA RECOMMANDE** (classe/explique/propose l'action) → **Camunda EXÉCUTE** dans le cluster → **vérifie → RESOLVED**.
+- **L'IA ne détecte pas et n'exécute pas** : c'est le **cerveau qui recommande**. IA down ⇒ Camunda détecte quand même et remédie en **repli déterministe** ; seuls les cas ambigus (CPU/HPA) attendent son retour. **Camunda down ⇒ 0 détection** (garde bloquante unique).

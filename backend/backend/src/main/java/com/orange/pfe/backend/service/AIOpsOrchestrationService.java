@@ -128,16 +128,14 @@ public class AIOpsOrchestrationService {
                 camundaDownResp.setMessage("Camunda injoignable — détection suspendue (orchestrateur central)");
                 return camundaDownResp;
             }
-            // L'IA = CERVEAU du projet : AUCUNE détection si le service IA est injoignable (même règle que
-            // Camunda). Le cerveau absent => HELIOS ne classe ni ne remédie rien. Gate au point UNIQUE
-            // analyze() (polling + watcher + webhook). IA arrêtée => 0 incident applicatif détecté.
-            if (request.isCreateIncident() && !aiOpsClientService.isReachable()) {
-                log.warn("Détection ignorée pour {}/{} — service IA injoignable (cerveau requis)",
+            // DÉTECTION = CAMUNDA + MONITORING (pas l'IA). L'IA est le CERVEAU qui RECOMMANDE, pas la
+            // garde de détection : si elle est injoignable, on NE bloque PAS. La détection continue et la
+            // classification bascule en repli DÉTERMINISTE (marqueurs d'état K8s ci-dessous). Camunda
+            // (orchestrateur central) reste la SEULE garde bloquante (vérifiée juste au-dessus).
+            final boolean aiReachable = aiOpsClientService.isReachable();
+            if (!aiReachable) {
+                log.warn("Service IA injoignable pour {}/{} — Camunda détecte quand même, classification en repli DÉTERMINISTE (marqueurs K8s)",
                         request.getNamespace(), request.getApp());
-                AIOpsAnalyzeResponse aiDownResp = new AIOpsAnalyzeResponse();
-                aiDownResp.setIncidentCreated(false);
-                aiDownResp.setMessage("Service IA injoignable — détection suspendue (cerveau du projet)");
-                return aiDownResp;
             }
 
             AIPredictRequest predictRequest = new AIPredictRequest();
@@ -163,6 +161,7 @@ public class AIOpsOrchestrationService {
             final boolean forceInit = featureOverrides.remove("init_container_failure_detected") != null;
             final boolean forcePending = featureOverrides.remove("pod_pending_unschedulable_detected") != null;
             final boolean forceSaturation = featureOverrides.remove("replica_saturation_detected") != null;
+            final boolean forceStuckTerminating = featureOverrides.remove("pod_stuck_terminating_detected") != null;
             final boolean forceDeployUnavail = featureOverrides.remove("deployment_unavailable_detected") != null;
             final boolean transientRollout = featureOverrides.remove("transient_rollout_detected") != null;
             final boolean autoscaleEnabled = featureOverrides.remove("autoscale_enabled") != null;
@@ -192,10 +191,33 @@ public class AIOpsOrchestrationService {
                     remediationHistoryContextService.buildContext(request.getNamespace(), request.getApp())
             );
 
-            AIPredictResponse prediction = aiOpsClientService.predict(predictRequest);
+            // L'IA (cerveau) CLASSE/RECOMMANDE quand elle est joignable. Sinon, repli DÉTERMINISTE :
+            // prédiction NEUTRE que SEULS les marqueurs force* (état K8s certain, ci-dessous) rempliront
+            // -> incident classé + remédié SANS IA. Aucun marqueur => reste non-incident (rien à classer,
+            // ex. CPU_STRESS/AUTOSCALING qui exigent le cerveau : on n'invente pas de classification).
+            AIPredictResponse prediction;
+            if (aiReachable) {
+                prediction = aiOpsClientService.predict(predictRequest);
+            } else {
+                prediction = new AIPredictResponse();
+                prediction.setIncident(false);
+                prediction.setConfidence(0.0);
+                prediction.setFeatures(new java.util.HashMap<>());
+            }
             // For ImagePullBackOff, override the AI recommendation regardless of confidence:
             // the K8s state is unambiguous and ROLLBACK_DEPLOYMENT is the correct deterministic fix.
-            if (forceNetwork) {
+            if (forceStuckTerminating) {
+                // Pod bloqué en Terminating (finalizer non libéré) : la remédiation PRO = suppression
+                // forcée (retrait du finalizer). Type + action déterministes, plan construit en bypass.
+                prediction.setIncidentType("POD_STUCK_TERMINATING");
+                prediction.setRecommendedAction("FORCE_DELETE_POD");
+                prediction.setFinalExecutableAction("FORCE_DELETE_POD");
+                if (!prediction.isIncident()) {
+                    prediction.setIncident(true);
+                    prediction.setSeverity("MEDIUM");
+                    prediction.setConfidence(0.93);
+                }
+            } else if (forceNetwork) {
                 // A recent DENY NetworkPolicy is the ROOT CAUSE (highest priority) — whether it shows as
                 // unreachable or as NotReady/crash. The concrete fix is to REMOVE that policy, never a
                 // rollback/restart (which would be futile while the policy persists). A DNS-blocking
@@ -452,15 +474,25 @@ public class AIOpsOrchestrationService {
             final String predictedType = safe(prediction.getIncidentType());
             final boolean rollbackByType = "POD_CRASH_LOOP".equals(predictedType)
                     || "DEPLOYMENT_UNAVAILABLE".equals(predictedType);
+            // L'IA fait AUTORITÉ sur l'action : si elle recommande (executable) un ROLLBACK ou un
+            // SCALE_DOWN, HELIOS l'exécute via le même bypass que les marqueurs déterministes. Les
+            // marqueurs force* deviennent un FILET (ils confirment/rattrapent quand l'IA a manqué le cas
+            // ou est muette). => « l'IA recommande, Camunda exécute », plus de déterministe visible.
+            final String aiExec = safe(prediction.getFinalExecutableAction());
+            final boolean aiWantsScaleDown = "SCALE_DOWN".equals(aiExec);
+            final boolean aiWantsRollback = "ROLLBACK_DEPLOYMENT".equals(aiExec);
             // Saturation de replicas : SCALE_DOWN, jamais rollback (le rollback ne réduit pas les replicas).
             // forcePending est aussi vrai (des pods sont Pending) -> on EXCLUT la saturation du rollback.
-            final boolean useScaleDownPlan = forceSaturation;
-            final boolean useRollbackPlan = !forceNetwork && !forceSaturation && (forceRollback || forceCrashLoop || forceOOM
+            // Pod bloqué en Terminating : suppression forcée (retrait finalizer) en bypass — jamais rollback.
+            final boolean useStuckDeletePlan = forceStuckTerminating;
+            final boolean useScaleDownPlan = !forceStuckTerminating && (forceSaturation || (aiWantsScaleDown && !forceNetwork));
+            final boolean useRollbackPlan = !forceStuckTerminating && !forceNetwork && !forceSaturation && !aiWantsScaleDown
+                    && (forceRollback || forceCrashLoop || forceOOM
                     || forceHttpError || forceLatency || forceConfig || forceInit || forcePending
-                    || forceDeployUnavail || rollbackByType);
+                    || forceDeployUnavail || rollbackByType || aiWantsRollback);
 
             AIOpsAnalyzeResponse result =
-                    transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response, useRollbackPlan, useScaleDownPlan));
+                    transactionTemplate.execute(status -> analyzeWithIncidentCreation(request, prediction, response, useRollbackPlan, useScaleDownPlan, useStuckDeletePlan));
             // Email "incident détecté" AFTER commit (avoids holding the DB tx during SMTP).
             if (result != null && result.isIncidentCreated() && result.getIncidentId() != null) {
                 try {
@@ -535,7 +567,8 @@ public class AIOpsOrchestrationService {
             AIPredictResponse prediction,
             AIOpsAnalyzeResponse response,
             boolean useRollbackPlan,
-            boolean useScaleDownPlan
+            boolean useScaleDownPlan,
+            boolean useStuckDeletePlan
     ) {
         Incident incident = createIncidentFromPrediction(prediction, request.getNamespace(), request.getApp());
         MDC.put("incidentId", String.valueOf(incident.getId()));
@@ -596,6 +629,18 @@ public class AIOpsOrchestrationService {
                     com.orange.pfe.backend.model.action.RemediationTargetKind.DEPLOYMENT,
                     request.getApp(),
                     "Saturation de replicas — SCALE_DOWN auto vers le nombre de pods planifiables"
+            );
+        } else if (useStuckDeletePlan) {
+            // Pod bloqué en Terminating : suppression forcée (retrait du finalizer) construite en bypass
+            // -> auto-exécutable. L'exécuteur retire les finalizers du/des pod(s) coincé(s) de l'app.
+            plan = new com.orange.pfe.backend.service.remediation.RemediationPlan(
+                    ActionType.FORCE_DELETE_POD,
+                    com.orange.pfe.backend.model.action.AutomationMode.AUTO,
+                    false, true, false, false, false,
+                    request.getNamespace(),
+                    com.orange.pfe.backend.model.action.RemediationTargetKind.DEPLOYMENT,
+                    request.getApp(),
+                    "Pod bloqué en Terminating — suppression forcée (retrait du finalizer)"
             );
         } else {
             plan = remediationPolicyService.buildPlan(request, prediction);
@@ -852,6 +897,7 @@ public class AIOpsOrchestrationService {
     }
 
     private static double feat(Map<String, Double> f, String key) {
+        if (f == null) return 0.0;
         Double v = f.get(key);
         return v == null || v.isNaN() || v.isInfinite() ? 0.0 : v;
     }
@@ -870,9 +916,18 @@ public class AIOpsOrchestrationService {
         // wording ("Recommended action: INVESTIGATE...") which contradicts the real action. The
         // deterministic per-type rationale is always coherent and never mentions INVESTIGATE.
         String signals = describeMeasuredSignals(prediction);
+        // Résolution PROFESSIONNELLE de référence issue du catalogue HELIOS des 120 types — calculée sur
+        // le TYPE FINAL de l'incident (donc cohérente avec le type affiché, même après un garde-fou
+        // force*), avec repli sur la résolution fournie par l'IA. Chaque incident porte ainsi son
+        // explication + sa résolution catalogue. L'action reste PROPOSÉE par l'IA, EXÉCUTÉE par Camunda.
+        String catalogPro = IncidentCatalog.resolutionFor(prediction.getIncidentType());
+        if (catalogPro == null || catalogPro.isBlank()) {
+            catalogPro = safe(prediction.getCatalogResolution());
+        }
         incident.setExplanation(
                 (signals.isEmpty() ? "" : "Constat mesuré : " + signals + ". ")
-                        + buildCauseRationaleFr(prediction));
+                        + buildCauseRationaleFr(prediction)
+                        + (catalogPro.isEmpty() ? "" : " Résolution (catalogue HELIOS) : " + catalogPro));
         incident.setSeverity(mapSeverity(prediction.getSeverity()));
         incident.setStatus(IncidentStatus.NEW);
         incident.setSource(IncidentSource.AI);

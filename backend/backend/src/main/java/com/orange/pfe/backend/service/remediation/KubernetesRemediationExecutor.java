@@ -107,6 +107,7 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                     case SCALE_DOWN               -> scaleDown(plan.targetNamespace(), plan.targetName(), dryRun);
                     case ROLLBACK_DEPLOYMENT      -> rollbackDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
                     case DELETE_CRASHLOOPING_PODS -> deleteCrashloopingPods(plan.targetNamespace(), plan.targetName(), dryRun);
+                    case FORCE_DELETE_POD        -> forceDeleteStuckPods(plan.targetNamespace(), plan.targetName(), dryRun);
                     case REMOVE_NETWORK_POLICY   -> removeBlockingNetworkPolicy(plan.targetNamespace(), plan.targetName(), dryRun);
                     case FORCE_RECREATE_DEPLOYMENT -> forceRecreateDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
                     case CORDON_NODE              -> cordonNode(plan.targetName(), dryRun);
@@ -544,6 +545,54 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         }
         return new RemediationExecutionResult(true, appLabel,
                 "Deleted " + deleted + " bad/evicted pod(s) for " + appLabel + " — the deployment converges to its healthy pods");
+    }
+
+    /**
+     * POD BLOQUÉ EN TERMINATING : sa suppression a été demandée mais un FINALIZER le retient. On retire
+     * le finalizer par read-modify-REPLACE (évite le 415 d'un raw V1Patch) — dès que la liste des
+     * finalizers est vide et que deletionTimestamp est posé, l'API server supprime le pod aussitôt. Un
+     * force-delete grace=0 en secours nettoie tout résidu. C'est un vrai `kubectl` exécuté (pas une escalade).
+     */
+    private RemediationExecutionResult forceDeleteStuckPods(String namespace, String appLabel, boolean dryRun)
+            throws ApiException, IOException {
+        ensureApis();
+        List<V1Pod> pods = coreV1Api.listNamespacedPod(namespace)
+                .labelSelector("app=" + appLabel)
+                .execute()
+                .getItems();
+        int cleared = 0;
+        for (V1Pod pod : pods) {
+            if (pod.getMetadata() == null || pod.getMetadata().getName() == null) continue;
+            if (pod.getMetadata().getDeletionTimestamp() == null) continue; // uniquement les pods en Terminating
+            String podName = pod.getMetadata().getName();
+            if (!dryRun) {
+                if (pod.getMetadata().getFinalizers() != null && !pod.getMetadata().getFinalizers().isEmpty()) {
+                    try {
+                        pod.getMetadata().setFinalizers(new java.util.ArrayList<>());
+                        coreV1Api.replaceNamespacedPod(podName, namespace, pod).execute();
+                        logger.info("Removed finalizers from stuck-terminating pod {}/{}", namespace, podName);
+                    } catch (ApiException ex) {
+                        if (ex.getCode() != 404 && ex.getCode() != 409) throw ex;
+                    }
+                }
+                try {
+                    coreV1Api.deleteNamespacedPod(podName, namespace)
+                            .gracePeriodSeconds(0)
+                            .propagationPolicy("Background")
+                            .body(new V1DeleteOptions())
+                            .execute();
+                } catch (ApiException ex) {
+                    if (ex.getCode() != 404) throw ex;
+                }
+            }
+            cleared++;
+        }
+        if (cleared == 0) {
+            return new RemediationExecutionResult(true, appLabel,
+                    "No stuck-terminating pod for " + appLabel + " (already gone)");
+        }
+        return new RemediationExecutionResult(true, appLabel,
+                "Force-deleted " + cleared + " stuck-terminating pod(s) for " + appLabel + " (finalizer removed)");
     }
 
     /**

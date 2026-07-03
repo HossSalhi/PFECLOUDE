@@ -18,6 +18,7 @@ from app.features.metric_features import (
     score_metric_risk,
 )
 from app.models.inference import InferenceEngine
+from app.models.incident_catalog import resolution_for as _catalog_resolution_for
 from app.models.loader import load_model_bundle
 from app.models.schemas import PredictEvidence, PredictRequest, PredictResponse
 from app.services.memory_store import ChromaMemoryStore, IncidentMemory
@@ -249,6 +250,7 @@ class PredictorService:
             confidence=round(self._finite(result.confidence), 4),
             summary=result.summary,
             decision_explanation=result.decision_explanation,
+            catalog_resolution=_catalog_resolution_for(result.incident_type) if result.incident else None,
             chosen_plan_id=result.chosen_plan_id,
             top_recommended_plans=result.top_recommended_plans,
             evidence=evidence,
