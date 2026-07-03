@@ -38,9 +38,13 @@ public class RemediationPolicyService {
         // incidents pour les apps affectées (ex. pfe/podinfo) ; ceux-là NE doivent PAS recevoir
         // RESTART_VM (sinon target=app, pas le nœud -> l'agent rejette). Le nom de nœud (app) sert
         // de target pour l'agent vmrun.
+        // EXCEPTION host-ops : un nœud UP avec disque plein / horloge décalée se répare par une COMMANDE
+        // HÔTE in-cluster (HOST_IMAGE_GC / HOST_SYNC_TIME), PAS par un reboot VM. On ne force donc
+        // RESTART_VM que si l'action n'est pas déjà une commande hôte ciblée.
         if (!recommendationOnly && "k8s-nodes".equalsIgnoreCase(request.getNamespace())
                 && prediction.getIncidentType() != null
-                && prediction.getIncidentType().toUpperCase(Locale.ROOT).contains("NODE")) {
+                && prediction.getIncidentType().toUpperCase(Locale.ROOT).contains("NODE")
+                && actionType != ActionType.HOST_IMAGE_GC && actionType != ActionType.HOST_SYNC_TIME) {
             actionType = ActionType.RESTART_VM;
         }
         String targetNamespace = request.getNamespace();
@@ -183,6 +187,16 @@ public class RemediationPolicyService {
         switch (normalized) {
             case "NO_ACTION":
                 return null;
+
+            // ── Commandes HÔTE in-cluster (pod privilégié nsenter sur le nœud) ────────
+            case "HOST_IMAGE_GC":
+            case "HOST_RUN_IMAGE_GC":
+            case "RUN_IMAGE_GC_ON_NODE":
+                return ActionType.HOST_IMAGE_GC;
+            case "HOST_SYNC_TIME":
+            case "SYNC_NTP_ON_NODE":
+            case "SYNC_TIME_ON_NODE":
+                return ActionType.HOST_SYNC_TIME;
 
             // ── Rollback actions ──────────────────────────────────────────────
             case "ROLLBACK_RECENT_CHANGE_AND_RESTART":
