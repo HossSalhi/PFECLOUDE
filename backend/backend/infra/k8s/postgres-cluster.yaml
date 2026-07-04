@@ -5,7 +5,10 @@ metadata:
   namespace: pfe
 spec:
   affinity:
-    podAntiAffinityType: preferred
+    # required = garantie DURE que le primaire et le réplica ne partagent JAMAIS un nœud
+    # (HA DB : la panne d'un nœud ne peut pas tuer les 2 instances à la fois). En preferred,
+    # un reschedule après panne pouvait les co-localiser -> perte de la garantie de failover.
+    podAntiAffinityType: required
   backup:
     retentionPolicy: 7d
     target: prefer-standby
