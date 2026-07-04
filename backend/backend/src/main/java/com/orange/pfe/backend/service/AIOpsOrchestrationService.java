@@ -204,6 +204,16 @@ public class AIOpsOrchestrationService {
                 prediction.setConfidence(0.0);
                 prediction.setFeatures(new java.util.HashMap<>());
             }
+            // L'IA DÉCIDE EN PREMIER (dynamique, intelligent) : si elle est joignable ET propose une action
+            // EXÉCUTABLE sûre, HELIOS garde SA décision telle quelle — plus d'override déterministe visible.
+            // Le force* ne sert plus qu'en SECOURS (IA down/muette/sans action exécutable). EXCEPTIONS :
+            // forceNetwork (NetworkPolicy bloquante) + forceStuckTerminating (finalizer) = faits K8s que l'IA
+            // NE VOIT PAS (absents de Prometheus) -> ils priment (sûreté), sinon rollback futile.
+            final String aiExecPref = safe(prediction.getFinalExecutableAction());
+            final boolean aiDecides = aiReachable && prediction.isIncident()
+                    && ("ROLLBACK_DEPLOYMENT".equals(aiExecPref) || "RESTART_POD".equals(aiExecPref)
+                        || "SCALE_DEPLOYMENT".equals(aiExecPref) || "SCALE_DOWN".equals(aiExecPref)
+                        || "DELETE_CRASHLOOPING_PODS".equals(aiExecPref));
             // For ImagePullBackOff, override the AI recommendation regardless of confidence:
             // the K8s state is unambiguous and ROLLBACK_DEPLOYMENT is the correct deterministic fix.
             if (forceStuckTerminating) {
@@ -232,6 +242,12 @@ public class AIOpsOrchestrationService {
                     prediction.setSeverity("HIGH");
                     prediction.setConfidence(0.92);
                 }
+            } else if (aiDecides) {
+                // L'IA a proposé une action EXÉCUTABLE sûre -> on l'exécute TELLE QUELLE (dynamique).
+                // Aucun override déterministe : le type, l'action et l'explication viennent de l'IA.
+                log.info("Action décidée par l'IA (DYNAMIQUE) pour {}/{}: type={} action={} confiance={} "
+                        + "— aucun override déterministe", request.getNamespace(), request.getApp(),
+                        prediction.getIncidentType(), aiExecPref, prediction.getConfidence());
             } else if (forceOOM) {
                 // OOMKilled (memory test): revert the change that lowered the memory limit -> rollback.
                 prediction.setIncidentType("MEMORY_STRESS");
