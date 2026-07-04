@@ -113,7 +113,8 @@ public class SecurityConfig {
                         "/actuator/health/**",
                         "/actuator/prometheus",
                         "/actuator/info",
-                        "/api/events/**"
+                        "/api/events/**",
+                        "/api/webhooks/falco"   // ingestion Falco (trafic interne cluster)
                 ).permitAll();
 
                 // Swagger (si activé)

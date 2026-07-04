@@ -1,0 +1,53 @@
+# HELIOS — valeurs Helm Falco (détection SÉCURITÉ eBPF -> incident -> IA -> Camunda).
+#
+# Installe une DÉTECTION de la catégorie Sécurité (crypto-mining, shell dans un conteneur,
+# lecture de fichier sensible, écriture sous un binaire, escalade de privilèges…) qu'aucun
+# signal Prometheus/état-K8s ne voit. Falco (sonde eBPF moderne CO-RE, aucun header noyau
+# requis grâce au BTF) tourne en DaemonSet sur master+worker1+worker2 ; Falcosidekick POST
+# chaque alerte vers le webhook backend (/api/webhooks/falco) qui crée un incident HELIOS et
+# déclenche la remédiation Camunda (remplacement du pod compromis).
+#
+# Prérequis validés sur le cluster : helm v4, noyau 6.8 (>=5.8), /sys/kernel/btf/vmlinux présent.
+# Install :
+#   helm repo add falcosecurity https://falcosecurity.github.io/charts && helm repo update
+#   helm upgrade --install falco falcosecurity/falco -n falco --create-namespace -f falco-values.yaml
+#
+# Empreinte modeste (cluster contraint) : ~128Mi/agent. Le webhook backend n'auto-remédie QUE
+# les règles à haute confiance (voir FalcoWebhookController.isActionableRule) et JAMAIS les
+# composants HELIOS (backend/frontend/postgres) — anti-boucle d'auto-sabotage.
+
+driver:
+  kind: modern_ebpf          # CO-RE : pas de compilation de module, pas de headers noyau
+
+falco:
+  json_output: true
+  json_include_output_property: true
+  log_level: info
+  http_output:
+    enabled: true
+    url: "http://falco-falcosidekick:2801"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 384Mi
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  config:
+    debug: false
+    webhook:
+      address: "http://backend.pfe.svc.cluster.local:8080/api/webhooks/falco"
+      method: POST
+      minimumpriority: notice
