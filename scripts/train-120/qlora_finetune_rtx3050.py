@@ -17,7 +17,7 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfi
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CORPUS = os.path.join(HERE, "corpus_120_sft.jsonl")
+CORPUS = os.path.join(HERE, os.environ.get("FT_CORPUS", "corpus_120_sft.jsonl"))
 BASE = os.environ.get("FT_BASE", "Qwen/Qwen2.5-1.5B-Instruct")
 OUT_LORA = os.path.join(HERE, "aiops-sre-120-ft-lora")
 OUT_MERGED = os.path.join(HERE, "aiops-sre-120-ft-merged")
@@ -39,7 +39,9 @@ def main():
     ds = ds.map(to_text, remove_columns=ds.column_names)
 
     def tokenize(ex):
-        out = tok(ex["text"], truncation=True, max_length=MAXLEN, padding="max_length")
+        # padding DYNAMIQUE (pas 'max_length') -> le collator padde par batch ; avec batch=1,
+        # chaque séquence garde sa longueur réelle -> VRAM très réduite (évite l'OOM sur 4 Go).
+        out = tok(ex["text"], truncation=True, max_length=MAXLEN)
         out["labels"] = out["input_ids"].copy()
         return out
     ds = ds.map(tokenize, remove_columns=["text"])
