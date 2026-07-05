@@ -49,7 +49,12 @@ def main():
     bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
                              bnb_4bit_compute_dtype=torch.float16,
                              bnb_4bit_use_double_quant=True)
-    model = AutoModelForCausalLM.from_pretrained(BASE, quantization_config=bnb, device_map={"": 0})
+    # device_map='auto' + plafond VRAM : quantifie couche par couche + offload CPU du surplus fp16
+    # pendant le chargement -> évite le pic fp16 qui OOM sur 4 Go (nécessaire pour le 1.5B).
+    _maxvram = os.environ.get("FT_MAXVRAM", "3000MB")
+    model = AutoModelForCausalLM.from_pretrained(
+        BASE, quantization_config=bnb, device_map="auto",
+        max_memory={0: _maxvram, "cpu": "12GB"}, low_cpu_mem_usage=True)
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     model.config.use_cache = False
     lora = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, bias="none", task_type="CAUSAL_LM",
