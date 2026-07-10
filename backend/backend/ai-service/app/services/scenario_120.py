@@ -34,13 +34,26 @@ _NUM_MAP = {
     "warning_lines":        ["warning_line_count", "warning_lines"],
 }
 
-# reasons K8s canoniques repérables dans le texte de root-cause (event.reason fiable)
-_EVENT_REASONS = [
-    "OOMKilled", "ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CrashLoopBackOff",
-    "CreateContainerConfigError", "RunContainerError", "ContainerCannotRun", "Evicted",
-    "FailedScheduling", "Unhealthy", "BackOff", "FailedMount", "NodeNotReady",
-    "FailedCreatePodSandBox", "DeadlineExceeded", "Failed", "Killing", "Preempting",
+# event.reason K8s -> type des 120 (VÉRITÉ TERRAIN : un fait K8s, pas une prédiction).
+# Ordre = priorité de détection dans le texte de root-cause. Couvre les types "event-driven".
+_ER_TYPE = [
+    ("OOMKilled", "POD_OOM_KILLED"),
+    ("ImagePullBackOff", "POD_IMAGE_PULL_BACKOFF"),
+    ("ErrImagePull", "POD_ERR_IMAGE_PULL"),
+    ("InvalidImageName", "POD_IMAGE_PULL_BACKOFF"),
+    ("CrashLoopBackOff", "POD_CRASH_LOOP"),
+    ("CreateContainerConfigError", "POD_CONFIG_ERROR"),
+    ("RunContainerError", "POD_CONTAINER_RUNTIME_ERROR"),
+    ("ContainerCannotRun", "POD_CONTAINER_RUNTIME_ERROR"),
+    ("FailedCreatePodSandBox", "POD_CONTAINER_RUNTIME_ERROR"),
+    ("Evicted", "POD_EVICTED"),
+    ("FailedScheduling", "POD_PENDING_INSUFFICIENT_RESOURCES"),
+    ("FailedMount", "VOLUME_MOUNT_FAILURE"),
+    ("NodeNotReady", "NODE_NOT_READY"),
+    ("Unhealthy", "POD_FAILED_PROBE"),
+    ("BackOff", "POD_CRASH_LOOP"),
 ]
+_EVENT_REASONS = [r for r, _ in _ER_TYPE] + ["DeadlineExceeded", "Failed", "Killing"]
 
 
 class Scenario120:
@@ -70,6 +83,15 @@ class Scenario120:
             if r.lower() in low:
                 return r
         return "None"
+
+    @staticmethod
+    def reason_type(rc: str | None) -> str | None:
+        """Type des 120 déduit DÉTERMINISTIQUEMENT de l'event.reason K8s (vérité terrain)."""
+        low = (rc or "").lower()
+        for reason, itype in _ER_TYPE:
+            if reason.lower() in low:
+                return itype
+        return None
 
     @staticmethod
     def log_sig(logs) -> str:
@@ -115,8 +137,9 @@ class Scenario120:
             else:
                 lbl = self.le.inverse_transform(self.model.predict(X))[0]
                 top = [{"type": str(lbl), "confidence": None}]
-            return {"event_reason": er, "type": top[0]["type"],
-                    "confidence": top[0]["confidence"], "top": top, "authoritative": False}
+            return {"event_reason": er, "reason_type": self.reason_type(rc),
+                    "type": top[0]["type"], "confidence": top[0]["confidence"],
+                    "top": top, "authoritative": False}
         except Exception as exc:
             logger.debug("Scenario120 shadow predict failed: %s", exc)
             return None

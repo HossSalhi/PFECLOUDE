@@ -64,12 +64,16 @@ class InferenceEngine:
             self._llm_timeout = getattr(settings, "llm_timeout_seconds", 25.0)
             self._rag_enabled = getattr(settings, "rag_enabled", True)
             self._rag_top_k = getattr(settings, "rag_top_k", 3)
+            self._ensemble_120 = getattr(settings, "ensemble_120_enabled", True)
+            self._ml120_threshold = getattr(settings, "ml120_confidence_threshold", 0.85)
         else:
             self._llm_decider_model = "helios-120-3b"
             self._llm_fallback_model = "qwen2.5:3b"
             self._llm_timeout = 25.0
             self._rag_enabled = True
             self._rag_top_k = 3
+            self._ensemble_120 = True
+            self._ml120_threshold = 0.85
         # RAG : index des 120 cartes catalogue (construit paresseusement au 1er appel).
         self._rag = RagRetriever() if self._rag_enabled else None
         # ML 120 candidat en SHADOW (non autoritaire) : chargé paresseusement s'il est présent.
@@ -393,6 +397,34 @@ class InferenceEngine:
                 incident, noise, incident_type = False, True, "NO_INCIDENT"
 
             if incident:
+                # ── ENSEMBLE ML+LLM sur les 120 ──────────────────────────────────
+                # Le ML 120 (entraîné sur 12000 ex.) PROMEUT le type quand il est SÛR
+                # (event_reason K8s + confiance >= seuil) -> il décide la classification
+                # parmi les 120. Sinon on garde la classification de base (plancher K8s).
+                ml_120_shadow = self._ml_120_shadow(
+                    safe_features, _rc, "; ".join(evidence) if evidence else "")
+                if ml_120_shadow:
+                    ml_120_shadow["previous_type"] = incident_type
+                    # event.reason K8s = VÉRITÉ TERRAIN -> type déterministe (couvre les 120
+                    # event-driven). Prime sur la prédiction ML brute (qui peut être feature-dominée).
+                    _er_type = ml_120_shadow.get("reason_type")
+                    if self._ensemble_120 and _er_type:
+                        if _er_type != incident_type:
+                            incident_type = _er_type
+                            _newact = _catalog_action_for(incident_type)
+                            if _newact:
+                                action = _newact
+                                final_executable_action = (
+                                    self._map_executable_action(action)
+                                    if execution_mode == "AUTO_EXECUTE_CANDIDATE" else None)
+                        ml_120_shadow["promoted_authoritative"] = True
+                    else:
+                        ml_120_shadow["promoted_authoritative"] = False
+                    # cohérence prédiction ML 120 vs vérité terrain (mesure sa qualité pour Phase 2)
+                    ml_120_shadow["ml_agrees_event_reason"] = (
+                        (ml_120_shadow.get("type") == _er_type) if _er_type else None)
+                    ml_120_shadow["agrees_with_authoritative"] = (
+                        ml_120_shadow.get("type") == incident_type)
                 if _rc:
                     evidence.append(f"K8s root cause: {_rc}")
                 ev = "; ".join(evidence) if evidence else f"composite risk score={overall_risk:.2f}"
@@ -401,11 +433,11 @@ class InferenceEngine:
                 # cause -- so it can only improve the answer, never degrade or fabricate it.
                 why = self._why_for(incident_type, action, _rc)
                 ai_decision = None
-                ml_120_shadow = None
                 if not skip_llm:
-                    # NOUVEAU : le LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120)
-                    # décide + explique. Entièrement gardé : toute panne LLM -> why déterministe conservé.
-                    ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc)
+                    # Le LLM (helios-120-3b) ANCRÉ par le RAG + les CANDIDATS top-3 du ML 120
+                    # décide l'action + explique. Gardé : panne LLM -> why déterministe conservé.
+                    _cands = [c.get("type") for c in (ml_120_shadow.get("top") or [])] if ml_120_shadow else None
+                    ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc, candidates=_cands)
                     if (ai_decision and ai_decision.get("explication")
                             and self._llm_ok(ai_decision["explication"], _rc)):
                         why = ai_decision["explication"]
@@ -418,10 +450,6 @@ class InferenceEngine:
                     _aa = (ai_decision["action"] or "").upper()
                     if _aa and (_aa == (action or "").upper() or _aa in (action or "").upper()):
                         decision_explanation += " [LLM+RAG consensus]"
-                # ML 120 candidat en SHADOW : prédit en parallèle, journalisé, NON autoritaire.
-                ml_120_shadow = self._ml_120_shadow(safe_features, _rc, ev)
-                if ml_120_shadow:
-                    ml_120_shadow["agrees_with_authoritative"] = (ml_120_shadow.get("type") == incident_type)
 
         # Catalogue HELIOS (120 types) : rattache la RÉSOLUTION PROFESSIONNELLE de référence au type
         # classé (résolution d'alias incluse), pour que CHAQUE incident traité par l'IA porte son
@@ -810,7 +838,7 @@ class InferenceEngine:
         except Exception:
             return None
 
-    def _llm_decide(self, incident_type, severity, evidence, action, rc):
+    def _llm_decide(self, incident_type, severity, evidence, action, rc, candidates=None):
         """Moteur de décision : LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120).
         Sortie modèle attendue : 'DIAGNOSTIC: <cause> | ACTION=<NAME> | EXPLICATION: <fix>'.
         Retourne {model, diagnostic, action, explication, rag_grounded} ou None.
@@ -830,6 +858,10 @@ class InferenceEngine:
             )
             if rag_ctx:
                 system_msg += "\n\n" + rag_ctx
+            if candidates:
+                _ct = ", ".join(dict.fromkeys([c for c in candidates if c]))
+                if _ct:
+                    system_msg += f"\n\nML classifier candidate types (most likely first): {_ct}."
             user_msg = (
                 f"Incident: {incident_type} (severity {severity}). "
                 f"Measured evidence: {evidence}. "

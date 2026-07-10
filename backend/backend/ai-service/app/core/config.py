@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     rag_enabled: bool = True
     rag_top_k: int = 3
 
+    # ── Ensemble ML+LLM sur les 120 types ─────────────────────────────────────
+    # Le ML 120 (entraîné sur 12000 ex.) PROMEUT le type quand il est sûr (event_reason
+    # K8s présent + confiance >= seuil) → il décide la classification parmi les 120.
+    # Le LLM voit les candidats top-3 du ML + le RAG → décide l'action + explique.
+    # Les deux collaborent ; les faits K8s restent le plancher de sûreté.
+    ensemble_120_enabled: bool = True
+    ml120_confidence_threshold: float = 0.85
+
     default_window_minutes: int = 5
     model_path: str = "model_artifacts/model.joblib"
 
