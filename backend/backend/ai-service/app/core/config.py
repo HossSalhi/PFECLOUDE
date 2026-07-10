@@ -20,15 +20,22 @@ class Settings(BaseSettings):
     monitoring_prometheus_port: int = 9090
     ai_service_port: int = 8000
 
-    # Local LLM model served by Ollama. Set to "aiops-sre" after running deploy-aiops-model.sh.
-    llm_model: str = "aiops-sre-q4"
-    llm_fallback_model: str = "qwen2.5:3b"
-    llm_second_fallback_model: str = "qwen2:0.5b"
-    # Fine-tuned 0.5B specialist used by InferenceEngine as the LoRA opinion gate
-    llm_specialist_model: str = "aiops-sre-ft-v2"
+    # NOUVEAU moteur de décision+explication : Qwen2.5-3B fine-tuné HELIOS (120 types),
+    # servi par Ollama sur .161 (déployé via scripts/llm-finetune/deploy_helios_120_gguf.py).
+    # Sortie attendue : "DIAGNOSTIC: <cause> | ACTION=<ACTION_NAME> | EXPLICATION: <fix>".
+    llm_model: str = "helios-120-3b"
+    # Repli si le modèle fine-tuné est indisponible (modèle de base généraliste sur .161).
+    llm_fallback_model: str = "qwen2.5:3b-instruct"
     # Per-request httpx timeout for all Ollama calls (AIOPS_LLM_TIMEOUT_SECONDS).
-    # Increase for larger models or GPU-saturated environments.
-    llm_timeout_seconds: float = 13.0
+    # 3B sur CPU = plus lent que l'ancien 0.5B ; on élargit la fenêtre.
+    llm_timeout_seconds: float = 25.0
+
+    # ── RAG (Retrieval-Augmented Generation) ──────────────────────────────────
+    # Ancre le LLM dans le catalogue des 120 incidents : on récupère les k cartes
+    # les plus proches (type + résolution PRO + action câblée) et on les injecte
+    # dans le prompt → moins d'hallucination, décisions fidèles au catalogue.
+    rag_enabled: bool = True
+    rag_top_k: int = 3
 
     default_window_minutes: int = 5
     model_path: str = "model_artifacts/model.joblib"

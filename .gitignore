@@ -52,3 +52,10 @@ frontend/target/
 
 # Local restore snapshots / scratch
 .restore/
+
+# HELIOS — LLM fine-tune & ML 120 : donnees d'entrainement + artefacts binaires (trop lourds)
+scripts/llm-finetune/*.jsonl
+scripts/train-120/*.csv
+scripts/train-120/artifacts/*.joblib
+scripts/train-120/artifacts/*.png
+*.gguf

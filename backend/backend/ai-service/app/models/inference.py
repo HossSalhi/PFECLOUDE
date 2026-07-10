@@ -6,6 +6,7 @@ import numpy as np
 
 from app.models.loader import ModelBundle
 from app.models.incident_catalog import resolution_for as _catalog_resolution_for, action_for as _catalog_action_for
+from app.services.rag_retriever import RagRetriever
 
 
 @dataclass
@@ -51,104 +52,29 @@ class PlanOption:
 
 
 class InferenceEngine:
-    # Class-level constants — built once at class definition time, never per-call.
-    _SPECIALIST_TYPES = [
-        "NO_INCIDENT", "POD_CRASH_LOOP", "POD_OOM_KILLED", "POD_IMAGE_PULL_BACKOFF",
-        "POD_PENDING_INSUFFICIENT_RESOURCES", "POD_STUCK_TERMINATING", "POD_LIVENESS_FAILURE",
-        "POD_READINESS_FAILURE", "POD_INIT_CONTAINER_FAILURE", "NODE_NOT_READY", "NODE_DISK_FULL",
-        "NODE_HIGH_CPU", "NODE_HIGH_MEMORY", "NODE_KUBELET_DOWN", "NODE_HARDWARE_FAILURE",
-        "NODE_CLOCK_SKEW", "NODE_DISK_IO_SATURATION", "DB_CONNECTION_REFUSED", "DB_DEADLOCK",
-        "DB_REPLICATION_LAG", "DB_SLOW_QUERIES", "DB_DISK_FULL", "DB_HIGH_WRITE_LOAD",
-        "DB_CONNECTION_POOL_EXHAUSTION", "NETWORK_DNS_FAILURE", "NETWORK_PARTITION",
-        "NETWORK_PACKET_LOSS", "NETWORK_LATENCY_BETWEEN_NODES", "INGRESS_BACKEND_DOWN",
-        "SERVICE_DISCOVERY_FAILURE", "AUTH_TOKEN_EXPIRED", "AUTH_BRUTE_FORCE_ATTEMPT",
-        "UNAUTHORIZED_API_ACCESS_SPIKE", "TLS_CERTIFICATE_EXPIRY", "SECRET_ROTATION_FAILURE",
-        "PVC_PENDING", "PVC_USAGE_HIGH", "PV_FILESYSTEM_CORRUPTION", "HIGH_LATENCY_P95",
-        "HIGH_LATENCY_P99", "ERROR_RATE_4XX_SPIKE", "ERROR_RATE_5XX_SPIKE", "REQUEST_RATE_DROP",
-        "CIRCUIT_BREAKER_OPEN", "THREAD_POOL_EXHAUSTION", "MEMORY_LEAK", "CPU_SATURATION",
-        "EXTERNAL_API_DEPENDENCY_DOWN", "METRICS_SCRAPE_FAILURE", "PROMETHEUS_OUT_OF_MEMORY",
-        "LOKI_INGESTION_LAG", "UNKNOWN_ANOMALY",
-    ]
-    _SPECIALIST_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "incident_type": {"type": "string", "enum": _SPECIALIST_TYPES},
-            "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-            "recommended_action": {"type": "string"},
-            "explanation": {"type": "string"},
-        },
-        "required": ["incident_type", "severity", "recommended_action"],
-    }
-    _SPECIALIST_SYS = (
-        "You are an SRE incident classifier. Given a trace, output the single best "
-        "incident_type from the allowed list, its severity, a recommended_action, "
-        "and a one-line explanation. JSON only."
-    )
-    _LLM_VALID_TYPES = frozenset({
-        "CPU_STRESS", "MEMORY_STRESS", "APPLICATION_ERROR_STORM",
-        "DATABASE_CONNECTIVITY", "AVAILABILITY_DROP", "RESTART_LOOP",
-        "GENERAL_DEGRADATION", "VM_DOWN", "NO_INCIDENT",
-    })
-    _LLM_VALID_ACTIONS = frozenset({
-        "SCALE_DEPLOYMENT_AND_CAPTURE_CPU_PROFILE",
-        "RESTART_POD_AND_SCALE_MEMORY_LIMITS",
-        "ROLLBACK_LAST_RELEASE_AND_SHED_TRAFFIC",
-        "FAILOVER_DATABASE_AND_RESTART_WORKLOAD",
-        "SCALE_DEPLOYMENT_AND_REBALANCE",
-        "ROLLBACK_RECENT_CHANGE_AND_RESTART",
-        "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE",
-        "RESTART_POD_AND_INVESTIGATE",
-        "NO_ACTION",
-    })
-    _LLM_SYSTEM_MSG = (
-        "You are a Kubernetes SRE JSON API. "
-        "You receive pre-classified signals (NORMAL/ELEVATED/HIGH/CRITICAL) and output ONLY a JSON object. "
-        "No explanation outside the JSON."
-    )
-    _LLM_TAXONOMY = (
-        "TAXONOMY_51_CLASSES (pick the BEST match):\n"
-        "POD: POD_CRASH_LOOP(restarts>5), POD_OOM_KILLED(OOMKilled+mem high), "
-        "POD_IMAGE_PULL_BACKOFF(image registry), POD_PENDING_INSUFFICIENT_RESOURCES(cluster ressources), "
-        "POD_STUCK_TERMINATING(deletion stuck), POD_LIVENESS_FAILURE(probe KO), "
-        "POD_READINESS_FAILURE(not ready no crash), POD_INIT_CONTAINER_FAILURE(init failed); "
-        "APP: HIGH_LATENCY_P95(p95>1s), HIGH_LATENCY_P99(tail>3s), "
-        "ERROR_RATE_5XX_SPIKE(5xx ratio), ERROR_RATE_4XX_SPIKE(4xx ratio), "
-        "REQUEST_RATE_DROP(traffic drop), MEMORY_LEAK(mem growing linear), "
-        "CPU_SATURATION(cpu>90%), THREAD_POOL_EXHAUSTION(java threads blocked), "
-        "DB_CONNECTION_POOL_EXHAUSTION(hikari pending>5), CIRCUIT_BREAKER_OPEN(CB tripped); "
-        "DB: DB_SLOW_QUERIES, DB_DEADLOCK, DB_REPLICATION_LAG, DB_DISK_FULL, "
-        "DB_CONNECTION_REFUSED(up=0), DB_HIGH_WRITE_LOAD; "
-        "NET: NETWORK_DNS_FAILURE(SERVFAIL spike), NETWORK_PACKET_LOSS, "
-        "NETWORK_LATENCY_BETWEEN_NODES, INGRESS_BACKEND_DOWN(502 spike), "
-        "SERVICE_DISCOVERY_FAILURE, TLS_CERTIFICATE_EXPIRY, NETWORK_PARTITION, "
-        "EXTERNAL_API_DEPENDENCY_DOWN; "
-        "NODE: NODE_NOT_READY, NODE_HIGH_CPU(VM cpu>90%), NODE_HIGH_MEMORY, "
-        "NODE_DISK_FULL, NODE_DISK_IO_SATURATION, NODE_KUBELET_DOWN, "
-        "NODE_CLOCK_SKEW, NODE_HARDWARE_FAILURE; "
-        "SEC: AUTH_TOKEN_EXPIRED(401 spike on auth/me), AUTH_BRUTE_FORCE_ATTEMPT, "
-        "UNAUTHORIZED_API_ACCESS_SPIKE(403 spike), SECRET_ROTATION_FAILURE; "
-        "STORAGE: PVC_PENDING, PV_FILESYSTEM_CORRUPTION, PVC_USAGE_HIGH; "
-        "OBS: PROMETHEUS_OUT_OF_MEMORY, LOKI_INGESTION_LAG, METRICS_SCRAPE_FAILURE; "
-        "OTHER: GENERAL_DEGRADATION, UNKNOWN_ANOMALY, NO_INCIDENT.\n"
-        "ACTIONS (pick one): RESTART_POD, SCALE_DEPLOYMENT, ROLLBACK_DEPLOYMENT, "
-        "DELETE_CRASHLOOPING_PODS, FORCE_RECREATE_DEPLOYMENT, SCALE_DOWN, "
-        "ESCALATION, NO_ACTION."
-    )
-
     def __init__(self, model_bundle: ModelBundle, settings=None) -> None:
         self.model_bundle = model_bundle
         # LLM model names — read from settings so they can be changed without code edits.
         # Defaults match the currently deployed Ollama models on .161.
         if settings is not None:
-            self._llm_specialist_model = getattr(settings, "llm_specialist_model", "aiops-sre-ft-v2")
-            self._llm_explainer_model = getattr(settings, "llm_model", "aiops-sre-q4")
+            # NOUVEAU moteur unique : LLM fine-tuné HELIOS (helios-120-3b) qui décide+explique,
+            # ancré par le RAG. L'ancien 0.5B (specialist) et l'explainer séparé sont retirés.
+            self._llm_decider_model = getattr(settings, "llm_model", "helios-120-3b")
             self._llm_fallback_model = getattr(settings, "llm_fallback_model", "qwen2.5:3b")
-            self._llm_timeout = getattr(settings, "llm_timeout_seconds", 13.0)
+            self._llm_timeout = getattr(settings, "llm_timeout_seconds", 25.0)
+            self._rag_enabled = getattr(settings, "rag_enabled", True)
+            self._rag_top_k = getattr(settings, "rag_top_k", 3)
         else:
-            self._llm_specialist_model = "aiops-sre-ft-v2"
-            self._llm_explainer_model = "aiops-sre-q4"
+            self._llm_decider_model = "helios-120-3b"
             self._llm_fallback_model = "qwen2.5:3b"
-            self._llm_timeout = 13.0
+            self._llm_timeout = 25.0
+            self._rag_enabled = True
+            self._rag_top_k = 3
+        # RAG : index des 120 cartes catalogue (construit paresseusement au 1er appel).
+        self._rag = RagRetriever() if self._rag_enabled else None
+        # ML 120 candidat en SHADOW (non autoritaire) : chargé paresseusement s'il est présent.
+        self._shadow_120 = None
+        self._shadow_120_loaded = False
         self._llm_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="llm-parallel"
         )
@@ -201,7 +127,9 @@ class InferenceEngine:
         _risk = self._finite(safe_features.get('metric_risk_score', 0.0))
         _auto_skip = _risk < 0.01 and pod_restarts < 1.0 and unavailable_replicas < 1.0 and latency_p95 < 0.01 and http_5xx_ratio < 0.01
         _skip_llm = skip_llm or _auto_skip
-        llm_result = None if _skip_llm else self._full_llm_predict(safe_features)
+        # Ancien LLM 0.5B de DÉTECTION retiré : la détection/classification du type revient au
+        # ML (+ règles). Le LLM fine-tuné n'intervient QUE plus bas pour décider l'action + expliquer.
+        llm_result = None
 
         if llm_result is not None:
             incident = llm_result["incident"]
@@ -472,33 +400,28 @@ class InferenceEngine:
                 # specific). The LLM is an optional flourish, used only if it actually names the
                 # cause -- so it can only improve the answer, never degrade or fabricate it.
                 why = self._why_for(incident_type, action, _rc)
-                specialist = None
+                ai_decision = None
+                ml_120_shadow = None
                 if not skip_llm:
-                    # Run explainer + specialist in parallel threads so total LLM
-                    # latency = max(explainer, specialist) instead of sum.
-                    _fut_why = self._llm_executor.submit(
-                        self._explain_why, incident_type, severity, confidence, ev, action
-                    )
-                    _fut_spec = self._llm_executor.submit(
-                        self._specialist_opinion, incident_type, severity, action, ev
-                    )
-                    try:
-                        _llm_why = _fut_why.result(timeout=self._llm_timeout)
-                    except Exception:
-                        _llm_why = None
-                    try:
-                        specialist = _fut_spec.result(timeout=self._llm_timeout)
-                    except Exception:
-                        specialist = None
-                    if _llm_why and self._llm_ok(_llm_why, _rc):
-                        why = _llm_why
+                    # NOUVEAU : le LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120)
+                    # décide + explique. Entièrement gardé : toute panne LLM -> why déterministe conservé.
+                    ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc)
+                    if (ai_decision and ai_decision.get("explication")
+                            and self._llm_ok(ai_decision["explication"], _rc)):
+                        why = ai_decision["explication"]
                 decision_explanation = (
                     f"{incident_type} (severity {severity}, confidence {confidence:.2f}). "
                     f"Measured evidence: {ev}. Recommended action: {action}. "
                     f"Why: {why}"
                 )
-                if specialist and specialist.get("consensus_with_ml"):
-                    decision_explanation += " [ML + fine-tuned specialist consensus]"
+                if ai_decision and ai_decision.get("action"):
+                    _aa = (ai_decision["action"] or "").upper()
+                    if _aa and (_aa == (action or "").upper() or _aa in (action or "").upper()):
+                        decision_explanation += " [LLM+RAG consensus]"
+                # ML 120 candidat en SHADOW : prédit en parallèle, journalisé, NON autoritaire.
+                ml_120_shadow = self._ml_120_shadow(safe_features, _rc, ev)
+                if ml_120_shadow:
+                    ml_120_shadow["agrees_with_authoritative"] = (ml_120_shadow.get("type") == incident_type)
 
         # Catalogue HELIOS (120 types) : rattache la RÉSOLUTION PROFESSIONNELLE de référence au type
         # classé (résolution d'alias incluse), pour que CHAQUE incident traité par l'IA porte son
@@ -544,9 +467,12 @@ class InferenceEngine:
             execution_mode,
             remediation_context,
         )
-        # Record the fine-tuned specialist's gated opinion for transparency (ML stays decider).
-        if incident and not skip_llm and specialist is not None:
-            decision_context["specialist"] = specialist
+        # Record the RAG-grounded LLM decision (diagnostic + action + explication) for transparency.
+        if incident and not skip_llm and ai_decision is not None:
+            decision_context["ai_decision"] = ai_decision
+        # Prédiction du ML 120 candidat (shadow) enregistrée pour comparaison (Phase 2).
+        if incident and ml_120_shadow:
+            decision_context["ml_120_shadow"] = ml_120_shadow
 
         return InferenceResult(
             incident=incident,
@@ -839,58 +765,87 @@ class InferenceEngine:
                 return any(r in t for r in required)
         return True  # metric incident (no K8s reason): any clean, non-empty LLM sentence is fine
 
-    def _explain_why(self, incident_type, severity, confidence, evidence, action):
-        """LLM reasoning, few-shot constrained to the facts. One grounded sentence or None."""
+    def _rag_context(self, incident_type, evidence, rc):
+        """Bloc de connaissance RAG : carte EXACTE du type classé (épinglée, jamais fausse)
+        + voisins sémantiques sur l'évidence. Retourne un texte à injecter, ou ""."""
+        if self._rag is None:
+            return ""
+        try:
+            pinned = self._rag.card_for(incident_type)
+            neighbors = self._rag.retrieve(f"{incident_type} {evidence} {rc or ''}", k=self._rag_top_k)
+            cards, seen = [], set()
+            for c in ([pinned] if pinned else []) + neighbors:
+                if c and c["type"] not in seen:
+                    seen.add(c["type"])
+                    cards.append(c)
+            if not cards:
+                return ""
+            lines = ["HELIOS knowledge base (known incidents, most relevant first):"]
+            for c in cards[: self._rag_top_k + 1]:
+                mode = "AUTO" if c["auto"] else "ESCALATE"
+                lines.append(f"- {c['type']} [{c['category']}] -> action={c['action']} "
+                             f"({mode}); fix: {c['resolution']}")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    def _ml_120_shadow(self, feats, rc, logs):
+        """Prédiction du ML 120 candidat en SHADOW (non autoritaire). None si absent/panne."""
+        if not self._shadow_120_loaded:
+            self._shadow_120_loaded = True
+            try:
+                import os
+                from app.services.scenario_120 import Scenario120
+                for p in ("model_artifacts/model_120.joblib",
+                          "/opt/pfe-ai-service/model_artifacts/model_120.joblib"):
+                    if os.path.exists(p):
+                        self._shadow_120 = Scenario120(p)
+                        break
+            except Exception:
+                self._shadow_120 = None
+        if self._shadow_120 is None:
+            return None
+        try:
+            return self._shadow_120.predict(feats, rc, logs)
+        except Exception:
+            return None
+
+    def _llm_decide(self, incident_type, severity, evidence, action, rc):
+        """Moteur de décision : LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120).
+        Sortie modèle attendue : 'DIAGNOSTIC: <cause> | ACTION=<NAME> | EXPLICATION: <fix>'.
+        Retourne {model, diagnostic, action, explication, rag_grounded} ou None.
+        Entièrement gardé : toute panne -> None (l'explication déterministe reste la base)."""
         try:
             import httpx as _httpx, re as _re
+            rag_ctx = self._rag_context(incident_type, evidence, rc)
+            # actions candidates (proposée + celles des cartes RAG) pour retrouver l'action dans la prose
+            cand_actions = [action] + _re.findall(r"action=([A-Z][A-Z0-9_]+)", rag_ctx or "")
             system_msg = (
-                "You are a senior SRE. Given an incident and its recommended action, reply with "
-                "ONE short sentence explaining WHY that action fixes it. Use only the facts given. "
-                "If a Kubernetes root cause is provided (e.g. ImagePullBackOff, OOMKilled, "
-                "CrashLoopBackOff, CreateContainerConfigError, Evicted), NAME it and tie the fix to it. "
-                "If it says no fault was detected, say the cause is not yet identified and recommend "
-                "investigation -- never invent a cause. "
-                "Never restate the type, severity or numbers. Never write a list or a preamble."
+                "You are the automatic decision engine of a Kubernetes self-healing system (HELIOS). "
+                "Reason ONLY from the provided evidence and knowledge base. "
+                "Do NOT invent namespaces, cluster names, application names, percentages or numbers "
+                "that are not in the evidence. "
+                "Give the DIAGNOSTIC (root cause), the ACTION (prefer an ACTION_NAME from the knowledge "
+                "base when it matches), and EXPLICATION of how that action fixes it. Be concise (2-3 sentences)."
             )
-            # Few-shot: small models copy the STYLE of these examples far better than rules.
-            # The examples NAME the K8s root cause (or stay honest when there is none).
-            ex1_u = ("Incident: DEPLOYMENT_UNAVAILABLE (severity HIGH). Measured evidence: 1 replica unavailable; "
-                     "K8s root cause: container waiting: ImagePullBackOff. "
-                     "Recommended action: ROLLBACK_RECENT_CHANGE_AND_RESTART. Why is this action the right response?")
-            ex1_a = ("The new image cannot be pulled (ImagePullBackOff) so the replica never starts; rolling back "
-                     "to the last working image lets the pods become ready again immediately.")
-            ex2_u = ("Incident: POD_CRASH_LOOP (severity HIGH). Measured evidence: 7 restarts in window; "
-                     "K8s root cause: last termination: OOMKilled. "
-                     "Recommended action: RESTART_POD_AND_TUNE_MEMORY_LIMITS. Why is this action the right response?")
-            ex2_a = ("The container is OOMKilled because it exceeds its memory limit, so restarting clears the "
-                     "exhausted memory while raising the limit stops the kernel from killing it again.")
-            ex3_u = ("Incident: DEPLOYMENT_UNAVAILABLE (severity MEDIUM). Measured evidence: 1 replica unavailable; "
-                     "K8s root cause: no container-level fault detected (no ImagePullBackOff, CrashLoop or OOM). "
-                     "Recommended action: INVESTIGATE. Why is this action the right response?")
-            ex3_a = ("No image, crash or OOM fault was detected, so the cause is not yet identified; investigating "
-                     "the recent rollout, scheduling and readiness probes is the right first step before any rollback.")
+            if rag_ctx:
+                system_msg += "\n\n" + rag_ctx
             user_msg = (
                 f"Incident: {incident_type} (severity {severity}). "
                 f"Measured evidence: {evidence}. "
-                f"Recommended action: {action}. Why is this action the right response?"
+                f"Proposed action: {action}. Decide the remediation."
             )
             with _httpx.Client(timeout=self._llm_timeout) as _http:
                 resp = _http.post(
                     "http://localhost:11434/api/chat",
                     json={
-                        "model": self._llm_fallback_model,
+                        "model": self._llm_decider_model,
                         "messages": [
                             {"role": "system", "content": system_msg},
-                            {"role": "user", "content": ex1_u},
-                            {"role": "assistant", "content": ex1_a},
-                            {"role": "user", "content": ex2_u},
-                            {"role": "assistant", "content": ex2_a},
-                            {"role": "user", "content": ex3_u},
-                            {"role": "assistant", "content": ex3_a},
                             {"role": "user", "content": user_msg},
                         ],
                         "stream": False,
-                        "options": {"temperature": 0.1, "num_predict": 90},
+                        "options": {"temperature": 0.2, "num_predict": 200},
                     },
                 )
             if resp.status_code != 200:
@@ -898,264 +853,34 @@ class InferenceEngine:
             raw = (resp.json().get("message", {}).get("content", "") or "").strip()
             if not raw:
                 return None
-            # Keep only the first answer line; small models ramble (markdown/meta) after it.
-            low = raw.lower()
-            cut = len(raw)
-            for mk in ["\n\n", "\n#", "\n**", "\nlet's", "\nlet me", "\nhere", "\nbelow",
-                       "\nsure", "for the following", "as follows", " reasons:", "\n1.", "\n- ", "\n* ",
-                       "incident:", "measured evidence:", "recommended action:", "why is this",
-                       "(severity"]:
-                j = low.find(mk)
-                if j != -1:
-                    cut = min(cut, j)
-            raw = raw[:cut].strip()
-            sents = _re.findall(r"[^.!?]*[.!?]", raw) or ([raw] if raw else [])
-            clean = []
-            for sx in sents:
-                t = sx.strip()
-                if not t:
-                    continue
-                lt = t.lower()
-                if lt.startswith(("the incident", "this incident", "the recommended action",
-                                  "let's", "let me", "here's", "here is", "sure", "certainly",
-                                  "you are", "your are", "as an", "i am", "i'm", "note:", "note that")):
-                    continue
-                if t.endswith(":") or "#" in t or "**" in t:
-                    continue
-                clean.append(t)
-                # Few-shot answers are a single sentence, so the model's first clean sentence IS
-                # the answer; anything after it is rambling/meta -> stop at one sentence.
-                if len(clean) >= 1:
-                    break
-            concise = " ".join(clean).strip()
-            return concise if concise else None
-        except Exception:
-            return None
-
-    def _specialist_opinion(self, incident_type, severity, action, evidence):
-        """Fine-tuned 0.5B specialist (Ollama model 'aiops-sre-ft') — a GATED second opinion
-        on the structured decision. It NEVER overrides the ML/deterministic decision: its JSON
-        output is validated against the taxonomy and kept only as a consensus signal; any
-        malformed or out-of-taxonomy output is dropped so it can never pollute the result.
-        Returns a small dict recorded in decision_context, or None on hard failure."""
-        try:
-            import httpx as _httpx, json as _json, re as _re
-            with _httpx.Client(timeout=self._llm_timeout) as _http:
-                resp = _http.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": self._llm_specialist_model,
-                        "messages": [
-                            {"role": "system", "content": self._SPECIALIST_SYS},
-                            {"role": "user", "content": "Trace shows: 7 restarts in window; container waiting CrashLoopBackOff; last termination Error. Pick the best type and action."},
-                            {"role": "assistant", "content": '{"incident_type":"POD_CRASH_LOOP","severity":"HIGH","recommended_action":"DELETE_CRASHLOOPING_PODS","explanation":"Container restarts in a loop; delete the pods for a clean restart."}'},
-                            {"role": "user", "content": "Trace shows: last termination OOMKilled; memory at the limit. Pick the best type and action."},
-                            {"role": "assistant", "content": '{"incident_type":"POD_OOM_KILLED","severity":"HIGH","recommended_action":"RESTART_POD_AND_TUNE_MEMORY_LIMITS","explanation":"Container exceeds its memory limit; restart and raise the limit."}'},
-                            {"role": "user", "content": "Trace shows: 1 node NotReady; node unreachable. Pick the best type and action."},
-                            {"role": "assistant", "content": '{"incident_type":"NODE_NOT_READY","severity":"HIGH","recommended_action":"ESCALATE_NODE_OUTAGE_AND_REBALANCE","explanation":"The node is unreachable; escalate and reschedule its pods onto healthy nodes."}'},
-                            {"role": "user", "content": f"Trace shows: {evidence}. Pick the best type and action."},
-                        ],
-                        "stream": False,
-                        "format": self._SPECIALIST_SCHEMA,  # forces a valid type from the 52 (grammar-constrained)
-                        "options": {"temperature": 0.0, "repeat_penalty": 1.2, "num_predict": 200},
-                    },
-                )
-            if resp.status_code != 200:
-                return {"model": self._llm_specialist_model, "status": "unavailable", "consensus_with_ml": False}
-            raw = (resp.json().get("message", {}).get("content", "") or "").strip()
-            m = _re.search(r"\{.*\}", raw, _re.DOTALL)
-            if not m:
-                return {"model": self._llm_specialist_model, "status": "rejected_no_json", "consensus_with_ml": False}
-            try:
-                obj = _json.loads(m.group(0))
-            except Exception:
-                return {"model": self._llm_specialist_model, "status": "rejected_bad_json", "consensus_with_ml": False}
-            # The small model is inconsistent about the field name (incident_type / type / eventType)
-            # and the action key (recommended_action / action) — accept the common variants.
-            s_type = str(obj.get("incident_type") or obj.get("type") or obj.get("eventType") or "").strip().upper()
-            s_sev = str(obj.get("severity") or "").strip().upper()
-            s_act = str(obj.get("recommended_action") or obj.get("action") or "").strip().upper()
-            # GATING: reject hallucinated / out-of-taxonomy output (e.g. severity "BRIGHT").
-            valid = (
-                bool(_re.fullmatch(r"[A-Z][A-Z0-9_]{2,40}", s_type))
-                and s_sev in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-                and len(s_act) >= 2  # action is free-form/advisory — don't reject the opinion over it
-            )
-            if not valid:
-                return {"model": self._llm_specialist_model, "status": "rejected_invalid_output",
-                        "consensus_with_ml": False, "raw_type": s_type[:40]}
-            return {
-                "model": self._llm_specialist_model,
-                "status": "ok",
-                "incident_type": s_type,
-                "severity": s_sev,
-                "recommended_action": s_act,
-                "consensus_with_ml": (s_type == str(incident_type).upper()),
-            }
-        except Exception:
-            return None
-
-    def _full_llm_predict(self, features: dict[str, float]) -> dict | None:
-        """
-        Full LLM-based analysis via qwen2:0.5b (Ollama).
-        Pre-classifies metrics as labels so the small model can reason correctly.
-        Short-circuits with NO_INCIDENT when all signals are normal (no LLM call needed).
-        Returns a dict with all fields, or None on failure (triggers rule-based fallback).
-        """
-        try:
-            import httpx as _httpx
-            import json as _json
-
-            memory_gb = features.get("memory_working_set_bytes", 0.0) / 1_000_000_000
-            cpu = features.get("cpu_usage_cores", 0.0)
-            http_5xx = features.get("http_5xx_ratio", 0.0)
-            latency = features.get("http_latency_p95_seconds", 0.0)
-            restarts = features.get("pod_restarts_total", 0.0)
-            unavailable = features.get("unavailable_replicas", 0.0)
-            db_hits = features.get("db_keyword_hits", 0.0)
-            restart_hits = features.get("restart_keyword_hits", 0.0)
-            db_pending = features.get("db_pool_pending", 0.0)
-            risk = features.get("overall_risk_score", 0.0)
-
-            # Pre-classify each signal so the small LLM can reason about labels, not numbers.
-            def _lv(val: float, hi: float, crit: float) -> str:
-                if val >= crit:
-                    return "CRITICAL"
-                if val >= hi:
-                    return "HIGH"
-                return "NORMAL"
-
-            cpu_lv = _lv(cpu, 0.55, 0.85)
-            mem_lv = _lv(memory_gb, 0.70, 1.20)
-            err_lv = _lv(http_5xx, 0.08, 0.30)
-            lat_lv = _lv(latency, 0.50, 2.00)
-            rst_lv = "HIGH" if restarts >= 2.0 else ("ELEVATED" if restarts >= 1.0 else "NORMAL")
-            unavail_lv = "HIGH" if unavailable >= 1.0 else "NORMAL"
-            db_lv = "HIGH" if db_hits >= 5.0 else ("ELEVATED" if db_hits >= 2.0 else "NORMAL")
-            dbp_lv = "HIGH" if db_pending >= 1.0 else "NORMAL"
-            restart_kw_lv = "HIGH" if restart_hits >= 2.0 else ("ELEVATED" if restart_hits >= 1.0 else "NORMAL")
-
-            signals = {
-                "cpu": cpu_lv, "memory": mem_lv, "http_5xx": err_lv,
-                "latency": lat_lv, "restarts": rst_lv, "unavailable_replicas": unavail_lv,
-                "db_keyword_hits": db_lv, "db_pool_pending": dbp_lv,
-                "restart_keyword_hits": restart_kw_lv,
-            }
-            elevated = {k: v for k, v in signals.items() if v != "NORMAL"}
-
-            # Short-circuit: if nothing is elevated, skip the LLM entirely.
-            if not elevated:
-                return {
-                    "incident": False,
-                    "incident_type": "NO_INCIDENT",
-                    "severity": "LOW",
-                    "confidence": 0.10,
-                    "recommended_action": "NO_ACTION",
-                    "execution_mode": "RECOMMEND_ONLY",
-                    "explanation": "All Kubernetes signals are within normal ranges — no incident detected.",
-                }
-
-            signal_summary = ", ".join(f"{k}={v}" for k, v in elevated.items())
-
-            system_msg = self._LLM_SYSTEM_MSG
-            taxonomy = self._LLM_TAXONOMY
-
-            user_msg = (
-                f"Elevated signals detected: {signal_summary}\n"
-                f"(all other signals: NORMAL)\n\n"
-                f"{taxonomy}\n"
-                "Output JSON only:\n"
-                '{"incident": true_or_false, "incident_type": "TYPE", "severity": "SEV", '
-                '"confidence": 0.50_to_0.95, "recommended_action": "ACTION", "auto_execute": true_or_false, '
-                '"explanation": "one sentence in english"}\n\n'
-                "severity: LOW MEDIUM HIGH CRITICAL.\n"
-                "auto_execute=true only if confidence>=0.70 AND severity in (MEDIUM, HIGH)."
-            )
-
-            with _httpx.Client(timeout=self._llm_timeout) as _http:
-                resp = _http.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": self._llm_explainer_model,
-                        "messages": [
-                            {"role": "system", "content": system_msg},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "stream": False,
-                        "format": "json",
-                        "options": {"temperature": 0.0, "num_predict": 200},
-                    },
-                )
-
-            if resp.status_code != 200:
+            diag = act = expl = None
+            # 1) format strict s'il est présent (future-proof si un modèle l'émet)
+            m = _re.search(r"ACTION\s*=\s*([A-Z][A-Z0-9_]{2,60})", raw)
+            if m:
+                act = m.group(1)
+            m = _re.search(r"DIAGNOSTIC\s*:\s*(.+?)(?:\||\n|$)", raw, _re.IGNORECASE)
+            if m:
+                diag = m.group(1).strip()
+            m = _re.search(r"EXPLICATION\s*:\s*(.+)$", raw, _re.IGNORECASE | _re.DOTALL)
+            if m:
+                expl = m.group(1).strip().split("\n")[0].strip()
+            # 2) sinon le modèle répond en PROSE -> la prose EST l'explication (le modèle explique bien)
+            if not expl:
+                prose = _re.sub(r"(?i)\b(DIAGNOSTIC|ACTION|EXPLICATION)\s*[:=]\s*", "", raw).strip()
+                sents = _re.findall(r"[^.!?]*[.!?]", prose) or [prose]
+                expl = " ".join(s.strip() for s in sents[:3]).strip()[:500]
+                if not diag and sents:
+                    diag = sents[0].strip()[:200]
+            # 3) action : à défaut de ACTION=, on scanne les actions candidates dans la réponse
+            if not act:
+                for cand in cand_actions:
+                    if cand and cand in raw:
+                        act = cand
+                        break
+            if not expl:
                 return None
-
-            resp_json = resp.json()
-            # Chat API returns message.content; generate API returns response
-            raw = (
-                resp_json.get("message", {}).get("content", "")
-                or resp_json.get("response", "")
-            ).strip()
-
-            # Extract JSON block from response
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start == -1 or end == 0:
-                return None
-
-            try:
-                data = _json.loads(raw[start:end])
-            except _json.JSONDecodeError as _je:
-                logger.debug("_full_llm_predict: LLM returned malformed JSON — %s (raw excerpt: %.120s)", _je, raw)
-                return None
-
-            incident_type = str(data.get("incident_type", "")).upper()
-            if incident_type not in self._LLM_VALID_TYPES:
-                return None
-
-            action = str(data.get("recommended_action", "")).upper()
-            if action not in self._LLM_VALID_ACTIONS:
-                action = "CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"
-
-            confidence = float(data.get("confidence", 0.5))
-            confidence = max(0.0, min(1.0, confidence))
-
-            incident = bool(data.get("incident", False))
-            auto_execute = bool(data.get("auto_execute", False))
-            severity = str(data.get("severity", "MEDIUM")).upper()
-            if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
-                severity = "MEDIUM"
-            explanation = str(data.get("explanation", "LLM analysis completed."))
-
-            # Sanity guard: if the strongest real signal is only ELEVATED (not HIGH/CRITICAL),
-            # cap severity at MEDIUM to prevent the small model from over-dramatising.
-            max_signal = max(elevated.values(), key=lambda v: {"NORMAL": 0, "ELEVATED": 1, "HIGH": 2, "CRITICAL": 3}.get(v, 0))
-            if max_signal == "ELEVATED" and severity == "CRITICAL":
-                severity = "MEDIUM"
-
-            if incident_type == "NO_INCIDENT":
-                incident = False
-            if not incident:
-                incident_type = "NO_INCIDENT"
-                action = "NO_ACTION"
-                auto_execute = False
-
-            execution_mode = (
-                "AUTO_EXECUTE_CANDIDATE"
-                if auto_execute and confidence >= 0.70 and severity != "CRITICAL"
-                else "RECOMMEND_ONLY"
-            )
-
-            return {
-                "incident": incident,
-                "incident_type": incident_type,
-                "severity": severity,
-                "confidence": confidence,
-                "recommended_action": action,
-                "execution_mode": execution_mode,
-                "explanation": explanation,
-            }
-
+            return {"model": self._llm_decider_model, "diagnostic": diag,
+                    "action": act, "explication": expl, "rag_grounded": bool(rag_ctx)}
         except Exception:
             return None
 
