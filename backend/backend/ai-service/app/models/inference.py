@@ -501,6 +501,9 @@ class InferenceEngine:
         # Prédiction du ML 120 candidat (shadow) enregistrée pour comparaison (Phase 2).
         if incident and ml_120_shadow:
             decision_context["ml_120_shadow"] = ml_120_shadow
+            self._log_shadow(
+                safe_features, _rc, ml_120_shadow, incident_type,
+                app=(remediation_context.get("app", "") if isinstance(remediation_context, dict) else ""))
 
         return InferenceResult(
             incident=incident,
@@ -838,6 +841,37 @@ class InferenceEngine:
         except Exception:
             return None
 
+    # features service loggées pour reconstituer le dataset de ré-entraînement (mappées au ML 120)
+    _SHADOW_LOG_FEATS = [
+        "cpu_usage_cores", "memory_working_set_bytes", "pod_restarts_total",
+        "unavailable_replicas", "http_latency_p95_seconds", "http_5xx_ratio",
+        "node_not_ready_count", "db_keyword_hits", "log_line_count",
+        "error_line_count", "warning_line_count",
+    ]
+
+    def _log_shadow(self, feats, rc, shadow, final_type, app=""):
+        """Journalise (best-effort, JSONL) la prédiction shadow + la vérité terrain event.reason.
+        Alimente le dataset RÉEL de ré-entraînement du ML 120 (Phase 2). Ne casse jamais rien."""
+        try:
+            import json, os, time
+            rec = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "app": app or "",
+                "rc": (rc or "")[:200],
+                "event_reason": shadow.get("event_reason"),
+                "reason_type": shadow.get("reason_type"),   # LABEL vérité si event-driven
+                "ml_type": shadow.get("type"),
+                "ml_conf": shadow.get("confidence"),
+                "ml_agrees": shadow.get("ml_agrees_event_reason"),
+                "final_type": final_type,
+                "feats": {k: round(float(feats.get(k, 0.0) or 0.0), 4) for k in self._SHADOW_LOG_FEATS},
+            }
+            path = os.environ.get("AIOPS_SHADOW_LOG", "model_artifacts/shadow_120_log.jsonl")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
     def _llm_decide(self, incident_type, severity, evidence, action, rc, candidates=None):
         """Moteur de décision : LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120).
         Sortie modèle attendue : 'DIAGNOSTIC: <cause> | ACTION=<NAME> | EXPLICATION: <fix>'.
@@ -877,7 +911,8 @@ class InferenceEngine:
                             {"role": "user", "content": user_msg},
                         ],
                         "stream": False,
-                        "options": {"temperature": 0.2, "num_predict": 200},
+                        "keep_alive": -1,  # garde le modèle chargé (évite le reload cold ~13s)
+                        "options": {"temperature": 0.2, "num_predict": 128},
                     },
                 )
             if resp.status_code != 200:
