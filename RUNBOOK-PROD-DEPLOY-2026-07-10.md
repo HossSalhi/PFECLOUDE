@@ -50,6 +50,18 @@ Monitoring (.160)  →  Camunda (backend, cluster)  DÉTECTE
 
 ## PHASE 2 — Test de production E2E DANS le cluster (5 VMs)
 
+### ⭐ Voie recommandée : lanceur automatique + garde-fou RAM
+```powershell
+python scripts/launch_phase2.py            # démarrage gradué (garde-fou RAM) + test réel
+python scripts/launch_phase2.py --min-only # master + 1 worker + .161 (RAM minimale)
+```
+Le lanceur : vérifie la RAM libre (refuse de démarrer si l'hôte gèlerait), allume master
+→ workers → monitoring **un par un** en surveillant la RAM, attend le cluster sain
+(nodes Ready + podinfo + postgres), puis exécute `prod_test_in_cluster.py`.
+**Besoin : ~10.5 Go libres (full) ou ~5.5 Go (--min-only). Fermer navigateur/IDE d'abord.**
+
+### Voie manuelle (détail)
+
 > Avant : rééquilibrer la RAM si besoin (aiCamunda 6→7-8 GB, master 3, workers 3.5).
 
 1. **Allumer les 5 VMs** : master (.153), worker1 (.158), worker2 (.155), monitoring (.160),
