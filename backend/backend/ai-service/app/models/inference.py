@@ -805,30 +805,6 @@ class InferenceEngine:
                 return any(r in t for r in required)
         return True  # metric incident (no K8s reason): any clean, non-empty LLM sentence is fine
 
-    def _rag_context(self, incident_type, evidence, rc):
-        """Bloc de connaissance RAG : carte EXACTE du type classé (épinglée, jamais fausse)
-        + voisins sémantiques sur l'évidence. Retourne un texte à injecter, ou ""."""
-        if self._rag is None:
-            return ""
-        try:
-            pinned = self._rag.card_for(incident_type)
-            neighbors = self._rag.retrieve(f"{incident_type} {evidence} {rc or ''}", k=self._rag_top_k)
-            cards, seen = [], set()
-            for c in ([pinned] if pinned else []) + neighbors:
-                if c and c["type"] not in seen:
-                    seen.add(c["type"])
-                    cards.append(c)
-            if not cards:
-                return ""
-            lines = ["HELIOS knowledge base (known incidents, most relevant first):"]
-            for c in cards[: self._rag_top_k + 1]:
-                mode = "AUTO" if c["auto"] else "ESCALATE"
-                lines.append(f"- {c['type']} [{c['category']}] -> action={c['action']} "
-                             f"({mode}); fix: {c['resolution']}")
-            return "\n".join(lines)
-        except Exception:
-            return ""
-
     def _ml_120_shadow(self, feats, rc, logs):
         """Prédiction du ML 120 candidat en SHADOW (non autoritaire). None si absent/panne."""
         if not self._shadow_120_loaded:
@@ -882,88 +858,13 @@ class InferenceEngine:
             pass
 
     def _llm_decide(self, incident_type, severity, evidence, action, rc, candidates=None):
-        """Moteur de décision : LLM fine-tuné (helios-120-3b) ANCRÉ par le RAG (catalogue 120).
-        Sortie modèle attendue : 'DIAGNOSTIC: <cause> | ACTION=<NAME> | EXPLICATION: <fix>'.
-        Retourne {model, diagnostic, action, explication, rag_grounded} ou None.
-        Entièrement gardé : toute panne -> None (l'explication déterministe reste la base)."""
-        # Chemin principal : wrapper HeliosLLM (RAG + CRAG). Repli inline ci-dessous si absent.
-        if getattr(self, "_llm", None) is not None:
-            return self._llm.decide(incident_type, severity, evidence, action, rc, candidates)
-        try:
-            import httpx as _httpx, re as _re
-            rag_ctx = self._rag_context(incident_type, evidence, rc)
-            # actions candidates (proposée + celles des cartes RAG) pour retrouver l'action dans la prose
-            cand_actions = [action] + _re.findall(r"action=([A-Z][A-Z0-9_]+)", rag_ctx or "")
-            system_msg = (
-                "You are the automatic decision engine of a Kubernetes self-healing system (HELIOS). "
-                "Reason ONLY from the provided evidence and knowledge base. "
-                "Do NOT invent namespaces, cluster names, application names, percentages or numbers "
-                "that are not in the evidence. "
-                "Give the DIAGNOSTIC (root cause), the ACTION (prefer an ACTION_NAME from the knowledge "
-                "base when it matches), and EXPLICATION of how that action fixes it. Be concise (2-3 sentences)."
-            )
-            if rag_ctx:
-                system_msg += "\n\n" + rag_ctx
-            if candidates:
-                _ct = ", ".join(dict.fromkeys([c for c in candidates if c]))
-                if _ct:
-                    system_msg += f"\n\nML classifier candidate types (most likely first): {_ct}."
-            user_msg = (
-                f"Incident: {incident_type} (severity {severity}). "
-                f"Measured evidence: {evidence}. "
-                f"Proposed action: {action}. Decide the remediation."
-            )
-            with _httpx.Client(timeout=self._llm_timeout) as _http:
-                resp = _http.post(
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": self._llm_decider_model,
-                        "messages": [
-                            {"role": "system", "content": system_msg},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "stream": False,
-                        "keep_alive": -1,  # garde le modèle chargé (évite le reload cold ~13s)
-                        "options": {"temperature": 0.2, "num_predict": 128},
-                    },
-                )
-            if resp.status_code != 200:
-                return None
-            raw = (resp.json().get("message", {}).get("content", "") or "").strip()
-            if not raw:
-                return None
-            diag = act = expl = None
-            # 1) format strict s'il est présent (future-proof si un modèle l'émet)
-            m = _re.search(r"ACTION\s*=\s*([A-Z][A-Z0-9_]{2,60})", raw)
-            if m:
-                act = m.group(1)
-            m = _re.search(r"DIAGNOSTIC\s*:\s*(.+?)(?:\||\n|$)", raw, _re.IGNORECASE)
-            if m:
-                diag = m.group(1).strip()
-            m = _re.search(r"EXPLICATION\s*:\s*(.+)$", raw, _re.IGNORECASE | _re.DOTALL)
-            if m:
-                expl = m.group(1).strip().split("\n")[0].strip()
-            # 2) sinon le modèle répond en PROSE -> la prose EST l'explication (le modèle explique bien)
-            if not expl:
-                prose = _re.sub(r"(?i)\b(DIAGNOSTIC|ACTION|EXPLICATION)\s*[:=]\s*", "", raw).strip()
-                sents = _re.findall(r"[^.!?]*[.!?]", prose) or [prose]
-                expl = " ".join(s.strip() for s in sents[:3]).strip()[:500]
-                if not diag and sents:
-                    diag = sents[0].strip()[:200]
-            # 3) action : à défaut de ACTION=, on scanne les actions candidates dans la réponse
-            if not act:
-                for cand in cand_actions:
-                    if cand and cand in raw:
-                        act = cand
-                        break
-            if not expl:
-                return None
-            return {"model": self._llm_decider_model, "diagnostic": diag,
-                    "action": act, "explication": expl, "rag_grounded": bool(rag_ctx)}
-        except Exception:
+        """Delegue au wrapper HeliosLLM (RAG + CRAG). None si le wrapper est absent/en
+        panne -> l appelant retombe sur l explication deterministe (pipeline jamais casse)."""
+        llm = getattr(self, "_llm", None)
+        if llm is None:
             return None
+        return llm.decide(incident_type, severity, evidence, action, rc, candidates)
 
-    @staticmethod
     def _classify_incident_type(features: dict[str, float], incident: bool) -> str:
         if not incident:
             return "NO_INCIDENT"
