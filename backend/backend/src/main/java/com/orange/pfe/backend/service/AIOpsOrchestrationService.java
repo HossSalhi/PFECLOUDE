@@ -171,6 +171,15 @@ public class AIOpsOrchestrationService {
             // now is collateral. (Peeked, NOT removed: it stays a feature for the AI prediction.)
             final boolean nodeDownNow = featureOverrides.getOrDefault("node_not_ready_count", 0.0) > 0.0;
 
+            // Un fait de panne K8s CERTAIN (marqueur d'état) est-il présent ? (indépendant de l'IA).
+            // Sert UNIQUEMENT au repli d'ESCALADE quand l'IA est injoignable (voir plus bas) : PLUS de
+            // remédiation déterministe fabriquée. Le garde-fou force* n'agit QUE lorsque l'IA est joignable
+            // (corrections de faits qu'elle ne voit pas : NetworkPolicy, finalizer). IA muette => escalade.
+            final boolean anyDeterministicFault = forceRollback || forceCrashLoop || forceUnavailable
+                    || forceNetwork || forceOOM || forceDisk || forceHttpError || forceLatency
+                    || forceConfig || forceInit || forcePending || forceSaturation
+                    || forceStuckTerminating || forceDeployUnavail;
+
             // NODE OUTAGE in progress: a worker is NotReady, so EVERY app that had a pod on it is
             // rescheduling and surfaces as DEPLOYMENT_UNAVAILABLE / POD_CRASH_LOOP churn. Those per-app
             // incidents are pure COLLATERAL of the node down (the single k8s-nodes incident already
@@ -216,7 +225,23 @@ public class AIOpsOrchestrationService {
                         || "DELETE_CRASHLOOPING_PODS".equals(aiExecPref));
             // For ImagePullBackOff, override the AI recommendation regardless of confidence:
             // the K8s state is unambiguous and ROLLBACK_DEPLOYMENT is the correct deterministic fix.
-            if (forceStuckTerminating) {
+            if (!aiReachable) {
+                // IA INJOIGNABLE : le garde-fou déterministe force* est EFFACÉ (exigence produit :
+                // « jamais de remédiation déterministe »). On n'invente AUCUNE action codée en dur.
+                // Si un fait de panne K8s réel est présent, on ESCALADE vers l'astreinte (webhook +
+                // email, action ESCALATION) au lieu de deviner ; sinon on ne classe rien (on défère
+                // au retour de l'IA — le cerveau du système).
+                if (anyDeterministicFault) {
+                    prediction.setIncident(true);
+                    prediction.setSeverity("HIGH");
+                    prediction.setConfidence(0.0);
+                    prediction.setIncidentType("AI_UNAVAILABLE");
+                    prediction.setRecommendedAction("ESCALATE_AI_UNAVAILABLE");
+                    prediction.setFinalExecutableAction(null);
+                    log.warn("IA injoignable + panne K8s pour {}/{} — ESCALADE humaine (aucune remédiation déterministe)",
+                            request.getNamespace(), request.getApp());
+                }
+            } else if (forceStuckTerminating) {
                 // Pod bloqué en Terminating (finalizer non libéré) : la remédiation PRO = suppression
                 // forcée (retrait du finalizer). Type + action déterministes, plan construit en bypass.
                 prediction.setIncidentType("POD_STUCK_TERMINATING");
@@ -243,10 +268,36 @@ public class AIOpsOrchestrationService {
                     prediction.setConfidence(0.92);
                 }
             } else if (aiDecides) {
-                // L'IA a proposé une action EXÉCUTABLE sûre -> on l'exécute TELLE QUELLE (dynamique).
-                // Aucun override déterministe : le type, l'action et l'explication viennent de l'IA.
-                log.info("Action décidée par l'IA (DYNAMIQUE) pour {}/{}: type={} action={} confiance={} "
-                        + "— aucun override déterministe", request.getNamespace(), request.getApp(),
+                // L'IA a proposé une action EXÉCUTABLE sûre -> on GARDE sa décision (dynamique) : action
+                // + explication viennent de l'IA. MAIS le TYPE affiché doit dire la VÉRITÉ. Un marqueur
+                // d'état conteneur K8s (reason kubelet = fait CERTAIN que l'IA ne voit pas dans ses
+                // features) CORRIGE le type quand l'IA l'a mal classé — cas prouvé : init / pending /
+                // latence s'effondrent en POD_IMAGE_PULL_BACKOFF (ML feature-dominé). Le kubelet ne se
+                // trompe pas sur SON état ; l'ACTION (rollback/delete...) reste la décision de l'IA.
+                // Même logique d'exception que forceNetwork/forceStuckTerminating (faits invisibles à l'IA).
+                final String aiType = prediction.getIncidentType();
+                final String groundType = groundTruthContainerType(forceOOM, forceDisk, forceConfig,
+                        forceInit, forcePending, forceSaturation, forceDeployUnavail, forceRollback, forceCrashLoop);
+                if (groundType != null) {
+                    if (!groundType.equals(aiType)) {
+                        log.info("TYPE corrigé par la VÉRITÉ TERRAIN K8s pour {}/{} : IA='{}' -> '{}' "
+                                + "(action IA conservée : {})", request.getNamespace(), request.getApp(),
+                                aiType, groundType, aiExecPref);
+                        prediction.setIncidentType(groundType);
+                    }
+                } else if (isUncorroboratedK8sType(aiType)) {
+                    // L'IA nomme un état conteneur précis (ImagePullBackOff / init) que le cluster ne
+                    // MONTRE PAS (aucun marqueur K8s correspondant, ex. latence sans métrique .160) ->
+                    // on reste FIDÈLE aux faits : répliques indisponibles => DEPLOYMENT_UNAVAILABLE
+                    // (remédié par rollback), sinon signal ambigu => GENERAL_DEGRADATION (non persisté).
+                    double unavail = feat(prediction.getFeatures(), "unavailable_replicas");
+                    String corrected = unavail >= 1 ? "DEPLOYMENT_UNAVAILABLE" : "GENERAL_DEGRADATION";
+                    log.info("Type IA NON corroboré pour {}/{} : '{}' -> '{}' (aucun marqueur K8s correspondant)",
+                            request.getNamespace(), request.getApp(), aiType, corrected);
+                    prediction.setIncidentType(corrected);
+                }
+                log.info("Action décidée par l'IA (DYNAMIQUE) pour {}/{}: type={} action={} confiance={}",
+                        request.getNamespace(), request.getApp(),
                         prediction.getIncidentType(), aiExecPref, prediction.getConfidence());
             } else if (forceOOM) {
                 // OOMKilled (memory test): revert the change that lowered the memory limit -> rollback.
@@ -396,7 +447,7 @@ public class AIOpsOrchestrationService {
             // helios.io/autoscale=true) under CPU saturation is a MONTÉE EN CHARGE, not a runaway process
             // to restart — HELIOS adds capacity (SCALE_DEPLOYMENT, real `kubectl scale`) so the load is
             // spread. Reclassify the CPU signal to AUTOSCALING (wins over the AI's CPU_STRESS / restart).
-            if (autoscaleEnabled && !forceNetwork && !forceOOM && !forceDisk && !forceConfig && !forceInit
+            if (aiReachable && autoscaleEnabled && !forceNetwork && !forceOOM && !forceDisk && !forceConfig && !forceInit
                     && !forcePending && !forceCrashLoop && !forceRollback
                     && ("CPU_STRESS".equals(prediction.getIncidentType())
                         || feat(prediction.getFeatures(), "cpu_usage_cores") >= 0.20)) {
@@ -500,9 +551,11 @@ public class AIOpsOrchestrationService {
             // Saturation de replicas : SCALE_DOWN, jamais rollback (le rollback ne réduit pas les replicas).
             // forcePending est aussi vrai (des pods sont Pending) -> on EXCLUT la saturation du rollback.
             // Pod bloqué en Terminating : suppression forcée (retrait finalizer) en bypass — jamais rollback.
-            final boolean useStuckDeletePlan = forceStuckTerminating;
-            final boolean useScaleDownPlan = !forceStuckTerminating && (forceSaturation || (aiWantsScaleDown && !forceNetwork));
-            final boolean useRollbackPlan = !forceStuckTerminating && !forceNetwork && !forceSaturation && !aiWantsScaleDown
+            // Gardés par aiReachable : IA injoignable => AUCUN plan déterministe de bypass (le force* est
+            // effacé dans ce cas, on escalade). IA joignable => comportement prouvé inchangé.
+            final boolean useStuckDeletePlan = aiReachable && forceStuckTerminating;
+            final boolean useScaleDownPlan = aiReachable && !forceStuckTerminating && (forceSaturation || (aiWantsScaleDown && !forceNetwork));
+            final boolean useRollbackPlan = aiReachable && !forceStuckTerminating && !forceNetwork && !forceSaturation && !aiWantsScaleDown
                     && (forceRollback || forceCrashLoop || forceOOM
                     || forceHttpError || forceLatency || forceConfig || forceInit || forcePending
                     || forceDeployUnavail || rollbackByType || aiWantsRollback);
@@ -575,6 +628,28 @@ public class AIOpsOrchestrationService {
             case "POD_IMAGE_PULL_BACKOFF", "POD_INIT_CONTAINER_FAILURE" -> true;
             default -> false;
         };
+    }
+
+    /**
+     * Type CANONIQUE déduit du marqueur d'état conteneur K8s (reason kubelet = VÉRITÉ TERRAIN),
+     * ou null si aucun état conteneur précis n'est présent. Sert à CORRIGER le type affiché quand
+     * l'IA décide (aiDecides) mais a mal classé un état que le kubelet identifie sans ambiguïté
+     * (ex. init/pending -> POD_IMAGE_PULL_BACKOFF). L'ACTION reste la décision de l'IA.
+     * Priorité = ordre de détection de KubernetesSignalEnrichmentService (un seul marqueur d'état
+     * conteneur par incident ; saturation/deployUnavail en dernier recours).
+     */
+    private static String groundTruthContainerType(boolean oom, boolean disk, boolean config, boolean init,
+            boolean pending, boolean saturation, boolean deployUnavail, boolean imagePull, boolean crashLoop) {
+        if (oom)           return "POD_OOM_KILLED";
+        if (disk)          return "POD_EVICTED";
+        if (imagePull)     return "POD_IMAGE_PULL_BACKOFF";
+        if (crashLoop)     return "POD_CRASH_LOOP";
+        if (config)        return "POD_CONFIG_ERROR";
+        if (init)          return "POD_INIT_CONTAINER_FAILURE";
+        if (saturation)    return "REPLICA_SATURATION";
+        if (pending)       return "POD_PENDING_INSUFFICIENT_RESOURCES";
+        if (deployUnavail) return "DEPLOYMENT_UNAVAILABLE";
+        return null;
     }
 
     @Transactional
@@ -745,9 +820,14 @@ public class AIOpsOrchestrationService {
             case "HIGH_RESPONSE_TIME", "LATENCY_DEGRADATION" -> "Latence HTTP élevée";
             case "HIGH_ERROR_RATE", "APPLICATION_ERROR_STORM" -> "Pic d'erreurs HTTP (5xx)";
             case "POD_IMAGE_PULL_BACKOFF"                -> "Échec de téléchargement d'image";
+            case "POD_ERR_IMAGE_PULL"                    -> "Échec de récupération d'image";
             case "POD_PENDING_INSUFFICIENT_RESOURCES"    -> "Pod non planifiable (ressources)";
             case "POD_INIT_CONTAINER_FAILURE"            -> "Échec du conteneur d'init";
             case "POD_CONFIG_ERROR"                      -> "Erreur de configuration du conteneur";
+            case "POD_EVICTED"                           -> "Pod évincé (pression disque / stockage éphémère)";
+            case "REPLICA_SATURATION"                    -> "Saturation de répliques";
+            case "POD_STUCK_TERMINATING"                 -> "Pod bloqué en Terminating (finalizer)";
+            case "AI_UNAVAILABLE"                        -> "Service IA indisponible — escalade astreinte";
             case "DATABASE_CONNECTIVITY", "DB_CONNECTION_FAILURE", "DATABASE_POOL_SATURATION" -> "Base de données injoignable";
             case "NODE_NOT_READY"                        -> "Nœud Kubernetes indisponible";
             case "NODE_DISK_PRESSURE"                    -> "Pression disque sur le nœud";
@@ -815,6 +895,23 @@ public class AIOpsOrchestrationService {
             case "POD_CONFIG_ERROR" ->
                     "Cause : le conteneur ne peut pas être créé (ConfigMap/Secret manquant ou référence "
                   + "invalide — CreateContainerConfigError). HELIOS revient à la dernière révision saine (rollback).";
+            case "POD_ERR_IMAGE_PULL" ->
+                    "Cause : l'image du conteneur est introuvable ou non récupérable (ErrImagePull). "
+                  + "HELIOS revient à la dernière révision valide (rollback).";
+            case "POD_EVICTED" ->
+                    "Cause : le pod a été évincé par le kubelet sous pression disque / stockage éphémère "
+                  + "saturé. Kubernetes recrée déjà un pod sain ; HELIOS supprime le pod évincé résiduel "
+                  + "(kubectl delete pod) pour lever la pression et nettoyer l'état.";
+            case "REPLICA_SATURATION" ->
+                    "Cause : trop de répliques demandées pour la capacité du cluster (plusieurs pods restent "
+                  + "Pending/Unschedulable). HELIOS réduit le nombre de répliques (scale down) au nombre "
+                  + "réellement planifiable — un rollback ne changerait pas le nombre de répliques.";
+            case "POD_STUCK_TERMINATING" ->
+                    "Cause : un pod reste bloqué en Terminating (finalizer non libéré bien au-delà de sa grace "
+                  + "period). HELIOS force la suppression (retrait du finalizer) pour débloquer le pod.";
+            case "AI_UNAVAILABLE" ->
+                    "Le service IA est injoignable alors qu'une panne Kubernetes est détectée. HELIOS escalade "
+                  + "vers l'astreinte (webhook + email) plutôt que d'appliquer une remédiation déterministe fabriquée.";
             case "DATABASE_CONNECTIVITY", "DB_CONNECTION_FAILURE", "DATABASE_POOL_SATURATION" ->
                     "Cause : l'application ne peut plus joindre sa base de données (port 5432 bloqué par une "
                   + "NetworkPolicy récente — le DNS, lui, fonctionne). HELIOS supprime la policy bloquante "
@@ -858,6 +955,11 @@ public class AIOpsOrchestrationService {
             case "POD_INIT_CONTAINER_FAILURE" ->
                     restarts >= 1 ? "init en échec (" + (int) restarts + " tentatives)" : "init en échec";
             case "POD_CONFIG_ERROR" -> "ConfigMap/Secret manquant";
+            case "POD_ERR_IMAGE_PULL" -> "image introuvable (ErrImagePull)";
+            case "POD_EVICTED" -> "pod évincé (pression disque)";
+            case "REPLICA_SATURATION" -> unavail >= 1 ? (int) unavail + " pods en attente" : "répliques en excès";
+            case "POD_STUCK_TERMINATING" -> "finalizer non libéré";
+            case "AI_UNAVAILABLE" -> "IA injoignable";
             case "DATABASE_CONNECTIVITY", "DB_CONNECTION_FAILURE", "DATABASE_POOL_SATURATION" -> "connexion DB bloquée (port 5432)";
             case "HIGH_ERROR_RATE", "APPLICATION_ERROR_STORM" ->
                     String.format(Locale.FRENCH, "%.0f%% de 5xx", err5xx * 100);
