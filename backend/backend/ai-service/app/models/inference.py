@@ -865,6 +865,7 @@ class InferenceEngine:
             return None
         return llm.decide(incident_type, severity, evidence, action, rc, candidates)
 
+    @staticmethod
     def _classify_incident_type(features: dict[str, float], incident: bool) -> str:
         if not incident:
             return "NO_INCIDENT"
