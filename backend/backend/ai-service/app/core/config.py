@@ -20,12 +20,15 @@ class Settings(BaseSettings):
     monitoring_prometheus_port: int = 9090
     ai_service_port: int = 8000
 
-    # NOUVEAU moteur de décision+explication : Qwen2.5-3B fine-tuné HELIOS (120 types),
-    # servi par Ollama sur .161 (déployé via scripts/llm-finetune/deploy_helios_120_gguf.py).
+    # Moteur de décision+explication ANCRÉ RAG. L'investigation PFE (ablation base×FT×RAG×CRAG,
+    # 11/07) a montré que le modèle de BASE qwen2.5:3b + RAG nomme l'action catalogue exacte 91%
+    # du temps, alors que le fine-tuné helios-120-3b régresse (0% : diagnostics justes mais actions
+    # vagues « investigate », format ignoré). -> le BASE devient le décideur PRINCIPAL, le fine-tuné
+    # reste en repli. (Le RAG apporte la vraie valeur : fidélité 0.73->0.91.)
     # Sortie attendue : "DIAGNOSTIC: <cause> | ACTION=<ACTION_NAME> | EXPLICATION: <fix>".
-    llm_model: str = "helios-120-3b"
-    # Repli si le modèle fine-tuné est indisponible (modèle de base généraliste sur .161).
-    llm_fallback_model: str = "qwen2.5:3b-instruct"
+    llm_model: str = "qwen2.5:3b-instruct"
+    # Repli si le modèle de base est indisponible.
+    llm_fallback_model: str = "helios-120-3b"
     # Per-request httpx timeout for all Ollama calls (AIOPS_LLM_TIMEOUT_SECONDS).
     # 3B sur CPU = plus lent que l'ancien 0.5B ; on élargit la fenêtre.
     llm_timeout_seconds: float = 25.0
