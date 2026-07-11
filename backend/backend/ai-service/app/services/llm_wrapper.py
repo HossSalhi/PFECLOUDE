@@ -122,6 +122,28 @@ class HeliosLLM:
         except Exception:
             return None
 
+    # ── appel Ollama en SORTIE STRUCTURÉE (décodage contraint) ───────────────
+    # Ollama contraint la génération à un schéma JSON -> l'action est FORCÉMENT un
+    # token catalogue valide (enum), la sortie toujours parsable. Corrige le maillon
+    # faible mesuré (l'action nommée/le format). Repli prose si indisponible.
+    def _chat_json(self, system, user, schema, model=None):
+        import httpx, json as _json
+        m = model or self.model
+        try:
+            with httpx.Client(timeout=self.timeout) as h:
+                r = h.post(self.url + "/api/chat", json={
+                    "model": m,
+                    "messages": [{"role": "system", "content": system},
+                                 {"role": "user", "content": user}],
+                    "stream": False, "keep_alive": -1, "format": schema,
+                    "options": {"temperature": 0.1, "num_predict": self.num_predict}})
+            if r.status_code != 200:
+                return None
+            content = (r.json().get("message", {}).get("content", "") or "").strip()
+            return _json.loads(content) if content else None
+        except Exception:
+            return None
+
     # ── pipeline complet ─────────────────────────────────────────────────────
     def decide(self, incident_type, severity, evidence, action, rc, candidates=None):
         try:
@@ -143,6 +165,31 @@ class HeliosLLM:
                     system += f"\n\nML classifier candidate types (most likely first): {ct}."
             user = (f"Incident: {incident_type} (severity {severity}). "
                     f"Measured evidence: {evidence}. Proposed action: {action}. Decide the remediation.")
+
+            # ── DÉCODAGE CONTRAINT (prioritaire) : l'action DOIT être une action
+            #    catalogue valide récupérée par le RAG -> 100% parsable, jamais de « investigate » flou.
+            enum_actions = list(dict.fromkeys(re.findall(r"action=([A-Z][A-Z0-9_]+)", ctx or "")))
+            if enum_actions:
+                enum_actions = enum_actions + ["CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"]
+                schema = {"type": "object", "properties": {
+                    "diagnostic": {"type": "string"},
+                    "action": {"type": "string", "enum": enum_actions},
+                    "explication": {"type": "string"}},
+                    "required": ["diagnostic", "action", "explication"]}
+                sys_json = system + ("\n\nRespond ONLY as JSON with keys diagnostic, action, explication. "
+                                     "'action' MUST be the catalog ACTION_NAME (from the allowed list) that "
+                                     "best fixes the incident; 'explication' says how it fixes it.")
+                obj = self._chat_json(sys_json, user, schema)
+                if not obj and self.fallback:
+                    obj = self._chat_json(sys_json, user, schema, model=self.fallback)
+                if obj and obj.get("action") in enum_actions:
+                    _diag = (obj.get("diagnostic") or "").strip() or None
+                    _expl = (obj.get("explication") or "").strip() or _diag
+                    if _expl:
+                        return {"model": self.model, "diagnostic": _diag,
+                                "action": obj["action"], "explication": _expl,
+                                "rag_grounded": True, "crag_grade": grade, "crag": meta,
+                                "constrained": True}
 
             raw = self._chat(system, user)
             if not raw and self.fallback:
