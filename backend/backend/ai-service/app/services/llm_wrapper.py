@@ -145,7 +145,7 @@ class HeliosLLM:
             return None
 
     # ── pipeline complet ─────────────────────────────────────────────────────
-    def decide(self, incident_type, severity, evidence, action, rc, candidates=None):
+    def decide(self, incident_type, severity, evidence, action, rc, candidates=None, history=None):
         try:
             ctx, grade, meta = self._crag(incident_type, evidence, rc)
             system = (
@@ -163,6 +163,8 @@ class HeliosLLM:
                 ct = ", ".join(dict.fromkeys([c for c in candidates if c]))
                 if ct:
                     system += f"\n\nML classifier candidate types (most likely first): {ct}."
+            if history:                       # MÉMOIRE DE CAS : historique de remédiation de cette app
+                system += "\n\n" + history
             user = (f"Incident: {incident_type} (severity {severity}). "
                     f"Measured evidence: {evidence}. Proposed action: {action}. Decide the remediation.")
 

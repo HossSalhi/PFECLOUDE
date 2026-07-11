@@ -84,7 +84,12 @@ class InferenceEngine:
             from app.services.llm_wrapper import HeliosLLM
             self._llm = HeliosLLM(
                 self._rag, model=self._llm_decider_model, fallback=self._llm_fallback_model,
-                timeout=self._llm_timeout, num_predict=128, top_k=self._rag_top_k
+                # num_predict COURT (64) + timeout serré (config 14s) : sur ce CPU contraint (.161, 1 seul
+                # 3B), le LLM dans le chemin critique /predict doit rester RAPIDE, sinon il dépasse le budget
+                # ai-classify -> timeout -> circuit breaker -> plus de remédiation. La classification +
+                # l'action viennent des marqueurs déterministes + catalogue (rapides, fiables) ; le LLM est
+                # BEST-EFFORT (produit une sortie s'il tient dans 14s, sinon explication déterministe _why_for).
+                timeout=self._llm_timeout, num_predict=64, top_k=self._rag_top_k
             ) if self._rag_enabled else None
         except Exception:
             self._llm = None
@@ -446,7 +451,8 @@ class InferenceEngine:
                     # Le LLM (helios-120-3b) ANCRÉ par le RAG + les CANDIDATS top-3 du ML 120
                     # décide l'action + explique. Gardé : panne LLM -> why déterministe conservé.
                     _cands = [c.get("type") for c in (ml_120_shadow.get("top") or [])] if ml_120_shadow else None
-                    ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc, candidates=_cands)
+                    _hist = self._history_hint(remediation_context)
+                    ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc, candidates=_cands, history=_hist)
                     if (ai_decision and ai_decision.get("explication")
                             and self._llm_ok(ai_decision["explication"], _rc)):
                         why = ai_decision["explication"]
@@ -857,13 +863,31 @@ class InferenceEngine:
         except Exception:
             pass
 
-    def _llm_decide(self, incident_type, severity, evidence, action, rc, candidates=None):
-        """Delegue au wrapper HeliosLLM (RAG + CRAG). None si le wrapper est absent/en
-        panne -> l appelant retombe sur l explication deterministe (pipeline jamais casse)."""
+    def _llm_decide(self, incident_type, severity, evidence, action, rc, candidates=None, history=None):
+        """Delegue au wrapper HeliosLLM (RAG + CRAG + memoire de cas). None si le wrapper est
+        absent/en panne -> l appelant retombe sur l explication deterministe (pipeline jamais casse)."""
         llm = getattr(self, "_llm", None)
         if llm is None:
             return None
-        return llm.decide(incident_type, severity, evidence, action, rc, candidates)
+        return llm.decide(incident_type, severity, evidence, action, rc, candidates, history=history)
+
+    @staticmethod
+    def _history_hint(rc_ctx):
+        """MÉMOIRE DE CAS : résume l'historique de remédiation de CETTE app (déjà fourni par le
+        backend dans remediation_context : recent_success/failed_action_counts) pour que le LLM
+        préfère une action DÉJÀ ÉPROUVÉE ici et évite celle qui a échoué -> système apprenant."""
+        if not isinstance(rc_ctx, dict):
+            return None
+        succ = rc_ctx.get("recent_success_action_counts") or {}
+        fail = rc_ctx.get("recent_failed_action_counts") or {}
+        if not succ and not fail:
+            return None
+        parts = [f"{a} succeeded {n}x" for a, n in list(succ.items())[:3] if n]
+        parts += [f"{a} FAILED {n}x" for a, n in list(fail.items())[:3] if n]
+        if not parts:
+            return None
+        return ("Past remediations observed on THIS app: " + "; ".join(parts)
+                + ". Prefer an action that already succeeded here; avoid one that repeatedly failed.")
 
     @staticmethod
     def _classify_incident_type(features: dict[str, float], incident: bool) -> str:

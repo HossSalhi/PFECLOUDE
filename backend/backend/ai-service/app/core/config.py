@@ -27,11 +27,16 @@ class Settings(BaseSettings):
     # reste en repli. (Le RAG apporte la vraie valeur : fidélité 0.73->0.91.)
     # Sortie attendue : "DIAGNOSTIC: <cause> | ACTION=<ACTION_NAME> | EXPLICATION: <fix>".
     llm_model: str = "qwen2.5:3b-instruct"
-    # Repli si le modèle de base est indisponible.
-    llm_fallback_model: str = "helios-120-3b"
+    # PAS de repli MODÈLE : .161 (5.8 Go) ne tient qu'UN seul 3B en RAM. Charger un 2e modèle en
+    # repli saturait la RAM -> l'ai-service renvoyait une erreur -> circuit breaker backend ouvert
+    # -> plus de remédiation. Si qwen échoue, l'explication déterministe (_why_for) prend le relais
+    # (le pipeline ne casse jamais). Un seul modèle résident = robuste.
+    llm_fallback_model: str = ""
     # Per-request httpx timeout for all Ollama calls (AIOPS_LLM_TIMEOUT_SECONDS).
-    # 3B sur CPU = plus lent que l'ancien 0.5B ; on élargit la fenêtre.
-    llm_timeout_seconds: float = 25.0
+    # Cap SERRÉ (14s) : le LLM est dans le chemin critique /predict ; sur ce CPU contraint il ne doit
+    # JAMAIS faire dépasser le budget ai-classify du backend (~30s) sinon circuit breaker -> remédiation
+    # bloquée. Best-effort : sortie LLM si elle tient dans 14s, sinon explication déterministe (jamais cassé).
+    llm_timeout_seconds: float = 14.0
 
     # ── RAG (Retrieval-Augmented Generation) ──────────────────────────────────
     # Ancre le LLM dans le catalogue des 120 incidents : on récupère les k cartes
