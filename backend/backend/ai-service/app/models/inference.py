@@ -79,6 +79,15 @@ class InferenceEngine:
         # ML 120 candidat en SHADOW (non autoritaire) : chargé paresseusement s'il est présent.
         self._shadow_120 = None
         self._shadow_120_loaded = False
+        # Wrapper LLM (RAG + CRAG) : encapsule le pipeline de décision LLM.
+        try:
+            from app.services.llm_wrapper import HeliosLLM
+            self._llm = HeliosLLM(
+                self._rag, model=self._llm_decider_model, fallback=self._llm_fallback_model,
+                timeout=self._llm_timeout, num_predict=128, top_k=self._rag_top_k
+            ) if self._rag_enabled else None
+        except Exception:
+            self._llm = None
         self._llm_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="llm-parallel"
         )
@@ -877,6 +886,9 @@ class InferenceEngine:
         Sortie modèle attendue : 'DIAGNOSTIC: <cause> | ACTION=<NAME> | EXPLICATION: <fix>'.
         Retourne {model, diagnostic, action, explication, rag_grounded} ou None.
         Entièrement gardé : toute panne -> None (l'explication déterministe reste la base)."""
+        # Chemin principal : wrapper HeliosLLM (RAG + CRAG). Repli inline ci-dessous si absent.
+        if getattr(self, "_llm", None) is not None:
+            return self._llm.decide(incident_type, severity, evidence, action, rc, candidates)
         try:
             import httpx as _httpx, re as _re
             rag_ctx = self._rag_context(incident_type, evidence, rc)
