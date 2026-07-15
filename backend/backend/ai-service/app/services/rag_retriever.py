@@ -33,6 +33,8 @@ _STOP = {"pod", "node", "high", "low", "failure", "error", "down", "lost",
          "slow", "and", "the", "for"}
 # Poids du signal lexical dans le score hybride (le cosinus est ~0.1-0.4).
 _LEX_WEIGHT = 0.6
+# Poids du signal de re-ranking (recouvrement avec le TEXTE COMPLET de la carte).
+_RERANK_WEIGHT = 0.3
 
 
 def _norm(text: str) -> str:
@@ -119,8 +121,14 @@ class RagRetriever:
         hit = sum(1 for w in toks if w in qnorm)
         return hit / len(toks)
 
-    def retrieve(self, query: str, k: int = 3) -> list[dict]:
-        """Retourne les k cartes les plus proches (score HYBRIDE = cosinus + lexical)."""
+    def retrieve(self, query: str, k: int = 3, rerank: bool = False) -> list[dict]:
+        """Retourne les k cartes les plus proches (score HYBRIDE = cosinus + lexical).
+
+        rerank=True : RE-CLASSEMENT en 2 temps (rappel puis précision). On part d'un POOL
+        élargi trié par le score hybride, puis on re-note finement chaque candidat par le
+        recouvrement des mots de la requête avec le TEXTE COMPLET de la carte (résolution +
+        catégorie) — un signal que le lexical (qui ne voit que le nom du type) rate. Cela
+        remonte la carte dont la RÉSOLUTION colle aux symptômes, pas juste le nom."""
         if not self.ready:
             self.build()
         if not query or self._matrix is None:
@@ -134,6 +142,28 @@ class RagRetriever:
         lex = np.array([self._lex_score(qnorm, t) for t in self._lex], dtype=np.float32)
         scores = cos + _LEX_WEIGHT * lex  # hybride
         k = max(1, min(k, len(self._cards)))
+
+        if rerank and len(self._cards) > k:
+            pool_n = min(len(self._cards), max(3 * k, k + 6))
+            pool = np.argsort(-scores)[:pool_n]
+            qtoks = {t for t in qnorm.split() if len(t) >= 3}
+            scored = []
+            for i in pool:
+                i = int(i)
+                ctoks = {t for t in _norm(self._cards[i]["text"]).split() if len(t) >= 3}
+                ov = (len(qtoks & ctoks) / len(qtoks)) if qtoks else 0.0
+                scored.append((i, float(scores[i]) + _RERANK_WEIGHT * ov, ov))
+            scored.sort(key=lambda z: -z[1])
+            out = []
+            for i, s, ov in scored[:k]:
+                card = dict(self._cards[i])
+                card["score"] = round(s, 4)
+                card["cos"] = round(float(cos[i]), 4)
+                card["lex"] = round(float(lex[i]), 4)
+                card["rerank"] = round(ov, 4)
+                out.append(card)
+            return out
+
         top = np.argsort(-scores)[:k]
         out = []
         for i in top:

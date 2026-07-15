@@ -270,6 +270,19 @@ C={
  ["prediction: {app} volume will fill in {n}h","disk exhaustion forecast for {node}","predicted storage saturation for {app}"]),
 }
 
+# === CORRECTIF VOCABULAIRE (13 juil) : remplacer les actions GÉNÉRIQUES par les ACTIONS EXACTES ===
+# du catalogue INCIDENT_ACTIONS (93 noms précis). Sans ça, le fine-tune apprend un ancien vocabulaire
+# (ex. ROLLBACK) qui ne matche jamais le catalogue (ROLLBACK_TO_LAST_HEALTHY_REVISION) -> 0.125 en réel.
+import re as _re
+_catp = os.path.join(D, "..", "..", "backend", "backend", "ai-service", "app", "models", "incident_catalog.py")
+_cat = open(_catp, encoding="utf-8").read()
+_blk = _re.search(r"INCIDENT_ACTIONS.*?\{(.*?)\n\}", _cat, _re.S).group(1)
+_CATMAP = dict(_re.findall(r'"([A-Z_0-9]+)"\s*:\s*"([A-Z_0-9]+)"', _blk))
+_missing = [t for t in C if t not in _CATMAP]
+assert not _missing, f"types sans action catalogue: {_missing}"
+C = {t: (_CATMAP[t], diag, expl, symps) for t, (act, diag, expl, symps) in C.items()}
+print(f"[CORRECTIF] actions remappées sur le catalogue : {len(set(_CATMAP[t] for t in C))} actions distinctes")
+
 CLUSTER=["prod-eu","prod-us","staging-cluster","gke-prod","eks-main","onprem-01","dev-cluster","k8s-west","cluster-a","aks-prod"]
 WRAP=["{s}.","Incident detected: {s}.","Alert: {s}.","Monitoring reports: {s}.","{s} — please decide the action.",
  "In production, {s}.","{s}. What is the remediation?","On cluster {cluster}: {s}.","[{cluster}] {s}.",

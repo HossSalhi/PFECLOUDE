@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # vagues « investigate », format ignoré). -> le BASE devient le décideur PRINCIPAL, le fine-tuné
     # reste en repli. (Le RAG apporte la vraie valeur : fidélité 0.73->0.91.)
     # Sortie attendue : "DIAGNOSTIC: <cause> | ACTION=<ACTION_NAME> | EXPLICATION: <fix>".
-    llm_model: str = "qwen2.5:3b-instruct"
+    llm_model: str = "helios-120-pro"
     # PAS de repli MODÈLE : .161 (5.8 Go) ne tient qu'UN seul 3B en RAM. Charger un 2e modèle en
     # repli saturait la RAM -> l'ai-service renvoyait une erreur -> circuit breaker backend ouvert
     # -> plus de remédiation. Si qwen échoue, l'explication déterministe (_why_for) prend le relais
@@ -44,6 +44,30 @@ class Settings(BaseSettings):
     # dans le prompt → moins d'hallucination, décisions fidèles au catalogue.
     rag_enabled: bool = True
     rag_top_k: int = 3
+
+    # ── Outils d'amélioration du LLM (empilables, activables/mesurables un par un) ──
+    # few_shot : exemple travaillé (format + 4 étapes de raisonnement + confiance) dans le prompt.
+    # cot      : Chain-of-Thought — raisonne symptôme->cause->action EN INTERNE, sortie concise.
+    # confidence : le LLM auto-évalue sa fiabilité (high/medium/low) -> signal d'ESCALADE non bloquant.
+    # rerank   : 2e passe fine sur les cartes RAG (recouvrement avec la résolution, pas juste le nom).
+    #
+    # DÉFAUTS PILOTÉS PAR L'ABLATION (12 juil, .161 qwen+RAG, action nommée vs catalogue) :
+    #   - pack complet a RÉGRESSÉ 0.917->0.583 (décodage contraint JSON INERTE sur ce CPU -> prose ;
+    #     confidence tronque le JSON, few_shot/rerank changent le contexte -> -1 item chacun).
+    #   - cot confirmé sur 30 types : 0.867 == baseline 0.867 (ZÉRO gain) + ~2,3 s de latence/appel
+    #     -> dans le chemin critique (timeout 14 s) c'est un risque net sans contrepartie.
+    #   => AUCUN outil activé : la baseline (RAG+CRAG+catalogue) est déjà au plafond sur ce CPU.
+    #   Les 4 restent codés + config-gated : RÉACTIVABLES via env sur GPU (où le décodage contraint
+    #   redevient viable). Voir memory project_helios_llm_tools_ablation.
+    llm_few_shot: bool = False
+    llm_cot: bool = False
+    llm_confidence: bool = False
+    llm_rerank: bool = False
+    # knowledge_graph : structure K8s (pod->deploy->node, pvc->pv->storageclass...) injectée dans le
+    #   prompt -> le LLM sait sur quoi agir + quelles dépendances vérifier. self_consistency : N
+    #   générations + vote majoritaire sur l'action (>1 = ×N lent sur CPU -> OFF par défaut).
+    llm_knowledge_graph: bool = False
+    llm_self_consistency: int = 1
 
     # ── Ensemble ML+LLM sur les 120 types ─────────────────────────────────────
     # Le ML 120 (entraîné sur 12000 ex.) PROMEUT le type quand il est sûr (event_reason

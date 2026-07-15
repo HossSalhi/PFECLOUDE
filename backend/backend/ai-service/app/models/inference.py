@@ -66,6 +66,13 @@ class InferenceEngine:
             self._rag_top_k = getattr(settings, "rag_top_k", 3)
             self._ensemble_120 = getattr(settings, "ensemble_120_enabled", True)
             self._ml120_threshold = getattr(settings, "ml120_confidence_threshold", 0.85)
+            # Outils d'amélioration LLM (few-shot / CoT / confiance / re-ranking) — pilotables par config.
+            self._llm_few_shot = getattr(settings, "llm_few_shot", True)
+            self._llm_cot = getattr(settings, "llm_cot", True)
+            self._llm_confidence = getattr(settings, "llm_confidence", True)
+            self._llm_rerank = getattr(settings, "llm_rerank", True)
+            self._llm_kg = getattr(settings, "llm_knowledge_graph", False)
+            self._llm_selfcons = getattr(settings, "llm_self_consistency", 1)
         else:
             self._llm_decider_model = "helios-120-3b"
             self._llm_fallback_model = "qwen2.5:3b"
@@ -74,6 +81,12 @@ class InferenceEngine:
             self._rag_top_k = 3
             self._ensemble_120 = True
             self._ml120_threshold = 0.85
+            self._llm_few_shot = True
+            self._llm_cot = True
+            self._llm_confidence = True
+            self._llm_rerank = True
+            self._llm_kg = False
+            self._llm_selfcons = 1
         # RAG : index des 120 cartes catalogue (construit paresseusement au 1er appel).
         self._rag = RagRetriever() if self._rag_enabled else None
         # ML 120 candidat en SHADOW (non autoritaire) : chargé paresseusement s'il est présent.
@@ -89,7 +102,10 @@ class InferenceEngine:
                 # ai-classify -> timeout -> circuit breaker -> plus de remédiation. La classification +
                 # l'action viennent des marqueurs déterministes + catalogue (rapides, fiables) ; le LLM est
                 # BEST-EFFORT (produit une sortie s'il tient dans 14s, sinon explication déterministe _why_for).
-                timeout=self._llm_timeout, num_predict=64, top_k=self._rag_top_k
+                timeout=self._llm_timeout, num_predict=64, top_k=self._rag_top_k,
+                few_shot=self._llm_few_shot, cot=self._llm_cot,
+                confidence=self._llm_confidence, rerank=self._llm_rerank,
+                knowledge_graph=self._llm_kg, self_consistency=self._llm_selfcons
             ) if self._rag_enabled else None
         except Exception:
             self._llm = None

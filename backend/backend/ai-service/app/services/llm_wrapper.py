@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 class HeliosLLM:
     def __init__(self, rag, *, model="helios-120-3b", fallback="qwen2.5:3b-instruct",
                  timeout=25.0, num_predict=128, top_k=3,
-                 crag_high=0.60, crag_low=0.30, ollama_url="http://localhost:11434"):
+                 crag_high=0.60, crag_low=0.30, ollama_url="http://localhost:11434",
+                 few_shot=True, cot=True, confidence=True, rerank=True,
+                 knowledge_graph=False, self_consistency=1):
         self.rag = rag
         self.model = model
         self.fallback = fallback
@@ -37,6 +39,21 @@ class HeliosLLM:
         self.crag_high = crag_high   # seuil au-dessus duquel la récupération est jugée FIABLE
         self.crag_low = crag_low     # seuil en dessous duquel elle est jugée TROMPEUSE
         self.url = ollama_url
+        # ── Outils d'amélioration (empilables, mesurables un par un) ──
+        self.few_shot = bool(few_shot)     # exemple travaillé (format + raisonnement) dans le prompt
+        self.cot = bool(cot)               # Chain-of-Thought : raisonner symptôme -> cause -> action
+        self.confidence = bool(confidence) # le LLM auto-évalue sa confiance -> signal d'escalade
+        self.rerank = bool(rerank)         # re-classement fin des cartes RAG (recouvrement preuve)
+        # KNOWLEDGE GRAPH : structure K8s (pod->deploy->node, pvc->pv...) injectée dans le prompt.
+        self.kg = None
+        if knowledge_graph:
+            try:
+                from app.services.knowledge_graph import KnowledgeGraph
+                self.kg = KnowledgeGraph()
+            except Exception:
+                self.kg = None
+        # SELF-CONSISTENCY : N générations + vote majoritaire sur l'action (>1 = ×N lent sur CPU).
+        self.self_consistency = max(1, int(self_consistency))
 
     # ── vérité terrain event.reason (signal correctif) ───────────────────────
     def _reason_type(self, rc):
@@ -53,7 +70,8 @@ class HeliosLLM:
             return "", "none", {}
         try:
             pinned = self.rag.card_for(incident_type)
-            neighbors = self.rag.retrieve(f"{incident_type} {evidence} {rc or ''}", k=self.top_k)
+            neighbors = self.rag.retrieve(f"{incident_type} {evidence} {rc or ''}",
+                                          k=self.top_k, rerank=self.rerank)
             er_type = self._reason_type(rc)
             er_card = self.rag.card_for(er_type) if er_type else None
             top_score = max([c.get("score", 0.0) for c in neighbors], default=0.0)
@@ -144,18 +162,62 @@ class HeliosLLM:
         except Exception:
             return None
 
-    # ── pipeline complet ─────────────────────────────────────────────────────
+    # Exemple travaillé (FEW-SHOT) : enseigne le FORMAT + les 4 étapes de raisonnement + la
+    # confiance, avec une action catalogue RÉELLE (mapping correct crashloop -> rollback). Fixe et
+    # illustratif : n'injecte PAS la réponse de l'incident courant (pas de fuite) — le décodage
+    # contraint force de toute façon l'action à appartenir à l'enum du catalogue.
+    _FEWSHOT = (
+        "\n\nWorked example (follow this format and reasoning):\n"
+        "Evidence: 'pods CrashLoopBackOff, last state terminated exit 1 shortly after start'.\n"
+        "DIAGNOSTIC: a recent revision makes the container crash on startup. "
+        "ACTION=ROLLBACK_TO_LAST_HEALTHY_REVISION. "
+        "EXPLICATION: reverting to the last healthy revision restores a working container so pods stay Ready. "
+        "CONFIDENCE: high.")
+
+    # ── SELF-CONSISTENCY : N décisions -> action majoritaire (robustesse) ────────
     def decide(self, incident_type, severity, evidence, action, rc, candidates=None, history=None):
+        """Point d'entrée. Si self_consistency>1 : génère N décisions et retourne
+        celle dont l'ACTION est majoritaire (réduit la variance). Sinon : 1 passe."""
+        if self.self_consistency <= 1:
+            return self._decide_once(incident_type, severity, evidence, action, rc, candidates, history)
+        import collections
+        results = []
+        for _ in range(self.self_consistency):
+            d = self._decide_once(incident_type, severity, evidence, action, rc, candidates, history)
+            if d and d.get("action"):
+                results.append(d)
+        if not results:
+            return None
+        votes = collections.Counter(d["action"] for d in results)
+        winner = votes.most_common(1)[0][0]
+        best = next(d for d in results if d["action"] == winner)
+        best["self_consistency"] = {"n": self.self_consistency, "votes": dict(votes)}
+        return best
+
+    # ── pipeline complet (1 passe) ───────────────────────────────────────────────
+    def _decide_once(self, incident_type, severity, evidence, action, rc, candidates=None, history=None):
         try:
             ctx, grade, meta = self._crag(incident_type, evidence, rc)
             system = (
                 "You are the automatic decision engine of a Kubernetes self-healing system (HELIOS). "
                 "Reason ONLY from the provided evidence and knowledge base. Do NOT invent namespaces, "
-                "cluster names, application names, percentages or numbers that are not in the evidence. "
+                "cluster names, application names, percentages or numbers that are not in the evidence. ")
+            if self.cot:   # CHAIN-OF-THOUGHT : raisonnement guidé (interne, sortie concise)
+                system += (
+                    "Think step by step INTERNALLY before answering: (1) the SYMPTOM in the evidence, "
+                    "(2) the ROOT CAUSE, (3) the catalog ACTION_NAME that fixes that cause, (4) your "
+                    "CONFIDENCE (high/medium/low). Do NOT print the steps. ")
+            system += (
                 "Give the DIAGNOSTIC (root cause), the ACTION (prefer an ACTION_NAME from the knowledge "
                 "base when it matches), and EXPLICATION of how that action fixes it. Be concise (2-3 sentences).")
+            if self.few_shot:   # FEW-SHOT : un exemple travaillé (format + étapes + confiance)
+                system += self._FEWSHOT
             if ctx:
                 system += "\n\n" + ctx
+            if self.kg:   # KNOWLEDGE GRAPH : composant K8s touché + dépendances à vérifier
+                kg_ctx = self.kg.context_for(incident_type)
+                if kg_ctx:
+                    system += "\n\n" + kg_ctx
             if grade == "incorrect":
                 system += ("\n\nNote: the retrieved knowledge is low-confidence; rely on the symptoms "
                            "and the classified type, do not force a listed action if it does not fit.")
@@ -173,23 +235,37 @@ class HeliosLLM:
             enum_actions = list(dict.fromkeys(re.findall(r"action=([A-Z][A-Z0-9_]+)", ctx or "")))
             if enum_actions:
                 enum_actions = enum_actions + ["CAPTURE_DIAGNOSTICS_AND_INVESTIGATE"]
-                schema = {"type": "object", "properties": {
+                props = {
                     "diagnostic": {"type": "string"},
                     "action": {"type": "string", "enum": enum_actions},
-                    "explication": {"type": "string"}},
-                    "required": ["diagnostic", "action", "explication"]}
-                sys_json = system + ("\n\nRespond ONLY as JSON with keys diagnostic, action, explication. "
-                                     "'action' MUST be the catalog ACTION_NAME (from the allowed list) that "
-                                     "best fixes the incident; 'explication' says how it fixes it.")
+                    "explication": {"type": "string"}}
+                required = ["diagnostic", "action", "explication"]
+                if self.confidence:   # SEUIL DE CONFIANCE : le LLM auto-évalue la fiabilité
+                    props["confidence"] = {"type": "string", "enum": ["high", "medium", "low"]}
+                    required.append("confidence")
+                schema = {"type": "object", "properties": props, "required": required}
+                sys_json = system + (
+                    "\n\nRespond ONLY as JSON with keys diagnostic, action, explication"
+                    + (", confidence" if self.confidence else "") + ". "
+                    "'action' MUST be the catalog ACTION_NAME (from the allowed list) that best fixes "
+                    "the incident; 'explication' says how it fixes it"
+                    + ("; 'confidence' is high/medium/low based on how well the evidence matches the type."
+                       if self.confidence else "") + ".")
                 obj = self._chat_json(sys_json, user, schema)
                 if not obj and self.fallback:
                     obj = self._chat_json(sys_json, user, schema, model=self.fallback)
                 if obj and obj.get("action") in enum_actions:
                     _diag = (obj.get("diagnostic") or "").strip() or None
                     _expl = (obj.get("explication") or "").strip() or _diag
+                    _conf = (obj.get("confidence") or "").strip().lower() or None
                     if _expl:
+                        # SEUIL DE CONFIANCE -> signal d'ESCALADE (NON bloquant) : confiance faible OU
+                        # récupération jugée trompeuse par le CRAG -> l'orchestrateur PEUT demander une
+                        # revue humaine. On NE change PAS l'action (préserve l'auto-remédiation 16/16).
+                        _escalate = (_conf == "low") or (grade == "incorrect")
                         return {"model": self.model, "diagnostic": _diag,
                                 "action": obj["action"], "explication": _expl,
+                                "confidence": _conf, "escalate_suggested": _escalate,
                                 "rag_grounded": True, "crag_grade": grade, "crag": meta,
                                 "constrained": True}
 
