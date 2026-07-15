@@ -461,6 +461,15 @@ public class AIOpsOrchestrationService {
                     prediction.setConfidence(0.88);
                 }
             }
+            // CPU_STRESS SANS opt-in autoscaling = process EMBALLÉ (runaway), PAS une montée en charge :
+            // la remédiation correcte est un ROLLING RESTART (purge le process fou), PAS un SCALE — qui
+            // n'ajoute que des répliques (souvent plafonnées => action INERTE) sans tuer le process.
+            // Aligne l'action EXÉCUTÉE sur l'explication/catalogue ("rolling restart pour purger le process
+            // fou"). L'AUTOSCALING (opt-in, reclassé ci-dessus) garde le SCALE ; ici c'est du CPU_STRESS pur.
+            if ("CPU_STRESS".equals(prediction.getIncidentType())) {
+                prediction.setRecommendedAction("FORCE_RECREATE_DEPLOYMENT");
+                prediction.setFinalExecutableAction("FORCE_RECREATE_DEPLOYMENT");
+            }
             // No passive INVESTIGATE anywhere: any residual investigate recommendation becomes a concrete
             // rolling restart, so the detection trace and the executed action stay consistent (the
             // executor never receives INVESTIGATION for an app incident).

@@ -233,6 +233,24 @@ public class InfrastructureHealthScheduler {
         log.warn("DNS failure escalated to super admin: {}", reason);
     }
 
+    /**
+     * Explication INFRA déterministe pour les composants NON-nœud (VM monitoring/IA/Camunda -> VM_DOWN,
+     * pression nœud, DNS). Une VM/un service mort n'a pas de métriques niveau-pod : on ne propose donc
+     * AUCUNE action Kubernetes (ce serait absurde), on décrit la vraie récupération (intervention infra).
+     */
+    private String deterministicInfraExplanation(String type, ComponentStatus status) {
+        String comp = status.namespace() + "/" + status.app();
+        return switch (type == null ? "" : type) {
+            case "DNS_FAILURE" -> "Résolution DNS in-cluster cassée (" + comp + "). Récupération : "
+                    + "restaurer/redémarrer CoreDNS. HELIOS détecte et suit le retour à la normale.";
+            case "NODE_DISK_PRESSURE", "NODE_MEMORY_PRESSURE" -> "Pression ressources sur le nœud ("
+                    + comp + "). Action infra requise (libérer disque/mémoire) — escalade à l'astreinte.";
+            default -> "Composant d'infrastructure injoignable (" + comp + " — VM/service down). La "
+                    + "récupération est une intervention infra (redémarrage du service/VM) ; aucune action "
+                    + "Kubernetes niveau-pod n'est applicable. HELIOS détecte et suit le retour à la normale.";
+        };
+    }
+
     private String incidentTypeFor(ComponentStatus status) {
         return switch (status.namespace()) {
             case "node-pressure" -> status.app().contains("Disk") ? "NODE_DISK_PRESSURE" : "NODE_MEMORY_PRESSURE";
@@ -305,6 +323,17 @@ public class InfrastructureHealthScheduler {
 
     private void enrichIncidentWithAi(Incident incident, ComponentStatus status) {
         try {
+            // L'IA n'enrichit que les incidents NŒUD (k8s-nodes) : là, le vecteur de contexte de panne
+            // (charge des survivants, cause racine via Prometheus .160) donne une classification NODE réelle.
+            // Pour les AUTRES composants infra (VM monitoring/IA/Camunda -> VM_DOWN, pression nœud, DNS) une
+            // VM/un service mort n'a AUCUNE métrique niveau-pod : l'IA plaquerait une classification/action
+            // de POD absurde (ex. POD_PENDING_INSUFFICIENT_RESOURCES -> « ajouter des répliques » sur une VM
+            // éteinte). On garde donc le type DÉTERMINISTE + une explication INFRA, SANS reco d'action K8s.
+            if (!"k8s-nodes".equals(status.namespace())) {
+                incident.setExplanation(deterministicInfraExplanation(incident.getIncidentType(), status));
+                incidentRepository.save(incident);
+                return;
+            }
             AIPredictRequest req = new AIPredictRequest();
             req.setNamespace(status.namespace());
             req.setApp(status.app());
