@@ -310,15 +310,17 @@ def main():
         if master_alive():
             if MASTER in not_ready_since:
                 log.info(f"{MASTER} de retour Ready (rallumage manuel)")
-                helios_report_master_up()   # resout l'incident master dans le tableau
             not_ready_since.pop(MASTER, None)
         else:
             if MASTER not in not_ready_since:
                 not_ready_since[MASTER] = now
-                log.warning(f"{MASTER} injoignable — incident enregistre. AUCUN rallumage auto (desactive) : "
-                            f"le master reste down jusqu'a un rallumage MANUEL.")
-                helios_report_master_down()  # enregistre l'incident master dans le tableau
-            # Volontairement : PAS de power_on(MASTER). L'auto-rallumage du master est desactive.
+                # ZÉRO EXCEPTION (choix opérateur) : le watchdog ne crée PLUS l'incident master en direct.
+                # La détection du master passe DÉSORMAIS UNIQUEMENT par le backend
+                # (InfrastructureHealthScheduler, via l'API qui survit sur la VIP HA .150) -> gate Camunda.
+                # -> Camunda down = master NON détecté (comme tous les autres incidents). TOUT via Camunda.
+                log.warning(f"{MASTER} injoignable — détection déléguée au backend/Camunda (API via VIP HA). "
+                            f"AUCUN enregistrement direct par le watchdog, AUCUN rallumage auto (manuel).")
+            # Volontairement : NI power_on(MASTER), NI POST direct. Tout passe par Camunda (0 exception).
 
         # --- WORKERS : detection seulement (PAS d'auto-rallumage). Le rallumage est declenche par
         #     Camunda via POST /restart/<node>. On debloque juste la detection backend ( re-election

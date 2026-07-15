@@ -335,19 +335,35 @@ public class CamundaJobWorkerLifecycle {
                 boolean nodeTarget = "k8s-nodes".equalsIgnoreCase(action.getTargetNamespace());
                 if (isEscalationOnly) {
                     if (nodeTarget) {
-                        workflowService.addWorkflowLog(workflowId,
-                                "🔍 Décision IA : panne nœud — aucune action kubectl ne peut réparer un nœud "
-                                + "injoignable (redémarrer ses pods n'aide pas).");
-                        workflowService.addWorkflowLog(workflowId,
-                                "▶ Camunda déclenche le power-on de la VM " + action.getTargetName()
-                                + " via le watchdog hôte (hors cluster).");
-                        // C'EST ICI que Camunda pilote le rallumage : appel HTTP au watchdog hôte.
-                        String wdResult = triggerHostWatchdogRestart(action.getTargetName());
-                        workflowService.addWorkflowLog(workflowId,
-                                "$ vmrun start " + action.getTargetName()
-                                + "   (déclenché par Camunda via le watchdog hôte → " + wdResult + ")");
-                        workflowService.addWorkflowLog(workflowId,
-                                "⏳ HELIOS surveille le retour du nœud à l'état Ready avant de conclure.");
+                        // EXIGENCE PRODUIT : l'IA est le CERVEAU qui décide la solution ; Camunda ne fait
+                        // qu'EXÉCUTER ce que l'IA a « pensé ». Un nœud tombé est bien DÉTECTÉ par Camunda,
+                        // mais le power-on (la « solution ») ne s'exécute QUE si l'IA est joignable. IA
+                        // injoignable => PAS de rallumage automatique -> escalade humaine pure (le nœud
+                        // reste down jusqu'à intervention manuelle). Cohérent avec le repli app côté
+                        // AIOpsOrchestrationService (IA down => ESCALADE, jamais de remédiation sans IA).
+                        if (!aiOpsClientService.isReachable()) {
+                            workflowService.addWorkflowLog(workflowId,
+                                    "🔌 Service IA injoignable — HELIOS n'auto-répare PAS un nœud sans décision de l'IA.");
+                            workflowService.addWorkflowLog(workflowId,
+                                    "↗ Escalade humaine pour la panne du nœud " + action.getTargetName()
+                                    + " (AUCUN power-on automatique tant que l'IA est down — rallumage manuel requis).");
+                            workflowService.addWorkflowLog(workflowId,
+                                    "⏳ HELIOS surveille le retour du nœud à l'état Ready.");
+                        } else {
+                            workflowService.addWorkflowLog(workflowId,
+                                    "🔍 Décision IA : panne nœud — aucune action kubectl ne peut réparer un nœud "
+                                    + "injoignable (redémarrer ses pods n'aide pas).");
+                            workflowService.addWorkflowLog(workflowId,
+                                    "▶ Camunda déclenche le power-on de la VM " + action.getTargetName()
+                                    + " via le watchdog hôte (hors cluster).");
+                            // C'EST ICI que Camunda pilote le rallumage : appel HTTP au watchdog hôte.
+                            String wdResult = triggerHostWatchdogRestart(action.getTargetName());
+                            workflowService.addWorkflowLog(workflowId,
+                                    "$ vmrun start " + action.getTargetName()
+                                    + "   (déclenché par Camunda via le watchdog hôte → " + wdResult + ")");
+                            workflowService.addWorkflowLog(workflowId,
+                                    "⏳ HELIOS surveille le retour du nœud à l'état Ready avant de conclure.");
+                        }
                     } else {
                         workflowService.addWorkflowLog(workflowId,
                                 "🔍 Décision IA : aucune action Kubernetes automatique sûre pour ce type de panne.");
