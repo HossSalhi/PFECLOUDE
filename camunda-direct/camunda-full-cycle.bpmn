@@ -6,121 +6,46 @@
                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
                   id="helios-full-cycle-defs" targetNamespace="http://bpmn.io/schema/bpmn">
-  <bpmn:process id="helios-camunda-full-cycle" name="HELIOS — Camunda seul : detecte, decide via IA, execute" isExecutable="true">
+  <bpmn:process id="helios-camunda-full-cycle" name="HELIOS — Camunda seul : detecte par SSH, decide via IA, execute par SSH" isExecutable="true">
 
     <!-- =============== 1. CAMUNDA DECLENCHE =============== -->
     <bpmn:startEvent id="Timer" name="Cycle 60s">
-      <bpmn:outgoing>fT</bpmn:outgoing>
+      <bpmn:outgoing>f1</bpmn:outgoing>
       <bpmn:timerEventDefinition id="td1">
         <bpmn:timeCycle xsi:type="bpmn:tFormalExpression">R/PT60S</bpmn:timeCycle>
       </bpmn:timerEventDefinition>
     </bpmn:startEvent>
-    <bpmn:sequenceFlow id="fT" sourceRef="Timer" targetRef="Cpu" />
+    <bpmn:sequenceFlow id="f1" sourceRef="Timer" targetRef="Detecter" />
 
-    <bpmn:serviceTask id="Cpu" name="1. PROMETHEUS - saturation CPU (initialise)">
+    <!-- =============== 2. DETECTION — SSH SUR LA VM MONITORING ===============
+         Camunda se connecte en SSH sur .160 ; le detecteur y interroge Prometheus,
+         Loki et Grafana EN LOCAL et rend UN incident deja classe parmi 16 types,
+         avec sa cible. Le type vient du motif kubelet : c'est une VERITE TERRAIN,
+         pas une supposition. Toutes les regles rendent zero sur un cluster sain.
+    -->
+    <bpmn:serviceTask id="Detecter" name="1. DETECTER (SSH sur la VM monitoring .160)">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:9090/api/v1/query" target="url" />
-          <zeebe:input source="=15" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ query: &#34;sum by (namespace,pod) (rate(container_cpu_usage_seconds_total{container!=\&#34;POD\&#34;,container!=\&#34;\&#34;}[3m])) &gt; 0.15&#34; }" target="queryParameters" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://127.0.0.1:8099/detecter" target="url" />
+          <zeebe:input source="=60" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
+          <zeebe:input source="={ source: &#34;camunda&#34; }" target="body" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="resultExpression"
-            value="=if count(response.body.data.result) &gt; 0 then { nbAnomalies: 1, origine: &#34;cpu&#34;, ns: response.body.data.result[1].metric.namespace, cible: string join(sublist(split(response.body.data.result[1].metric.pod, &#34;-&#34;), 1, count(split(response.body.data.result[1].metric.pod, &#34;-&#34;)) - 2), &#34;-&#34;) } else { nbAnomalies: 0, origine: &#34;aucune&#34;, ns: &#34;aucun&#34;, cible: &#34;aucun&#34; }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>fT</bpmn:incoming>
-      <bpmn:outgoing>f1</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f1" sourceRef="Cpu" targetRef="Prometheus" />
-
-
-    <!-- =============== 2. PROMETHEUS — TOUS LES NAMESPACES =============== -->
-    <bpmn:serviceTask id="Prometheus" name="1. PROMETHEUS (.160) - tous namespaces">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:9090/api/v1/query" target="url" />
-          <zeebe:input source="=15" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ query: &#34;kube_deployment_status_replicas_unavailable &gt; 0&#34; }" target="queryParameters" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression"
-            value="=if count(response.body.data.result) &gt; 0 then { nbAnomalies: 1, origine: &#34;replicas&#34;, cible: response.body.data.result[1].metric.deployment, ns: response.body.data.result[1].metric.namespace } else { }" />
+            value="={ typeDetecte: response.body.type, ns: response.body.ns, cible: response.body.cible, noeudCible: response.body.noeud, nbAnomalies: response.body.nbAnomalies, monitoringFiable: response.body.monitoringFiable, preuve: response.body.preuve, severite: response.body.severite }" />
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
       <bpmn:incoming>f1</bpmn:incoming>
       <bpmn:outgoing>f2</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f2" sourceRef="Prometheus" targetRef="Noeuds" />
+    <bpmn:sequenceFlow id="f2" sourceRef="Detecter" targetRef="Decision" />
 
-    <!-- Detection au niveau des VMs. Placee en DERNIER des detecteurs : une VM tombee
-         rend aussi des replicas indisponibles, et c'est la panne de VM qui prime. -->
-    <bpmn:serviceTask id="Noeuds" name="1c. PROMETHEUS - une VM du cluster est-elle KO ?">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:9090/api/v1/query" target="url" />
-          <zeebe:input source="=15" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ query: &#34;kube_node_status_condition{condition=\&#34;Ready\&#34;,status=\&#34;true\&#34;} == 0&#34; }" target="queryParameters" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression"
-            value="=if count(response.body.data.result) &gt; 0 then { nbAnomalies: 1, origine: &#34;noeud&#34;, cible: response.body.data.result[1].metric.node, ns: &#34;k8s-nodes&#34; } else { }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
+    <!-- =============== 3. Y A-T-IL DE QUOI DECIDER ? =============== -->
+    <bpmn:exclusiveGateway id="Decision" name="Anomalie et monitoring fiable ?" default="fSain">
       <bpmn:incoming>f2</bpmn:incoming>
-      <bpmn:outgoing>f2b</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f2b" sourceRef="Noeuds" targetRef="Loki" />
-
-
-    <!-- =============== 3. LOKI =============== -->
-    <bpmn:serviceTask id="Loki" name="2. LOKI (.160) - logs">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:3100/loki/api/v1/query" target="url" />
-          <zeebe:input source="=15" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ query: &#34;sum(count_over_time({job=\&#34;k8s-containers\&#34;} |~ \&#34;(?i)(error|exception|panic)\&#34; [5m]))&#34; }" target="queryParameters" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression"
-            value="={ nbErreursLogs: if count(response.body.data.result) &gt; 0 then number(response.body.data.result[1].value[2]) else 0 }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>f2</bpmn:incoming>
-      <bpmn:outgoing>f3</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f3" sourceRef="Loki" targetRef="Grafana" />
-
-    <!-- =============== 4. GRAFANA — fiabilite du stack =============== -->
-    <bpmn:serviceTask id="Grafana" name="3. GRAFANA (.160) - sante du stack">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:3000/api/health" target="url" />
-          <zeebe:input source="=10" target="connectionTimeoutInSeconds" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression"
-            value="={ monitoringFiable: response.body.database = &#34;ok&#34;, grafanaVersion: response.body.version }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>f3</bpmn:incoming>
-      <bpmn:outgoing>f4</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f4" sourceRef="Grafana" targetRef="Decision" />
-
-    <!-- =============== 5. DECISION =============== -->
-    <bpmn:exclusiveGateway id="Decision" name="Anomalie ?" default="fSain">
-      <bpmn:incoming>f4</bpmn:incoming>
       <bpmn:outgoing>fAno</bpmn:outgoing>
       <bpmn:outgoing>fSain</bpmn:outgoing>
     </bpmn:exclusiveGateway>
@@ -129,8 +54,8 @@
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fSain" name="non" sourceRef="Decision" targetRef="FinSain" />
 
-    <!-- =============== 6. L'IA DECIDE L'ACTION =============== -->
-    <bpmn:serviceTask id="IA" name="4. IA (.161:8000) - quelle action ?">
+    <!-- =============== 4. L'IA DECIDE L'ACTION =============== -->
+    <bpmn:serviceTask id="IA" name="2. IA (.161:8000) - quelle action ?">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
@@ -146,63 +71,43 @@
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
       <bpmn:incoming>fAno</bpmn:incoming>
-      <bpmn:outgoing>f5</bpmn:outgoing>
+      <bpmn:outgoing>f3</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f5" sourceRef="IA" targetRef="Verifier" />
+    <bpmn:sequenceFlow id="f3" sourceRef="IA" targetRef="Routage" />
 
-    <!-- Verification de la premisse : le cluster confirme-t-il le diagnostic de l'IA ?
-         Le modele s'effondre sur la classe la plus frequente (mesure : un blocage DNS
-         reel est diagnostique POD_IMAGE_PULL_BACKOFF a 0.7188). On ne remedie pas sur
-         une premisse contredite par kubelet. -->
-    <bpmn:serviceTask id="Verifier" name="4b. Le cluster confirme-t-il le diagnostic ?">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="http://192.168.148.160:9090/api/v1/query" target="url" />
-          <zeebe:input source="=25" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ query: &#34;kube_pod_container_status_waiting_reason{namespace=\&#34;&#34; + ns + &#34;\&#34;,reason=~\&#34;ImagePullBackOff|ErrImagePull|InvalidImageName\&#34;} &gt; 0&#34; }" target="queryParameters" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression" value="={ imageConfirmee: count(response.body.data.result) &gt; 0 }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>f5</bpmn:incoming>
-      <bpmn:outgoing>f5b</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f5b" sourceRef="Verifier" targetRef="Routage" />
-
-    <!-- =============== 7. ROUTAGE SELON L'ACTION DE L'IA =============== -->
+    <!-- =============== 5. PEUT-ON EXECUTER ? =============== -->
     <bpmn:exclusiveGateway id="Routage" name="Peut-on executer l'action de l'IA ?" default="fExec">
-      <bpmn:incoming>f5b</bpmn:incoming>
+      <bpmn:incoming>f3</bpmn:incoming>
       <bpmn:outgoing>fProtege</bpmn:outgoing>
-      <bpmn:outgoing>fIncoherent</bpmn:outgoing>
       <bpmn:outgoing>fRien</bpmn:outgoing>
+      <bpmn:outgoing>fIncoherent</bpmn:outgoing>
       <bpmn:outgoing>fExec</bpmn:outgoing>
     </bpmn:exclusiveGateway>
 
-    <bpmn:sequenceFlow id="fProtege" name="namespace systeme : escalade humaine" sourceRef="Routage" targetRef="FinProtege">
+    <!-- Garde-fou 1 : namespaces systeme. Camunda est admin par SSH ; une erreur de
+         diagnostic redemarrerait CoreDNS ou l'operateur de base. On detecte, on trace,
+         on n'agit pas. -->
+    <bpmn:sequenceFlow id="fProtege" name="namespace systeme : escalade" sourceRef="Routage" targetRef="FinProtege">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=list contains(["kube-system","kube-public","kube-node-lease","cnpg-system","calico-system","tigera-operator","falco","local-path-storage","monitoring"], ns)</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fIncoherent" name="premisse contredite par le cluster" sourceRef="Routage" targetRef="FinIncoherent">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=(contains(actionIA, "IMAGE") or contains(actionIA, "PULLABLE")) and imageConfirmee = false</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fExec" name="executer (voie SSH, aucune limite RBAC)" sourceRef="Routage" targetRef="ExecuterSSH" />
     <bpmn:sequenceFlow id="fRien" name="IA: aucun incident" sourceRef="Routage" targetRef="FinSain">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA = "NO_INCIDENT" or actionIA = null</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
+    <!-- Garde-fou 2 : le type MESURE sur le cluster contredit le diagnostic de l'IA.
+         Mesure : sur un blocage DNS reel le modele repond POD_IMAGE_PULL_BACKOFF a
+         0.7188 de confiance. DEPLOYMENT_UNAVAILABLE est exclu : c'est un symptome
+         generique que l'IA a le droit d'affiner. -->
+    <bpmn:sequenceFlow id="fIncoherent" name="diagnostic IA contredit par le cluster" sourceRef="Routage" targetRef="FinIncoherent">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA != typeDetecte and typeDetecte != "DEPLOYMENT_UNAVAILABLE"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fExec" name="executer (SSH, aucune limite RBAC)" sourceRef="Routage" targetRef="ExecuterSSH" />
 
-    <!-- = Branche C (defaut) : redemarrage / rollback = -->
-
-    <!-- =============== 8. TRACER LA DECISION SUR L'OBJET K8S =============== -->
-
-    <!-- =============== 8. EXECUTION — VOIE SSH, AUCUNE LIMITE RBAC ===============
-         La passerelle traduit l'action de l'IA en commande reelle et la lance :
-           - kubectl sur le MASTER (kubeconfig admin : tout est permis)
-           - systemctl sur le NOEUD concerne (kubelet, containerd, disque)
-           - vmrun via le watchdog hote si la VM est ETEINTE (SSH impossible)
+    <!-- =============== 6. EXECUTION — SSH, AUCUNE LIMITE RBAC ===============
+         La passerelle traduit l'action de l'IA en commande reelle :
+         kubectl sur le MASTER (kubeconfig admin), systemctl sur le NOEUD,
+         ou vmrun via le watchdog hote si la VM est ETEINTE.
     -->
-    <bpmn:serviceTask id="ExecuterSSH" name="5. EXECUTER l'action de l'IA (SSH)">
+    <bpmn:serviceTask id="ExecuterSSH" name="3. EXECUTER l'action de l'IA (SSH)">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
@@ -218,11 +123,12 @@
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
       <bpmn:incoming>fExec</bpmn:incoming>
-      <bpmn:outgoing>fx1</bpmn:outgoing>
+      <bpmn:outgoing>f4</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fx1" sourceRef="ExecuterSSH" targetRef="Tracer" />
+    <bpmn:sequenceFlow id="f4" sourceRef="ExecuterSSH" targetRef="Tracer" />
 
-    <bpmn:serviceTask id="Tracer" name="6. Tracer la decision IA sur la ressource">
+    <!-- =============== 7. TRACER LA VERITE =============== -->
+    <bpmn:serviceTask id="Tracer" name="4. Tracer la decision et le RESULTAT REEL">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
@@ -230,65 +136,56 @@
           <zeebe:input source="http://127.0.0.1:8099/trace" target="url" />
           <zeebe:input source="=60" target="connectionTimeoutInSeconds" />
           <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
-          <zeebe:input source="={ ns: ns, cible: cible, action: actionIA, type: typeIA, origine: origine, resultat: execResume, ok: execOk }" target="body" />
+          <zeebe:input source="={ ns: ns, cible: cible, action: actionIA, type: typeIA, origine: typeDetecte, resultat: execResume, ok: execOk }" target="body" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="resultExpression" value="={ traceOk: response.body.ok }" />
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
-      <bpmn:incoming>fx1</bpmn:incoming>
-      <bpmn:outgoing>f6</bpmn:outgoing>
+      <bpmn:incoming>f4</bpmn:incoming>
+      <bpmn:outgoing>f5</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f6" sourceRef="Tracer" targetRef="FinExec" />
+    <bpmn:sequenceFlow id="f5" sourceRef="Tracer" targetRef="FinExec" />
 
     <bpmn:endEvent id="FinExec" name="Action IA executee par Camunda">
-      <bpmn:incoming>f6</bpmn:incoming>
+      <bpmn:incoming>f5</bpmn:incoming>
     </bpmn:endEvent>
     <bpmn:endEvent id="FinSain" name="Cluster sain">
       <bpmn:incoming>fSain</bpmn:incoming>
       <bpmn:incoming>fRien</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:endEvent id="FinProtege" name="Namespace systeme : escalade humaine, AUCUNE action automatique">
+    <bpmn:endEvent id="FinProtege" name="Namespace systeme : escalade, AUCUNE action">
       <bpmn:incoming>fProtege</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:endEvent id="FinIncoherent" name="Diagnostic IA contredit par le cluster : escalade, AUCUNE action">
+    <bpmn:endEvent id="FinIncoherent" name="Diagnostic IA contredit par le cluster : escalade">
       <bpmn:incoming>fIncoherent</bpmn:incoming>
     </bpmn:endEvent>
   </bpmn:process>
 
   <bpmndi:BPMNDiagram id="D1">
     <bpmndi:BPMNPlane id="P1" bpmnElement="helios-camunda-full-cycle">
-      <bpmndi:BPMNShape id="sX" bpmnElement="ExecuterSSH"><dc:Bounds x="1050" y="235" width="150" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="eX" bpmnElement="fExec"><di:waypoint x="995" y="268" /><di:waypoint x="1050" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="eX1" bpmnElement="fx1"><di:waypoint x="1200" y="268" /><di:waypoint x="1370" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNShape id="s1" bpmnElement="Timer"><dc:Bounds x="140" y="250" width="36" height="36" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="sCpu" bpmnElement="Cpu"><dc:Bounds x="200" y="330" width="130" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s2" bpmnElement="Prometheus"><dc:Bounds x="220" y="228" width="130" height="80" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s3" bpmnElement="Loki"><dc:Bounds x="380" y="228" width="120" height="80" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s4" bpmnElement="Grafana"><dc:Bounds x="530" y="228" width="120" height="80" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s5" bpmnElement="Decision" isMarkerVisible="true"><dc:Bounds x="685" y="243" width="50" height="50" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s6" bpmnElement="IA"><dc:Bounds x="780" y="228" width="130" height="80" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s7" bpmnElement="Routage" isMarkerVisible="true"><dc:Bounds x="945" y="243" width="50" height="50" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s12" bpmnElement="Tracer"><dc:Bounds x="1370" y="235" width="140" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s13" bpmnElement="FinExec"><dc:Bounds x="1550" y="252" width="36" height="36" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s14" bpmnElement="FinSain"><dc:Bounds x="692" y="400" width="36" height="36" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s15" bpmnElement="FinProtege"><dc:Bounds x="952" y="510" width="36" height="36" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="eProtege" bpmnElement="fProtege"><di:waypoint x="970" y="293" /><di:waypoint x="970" y="510" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNShape id="s16" bpmnElement="Verifier"><dc:Bounds x="855" y="120" width="140" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s18" bpmnElement="Noeuds"><dc:Bounds x="220" y="440" width="140" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="e2b" bpmnElement="f2b"><di:waypoint x="360" y="475" /><di:waypoint x="440" y="475" /><di:waypoint x="440" y="308" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNShape id="s17" bpmnElement="FinIncoherent"><dc:Bounds x="1052" y="510" width="36" height="36" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="e5b" bpmnElement="f5b"><di:waypoint x="995" y="155" /><di:waypoint x="1050" y="155" /><di:waypoint x="1050" y="243" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="eIncoherent" bpmnElement="fIncoherent"><di:waypoint x="995" y="268" /><di:waypoint x="1070" y="268" /><di:waypoint x="1070" y="510" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="eT" bpmnElement="fT"><di:waypoint x="158" y="286" /><di:waypoint x="158" y="365" /><di:waypoint x="200" y="365" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e1" bpmnElement="f1"><di:waypoint x="176" y="268" /><di:waypoint x="220" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e2" bpmnElement="f2"><di:waypoint x="350" y="268" /><di:waypoint x="380" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e3" bpmnElement="f3"><di:waypoint x="500" y="268" /><di:waypoint x="530" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e4" bpmnElement="f4"><di:waypoint x="650" y="268" /><di:waypoint x="685" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e5" bpmnElement="fAno"><di:waypoint x="735" y="268" /><di:waypoint x="780" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e6" bpmnElement="fSain"><di:waypoint x="710" y="293" /><di:waypoint x="710" y="400" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e7" bpmnElement="f5"><di:waypoint x="910" y="268" /><di:waypoint x="945" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e15" bpmnElement="f6"><di:waypoint x="1510" y="270" /><di:waypoint x="1550" y="270" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="s1" bpmnElement="Timer"><dc:Bounds x="140" y="242" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s2" bpmnElement="Detecter"><dc:Bounds x="230" y="220" width="170" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s3" bpmnElement="Decision" isMarkerVisible="true"><dc:Bounds x="450" y="235" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s4" bpmnElement="IA"><dc:Bounds x="550" y="220" width="150" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s5" bpmnElement="Routage" isMarkerVisible="true"><dc:Bounds x="750" y="235" width="50" height="50" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s6" bpmnElement="ExecuterSSH"><dc:Bounds x="850" y="220" width="160" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s7" bpmnElement="Tracer"><dc:Bounds x="1060" y="220" width="160" height="80" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s8" bpmnElement="FinExec"><dc:Bounds x="1270" y="242" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s9" bpmnElement="FinSain"><dc:Bounds x="457" y="400" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s10" bpmnElement="FinProtege"><dc:Bounds x="757" y="400" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s11" bpmnElement="FinIncoherent"><dc:Bounds x="757" y="480" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="e1" bpmnElement="f1"><di:waypoint x="176" y="260" /><di:waypoint x="230" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e2" bpmnElement="f2"><di:waypoint x="400" y="260" /><di:waypoint x="450" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e3" bpmnElement="fAno"><di:waypoint x="500" y="260" /><di:waypoint x="550" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e4" bpmnElement="fSain"><di:waypoint x="475" y="285" /><di:waypoint x="475" y="400" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e5" bpmnElement="f3"><di:waypoint x="700" y="260" /><di:waypoint x="750" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e6" bpmnElement="fExec"><di:waypoint x="800" y="260" /><di:waypoint x="850" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e7" bpmnElement="fProtege"><di:waypoint x="775" y="285" /><di:waypoint x="775" y="400" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e8" bpmnElement="fIncoherent"><di:waypoint x="775" y="285" /><di:waypoint x="720" y="480" /><di:waypoint x="757" y="498" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e9" bpmnElement="fRien"><di:waypoint x="760" y="270" /><di:waypoint x="600" y="400" /><di:waypoint x="493" y="418" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e10" bpmnElement="f4"><di:waypoint x="1010" y="260" /><di:waypoint x="1060" y="260" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="e11" bpmnElement="f5"><di:waypoint x="1220" y="260" /><di:waypoint x="1270" y="260" /></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 </bpmn:definitions>

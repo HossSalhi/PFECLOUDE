@@ -23,7 +23,8 @@ Perimetre de securite :
 import json, os, re, subprocess, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-NOEUDS = {"master": "192.168.148.153", "worker1": "192.168.148.158", "worker2": "192.168.148.155"}
+NOEUDS = {"master": "192.168.148.153", "worker1": "192.168.148.158", "worker2": "192.168.148.155",
+          "monitoring": "192.168.148.160"}   # .160 : detection (Prometheus/Loki/Grafana en local)
 UTIL = os.environ.get("HELIOS_SSH_USER", "kube")
 MDP = os.environ.get("HELIOS_SSH_PASS", "kube")
 JETON = os.environ.get("HELIOS_BRIDGE_TOKEN", "")
@@ -181,6 +182,22 @@ class Handler(BaseHTTPRequestHandler):
             if not commande:
                 return self.repondre(400, {"erreur": "commande vide"})
             return self.repondre(200, executer(noeud, commande))
+
+        if self.path == "/detecter":
+            # Camunda detecte EN SE CONNECTANT EN SSH sur la VM monitoring : le
+            # detecteur y interroge Prometheus, Loki et Grafana en local et rend
+            # UN incident deja classe parmi les 16 types.
+            r = executer("monitoring", "python3 /opt/helios/detecter.py")
+            try:
+                inc = json.loads(r["stdout"])
+            except Exception as e:
+                tracer("DETECT illisible", e, r.get("stdout", "")[:150])
+                return self.repondre(200, {"type": "NO_INCIDENT", "nbAnomalies": 0,
+                                           "ns": "aucun", "cible": "aucun", "noeud": "",
+                                           "monitoringFiable": False,
+                                           "preuve": "detecteur illisible: %s" % e})
+            tracer("DETECT", inc.get("type"), inc.get("ns"), inc.get("cible"), "|", inc.get("preuve", ""))
+            return self.repondre(200, inc)
 
         if self.path == "/trace":
             # annote la ressource concernee : un deploiement, ou un noeud si l'incident
