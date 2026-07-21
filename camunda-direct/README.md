@@ -77,6 +77,61 @@ Si l'IA annonce une action « image » que le cluster ne confirme pas
 (`imageConfirmee = false`), la passerelle route vers **`FinIncoherent`** : escalade, aucune
 action. Même principe que `groundTruthContainerType()` côté backend.
 
+## Accès de Camunda — ce qu'il atteint vraiment
+
+| Cible | Moyen | Vérifié |
+|---|---|---|
+| Prometheus `.160:9090` | HTTP | 200 |
+| Loki `.160:3100` | HTTP | 200 (`/ready` = `ready`) |
+| Grafana `.160:3000` | HTTP `/api/health` | 200 |
+| Stack IA `.161:8000` | HTTP `/predict` | 200 |
+| API Kubernetes `.150:6443` | HTTPS + token SA | v1.29.15 |
+| VMs master / worker1 / worker2 | passerelle SSH (ci-dessous) | exit=0 sur les 3 |
+
+Droits de la ServiceAccount `camunda-direct` (vérifiés par `kubectl auth can-i`) :
+
+| Autorisé | Refusé |
+|---|---|
+| patcher / scaler des deployments (tous namespaces) | supprimer un deployment |
+| supprimer des pods, supprimer des networkpolicies | lire les Secrets |
+| **lire** les nœuds (`get`/`list`) | créer un pod, **modifier/supprimer/drainer** un nœud |
+
+## Actions au niveau des VMs : la passerelle SSH
+
+L'API Kubernetes ne sait pas relancer un kubelet, purger un journal ni rallumer une VM.
+Le bundle de connecteurs Camunda n'a **pas** de connecteur SSH. D'où le service
+`helios-ssh-bridge` sur la VM de Camunda, que le connecteur HTTP sait appeler :
+
+```
+POST http://127.0.0.1:8099/exec
+X-Helios-Token: <jeton>
+{"host": "master|worker1|worker2", "command": "..."}
+  -> {"exitCode": 0, "stdout": "...", "ok": true}
+```
+
+**Périmètre de sécurité** (vérifié) :
+
+| Contrôle | État |
+|---|---|
+| écoute | `127.0.0.1:8099` uniquement — depuis `.160` : **injoignable (000)** |
+| sans jeton | **HTTP 401** |
+| cibles | table fixe de 3 nœuds, rien d'autre |
+| audit | chaque commande écrite dans `/var/log/helios-ssh-bridge.log` **avant** exécution |
+| jeton | posé en drop-in systemd `camunda8` (chmod 600), lu via `{{secrets.HELIOS_BRIDGE_TOKEN}}` |
+
+### Recouvrement avec le watchdog hôte (à connaître)
+
+Le watchdog `helios-node-autoheal.py` (hôte Windows) expose **déjà** une API sur `:9099`
+prévue pour Camunda : `POST /restart/<node>` (`vmrun start`) et `POST /host-exec/<node>`
+(liste blanche : `restart-kubelet`, `restart-containerd`, `sync-time`, `image-gc`, `reboot`).
+Son auto-réparation autonome est **désactivée par choix** — il détecte, Camunda décide.
+
+Les deux voies sont complémentaires, pas redondantes :
+
+- **passerelle SSH `:8099`** — commande libre, mais exige que la VM soit **allumée** ;
+- **watchdog `:9099`** — seule voie possible quand la VM est **éteinte** (`vmrun` agit sur
+  l'hyperviseur, pas dans l'OS invité).
+
 ## Résultats mesurés
 
 | Preuve | Résultat |
@@ -86,6 +141,7 @@ action. Même principe que `groundTruthContainerType()` côté backend.
 | Garde-fou système (`kube-public`) | 3 instances → `FinProtege`, 0 action, `coredns` 2/2 intact |
 | Garde-fou de cohérence (blocage DNS) | 2 instances → `FinIncoherent` (`imageConfirmee=false`), 0 action |
 | Non-régression du garde-fou (vrai ImagePull) | prémisse confirmée → action exécutée en 75 s |
+| **Panne de VM** (kubelet arrêté sur worker2) | NotReady à +40 s → `systemctl restart kubelet` par SSH à +60 s → **Ready à +60 s** |
 
 ## Limites connues et assumées
 
