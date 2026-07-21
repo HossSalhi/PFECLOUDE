@@ -127,12 +127,35 @@
       <bpmn:incoming>fAno</bpmn:incoming>
       <bpmn:outgoing>f5</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="f5" sourceRef="IA" targetRef="Routage" />
+    <bpmn:sequenceFlow id="f5" sourceRef="IA" targetRef="Verifier" />
+
+    <!-- Verification de la premisse : le cluster confirme-t-il le diagnostic de l'IA ?
+         Le modele s'effondre sur la classe la plus frequente (mesure : un blocage DNS
+         reel est diagnostique POD_IMAGE_PULL_BACKOFF a 0.7188). On ne remedie pas sur
+         une premisse contredite par kubelet. -->
+    <bpmn:serviceTask id="Verifier" name="4b. Le cluster confirme-t-il le diagnostic ?">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" />
+        <zeebe:ioMapping>
+          <zeebe:input source="GET" target="method" />
+          <zeebe:input source="http://192.168.148.160:9090/api/v1/query" target="url" />
+          <zeebe:input source="=25" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="={ query: &#34;kube_pod_container_status_waiting_reason{namespace=\&#34;&#34; + ns + &#34;\&#34;,reason=~\&#34;ImagePullBackOff|ErrImagePull|InvalidImageName\&#34;} &gt; 0&#34; }" target="queryParameters" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="resultExpression" value="={ imageConfirmee: count(response.body.data.result) &gt; 0 }" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:outgoing>f5b</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="f5b" sourceRef="Verifier" targetRef="Routage" />
 
     <!-- =============== 7. ROUTAGE SELON L'ACTION DE L'IA =============== -->
     <bpmn:exclusiveGateway id="Routage" name="Quelle action l'IA demande-t-elle ?" default="fRestart">
-      <bpmn:incoming>f5</bpmn:incoming>
+      <bpmn:incoming>f5b</bpmn:incoming>
       <bpmn:outgoing>fProtege</bpmn:outgoing>
+      <bpmn:outgoing>fIncoherent</bpmn:outgoing>
       <bpmn:outgoing>fRien</bpmn:outgoing>
       <bpmn:outgoing>fNetpol</bpmn:outgoing>
       <bpmn:outgoing>fScale</bpmn:outgoing>
@@ -141,6 +164,9 @@
 
     <bpmn:sequenceFlow id="fProtege" name="namespace systeme : escalade humaine" sourceRef="Routage" targetRef="FinProtege">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=list contains(["kube-system","kube-public","kube-node-lease","cnpg-system","calico-system","tigera-operator","falco","local-path-storage","monitoring"], ns)</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fIncoherent" name="premisse contredite par le cluster" sourceRef="Routage" targetRef="FinIncoherent">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=(contains(actionIA, "IMAGE") or contains(actionIA, "PULLABLE")) and imageConfirmee = false</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fRien" name="IA: aucun incident" sourceRef="Routage" targetRef="FinSain">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA = "NO_INCIDENT" or actionIA = null</bpmn:conditionExpression>
@@ -260,6 +286,9 @@
     <bpmn:endEvent id="FinProtege" name="Namespace systeme : escalade humaine, AUCUNE action automatique">
       <bpmn:incoming>fProtege</bpmn:incoming>
     </bpmn:endEvent>
+    <bpmn:endEvent id="FinIncoherent" name="Diagnostic IA contredit par le cluster : escalade, AUCUNE action">
+      <bpmn:incoming>fIncoherent</bpmn:incoming>
+    </bpmn:endEvent>
   </bpmn:process>
 
   <bpmndi:BPMNDiagram id="D1">
@@ -281,6 +310,10 @@
       <bpmndi:BPMNShape id="s14" bpmnElement="FinSain"><dc:Bounds x="692" y="400" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s15" bpmnElement="FinProtege"><dc:Bounds x="952" y="510" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="eProtege" bpmnElement="fProtege"><di:waypoint x="970" y="293" /><di:waypoint x="970" y="510" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="s16" bpmnElement="Verifier"><dc:Bounds x="855" y="120" width="140" height="70" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="s17" bpmnElement="FinIncoherent"><dc:Bounds x="1052" y="510" width="36" height="36" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="e5b" bpmnElement="f5b"><di:waypoint x="995" y="155" /><di:waypoint x="1050" y="155" /><di:waypoint x="1050" y="243" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="eIncoherent" bpmnElement="fIncoherent"><di:waypoint x="995" y="268" /><di:waypoint x="1070" y="268" /><di:waypoint x="1070" y="510" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="eT" bpmnElement="fT"><di:waypoint x="158" y="286" /><di:waypoint x="158" y="365" /><di:waypoint x="200" y="365" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="e1" bpmnElement="f1"><di:waypoint x="176" y="268" /><di:waypoint x="220" y="268" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="e2" bpmnElement="f2"><di:waypoint x="350" y="268" /><di:waypoint x="380" y="268" /></bpmndi:BPMNEdge>

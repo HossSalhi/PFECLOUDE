@@ -59,24 +59,65 @@ list contains(["kube-system","kube-public","kube-node-lease","cnpg-system",
 **aucune action automatique** n'est exécutée. C'est le principe déjà retenu ailleurs dans le
 projet (Sécurité / Control-plane = escalade humaine, zéro action déterministe).
 
+## Garde-fou : le cluster doit confirmer le diagnostic de l'IA
+
+Mesure : sur un **blocage DNS réel** (NetworkPolicy coupant l'egress), le modèle répond
+`POD_IMAGE_PULL_BACKOFF` → `ROLLBACK_TO_PULLABLE_IMAGE` avec **0,7188 de confiance**.
+Il s'effondre sur la classe la plus fréquente. Sans contrôle, Camunda exécuterait une
+remédiation dont la prémisse est fausse.
+
+La tâche `Verifier` interroge donc kubelet via Prometheus **avant** de router :
+
+```promql
+kube_pod_container_status_waiting_reason{namespace="<ns>",
+  reason=~"ImagePullBackOff|ErrImagePull|InvalidImageName"} > 0
+```
+
+Si l'IA annonce une action « image » que le cluster ne confirme pas
+(`imageConfirmee = false`), la passerelle route vers **`FinIncoherent`** : escalade, aucune
+action. Même principe que `groundTruthContainerType()` côté backend.
+
 ## Résultats mesurés
 
 | Preuve | Résultat |
 |---|---|
 | Chemin CPU (saturation d'un pod pourtant `Ready`) | détecté à +160 s, action IA exécutée à +356 s |
 | Namespace arbitraire `demo-camunda`, inconnu du backend | détecté et remédié en **75 s** (`POD_ERR_IMAGE_PULL` → `ROLLBACK_TO_PULLABLE_IMAGE`) |
-| Garde-fou `kube-public` | 3 instances → `FinProtege`, 0 action, `coredns` 2/2 intact |
+| Garde-fou système (`kube-public`) | 3 instances → `FinProtege`, 0 action, `coredns` 2/2 intact |
+| Garde-fou de cohérence (blocage DNS) | 2 instances → `FinIncoherent` (`imageConfirmee=false`), 0 action |
+| Non-régression du garde-fou (vrai ImagePull) | prémisse confirmée → action exécutée en 75 s |
 
-## Limite connue et assumée
+## Limites connues et assumées
 
-Sur les applications que **le backend HELIOS surveille aussi**, le chemin job-worker répare
-en ~45 s, soit **plus vite que le timer de 60 s** de ce process. La fenêtre d'anomalie se
-referme avant le cycle Camunda suivant, qui conclut alors légitimement « cluster sain ».
+**1. Le modèle se trompe de diagnostic.** Mesuré : blocage DNS → `POD_IMAGE_PULL_BACKOFF`
+à 0,7188. Le garde-fou empêche d'agir à tort, mais **ne produit pas** le bon diagnostic.
+Conséquence directe : les branches `NETWORK` et `SCALE` sont câblées et prouvées
+exécutables (via le process de test `helios-test-branches`), mais **jamais empruntées dans
+le cycle réel** — l'IA ne les demande jamais. Le vrai correctif est un réentraînement, hors
+périmètre ici. Ne pas maquiller ce point : il est mesuré, pas supposé.
 
-Ce n'est pas un défaut du BPMN mais une course entre deux détecteurs concurrents. Mesure à
-l'appui (`kube_deployment_status_replicas_unavailable` présent à +20 s et +40 s, absent
-dès +60 s). La preuve du chemin replicas se fait donc sur un namespace hors périmètre du
-backend — ce qui est aussi la démonstration de l'architecture « Camunda seul ».
+**2. Une application sans sonde de readiness est invisible.** Vérifié : un deny-all
+ingress+egress sur `helios-latency` (aucune `readinessProbe`) laisse le déploiement
+`ready=1`. Ce n'est pas propre à HELIOS — Kubernetes lui-même déclare l'app saine. Dès
+qu'une sonde dépendante du réseau existe, l'incident devient visible en ~40 s (mesuré sur
+`net-probe`).
+
+**3. Course entre les deux détecteurs.** Sur les applications que le backend surveille
+aussi, le job-worker répare en ~45 s, plus vite que le timer de 60 s. Mesure :
+`kube_deployment_status_replicas_unavailable` présent à +20 s et +40 s, **absent dès +60 s**.
+Camunda conclut alors légitimement « cluster sain ». Ce n'est pas un défaut du BPMN. Les
+preuves du chemin replicas se font donc hors périmètre du backend.
+
+**4. Loki n'est pas câblé comme déclencheur, par choix.** Il sait attribuer une erreur à un
+pod (`filename=/var/log/containers/<pod>_<namespace>_<container>.log`), mais le bruit de
+fond est élevé et variable (mesuré : `cnpg-controller-manager` ≈ 105 erreurs/5 min contre 16
+pour le backend), sans label `namespace` exploitable. Un seuil fixe serait fragile et
+risquerait de masquer un vrai incident. Loki reste donc un signal de **corroboration**
+(`nbErreursLogs`), pas de déclenchement.
+
+**5. Délai de propagation.** `kubectl` voit l'indisponibilité ~40 s avant que
+kube-state-metrics ne l'expose à Prometheus. Tout test doit **attendre le verdict Camunda**,
+pas un délai fixe — sinon on observe un `FinSain` légitime et on conclut à tort à un échec.
 
 ## Exploitation
 
