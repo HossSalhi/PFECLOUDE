@@ -173,130 +173,70 @@
     <bpmn:sequenceFlow id="f5b" sourceRef="Verifier" targetRef="Routage" />
 
     <!-- =============== 7. ROUTAGE SELON L'ACTION DE L'IA =============== -->
-    <bpmn:exclusiveGateway id="Routage" name="Quelle action l'IA demande-t-elle ?" default="fRestart">
+    <bpmn:exclusiveGateway id="Routage" name="Peut-on executer l'action de l'IA ?" default="fExec">
       <bpmn:incoming>f5b</bpmn:incoming>
       <bpmn:outgoing>fProtege</bpmn:outgoing>
-      <bpmn:outgoing>fNoeud</bpmn:outgoing>
       <bpmn:outgoing>fIncoherent</bpmn:outgoing>
       <bpmn:outgoing>fRien</bpmn:outgoing>
-      <bpmn:outgoing>fNetpol</bpmn:outgoing>
-      <bpmn:outgoing>fScale</bpmn:outgoing>
-      <bpmn:outgoing>fRestart</bpmn:outgoing>
+      <bpmn:outgoing>fExec</bpmn:outgoing>
     </bpmn:exclusiveGateway>
 
     <bpmn:sequenceFlow id="fProtege" name="namespace systeme : escalade humaine" sourceRef="Routage" targetRef="FinProtege">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=list contains(["kube-system","kube-public","kube-node-lease","cnpg-system","calico-system","tigera-operator","falco","local-path-storage","monitoring"], ns)</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fNoeud" name="panne de VM : action niveau systeme" sourceRef="Routage" targetRef="ActionNoeud">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=origine = "noeud" and typeIA != "NO_INCIDENT"</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fIncoherent" name="premisse contredite par le cluster" sourceRef="Routage" targetRef="FinIncoherent">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=(contains(actionIA, "IMAGE") or contains(actionIA, "PULLABLE")) and imageConfirmee = false</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fExec" name="executer (voie SSH, aucune limite RBAC)" sourceRef="Routage" targetRef="ExecuterSSH" />
     <bpmn:sequenceFlow id="fRien" name="IA: aucun incident" sourceRef="Routage" targetRef="FinSain">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA = "NO_INCIDENT" or actionIA = null</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fNetpol" name="REMOVE_NETWORK_POLICY" sourceRef="Routage" targetRef="ListerNetpol">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=contains(actionIA, "NETWORK")</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fScale" name="SCALE" sourceRef="Routage" targetRef="Scaler">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=contains(actionIA, "SCALE")</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="fRestart" name="ROLLBACK / RESTART (defaut)" sourceRef="Routage" targetRef="Redemarrer" />
 
-    <!-- = Branche A : supprimer la NetworkPolicy bloquante = -->
-    <bpmn:serviceTask id="ListerNetpol" name="5a. Lister les NetworkPolicies">
+    <!-- = Branche C (defaut) : redemarrage / rollback = -->
+
+    <!-- =============== 8. TRACER LA DECISION SUR L'OBJET K8S =============== -->
+
+    <!-- =============== 8. EXECUTION — VOIE SSH, AUCUNE LIMITE RBAC ===============
+         La passerelle traduit l'action de l'IA en commande reelle et la lance :
+           - kubectl sur le MASTER (kubeconfig admin : tout est permis)
+           - systemctl sur le NOEUD concerne (kubelet, containerd, disque)
+           - vmrun via le watchdog hote si la VM est ETEINTE (SSH impossible)
+    -->
+    <bpmn:serviceTask id="ExecuterSSH" name="5. EXECUTER l'action de l'IA (SSH)">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
-          <zeebe:input source="GET" target="method" />
-          <zeebe:input source="=&#34;https://192.168.148.150:6443/apis/networking.k8s.io/v1/namespaces/&#34; + ns + &#34;/networkpolicies&#34;" target="url" />
-          <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Authorization&#34;: &#34;Bearer {{secrets.K8S_TOKEN}}&#34; }" target="headers" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://127.0.0.1:8099/action" target="url" />
+          <zeebe:input source="=110" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
+          <zeebe:input source="={ action: actionIA, ns: ns, cible: cible, noeud: cible }" target="body" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="resultExpression"
-            value="={ netpolNom: if count(response.body.items) &gt; 0 then response.body.items[1].metadata.name else &#34;aucune&#34; }" />
+            value="={ execOk: response.body.ok, execCode: response.body.exitCode, execCmd: response.body.command, execResume: response.body.resume, execFait: response.body.execute }" />
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
-      <bpmn:incoming>fNetpol</bpmn:incoming>
-      <bpmn:outgoing>fa1</bpmn:outgoing>
+      <bpmn:incoming>fExec</bpmn:incoming>
+      <bpmn:outgoing>fx1</bpmn:outgoing>
     </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fa1" sourceRef="ListerNetpol" targetRef="SupprimerNetpol" />
+    <bpmn:sequenceFlow id="fx1" sourceRef="ExecuterSSH" targetRef="Tracer" />
 
-    <bpmn:serviceTask id="SupprimerNetpol" name="5b. SUPPRIMER la NetworkPolicy">
+    <bpmn:serviceTask id="Tracer" name="6. Tracer la decision IA sur la ressource">
       <bpmn:extensionElements>
         <zeebe:taskDefinition type="io.camunda:http-json:1" />
         <zeebe:ioMapping>
-          <zeebe:input source="DELETE" target="method" />
-          <zeebe:input source="=&#34;https://192.168.148.150:6443/apis/networking.k8s.io/v1/namespaces/&#34; + ns + &#34;/networkpolicies/&#34; + netpolNom" target="url" />
-          <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Authorization&#34;: &#34;Bearer {{secrets.K8S_TOKEN}}&#34; }" target="headers" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://127.0.0.1:8099/trace" target="url" />
+          <zeebe:input source="=60" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
+          <zeebe:input source="={ ns: ns, cible: cible, action: actionIA, type: typeIA, origine: origine, resultat: execResume, ok: execOk }" target="body" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression" value="={ resultatExec: &#34;NetworkPolicy supprimee: &#34; + netpolNom, codeHttp: response.status }" />
+          <zeebe:header key="resultExpression" value="={ traceOk: response.body.ok }" />
         </zeebe:taskHeaders>
       </bpmn:extensionElements>
-      <bpmn:incoming>fa1</bpmn:incoming>
-      <bpmn:outgoing>fa2</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fa2" sourceRef="SupprimerNetpol" targetRef="Tracer" />
-
-    <!-- = Branche B : scaler = -->
-    <bpmn:serviceTask id="Scaler" name="5c. SCALER le deploiement">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="PATCH" target="method" />
-          <zeebe:input source="=&#34;https://192.168.148.150:6443/apis/apps/v1/namespaces/&#34; + ns + &#34;/deployments/&#34; + cibleEff + &#34;/scale&#34;" target="url" />
-          <zeebe:input source="=20" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Authorization&#34;: &#34;Bearer {{secrets.K8S_TOKEN}}&#34;, &#34;Content-Type&#34;: &#34;application/merge-patch+json&#34; }" target="headers" />
-          <zeebe:input source="={ spec: { replicas: 2 } }" target="body" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression" value="={ resultatExec: &#34;Scale a 2 repliques&#34;, codeHttp: response.status }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>fScale</bpmn:incoming>
-      <bpmn:outgoing>fb1</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fb1" sourceRef="Scaler" targetRef="Tracer" />
-
-    <!-- = Branche C (defaut) : redemarrage / rollback = -->
-    <bpmn:serviceTask id="Redemarrer" name="5d. REDEMARRER (rollout restart)">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="PATCH" target="method" />
-          <zeebe:input source="=&#34;https://192.168.148.150:6443/apis/apps/v1/namespaces/&#34; + ns + &#34;/deployments/&#34; + cible" target="url" />
-          <zeebe:input source="=25" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Authorization&#34;: &#34;Bearer {{secrets.K8S_TOKEN}}&#34;, &#34;Content-Type&#34;: &#34;application/strategic-merge-patch+json&#34; }" target="headers" />
-          <zeebe:input source="={ spec: { template: { metadata: { annotations: { &#34;kubectl.kubernetes.io/restartedAt&#34;: string(now()) } } } } }" target="body" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression" value="={ resultatExec: &#34;Rollout restart&#34;, codeHttp: response.status }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>fRestart</bpmn:incoming>
-      <bpmn:outgoing>fc1</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fc1" sourceRef="Redemarrer" targetRef="Tracer" />
-
-    <!-- =============== 8. TRACER LA DECISION SUR L'OBJET K8S =============== -->
-    <bpmn:serviceTask id="Tracer" name="6. Tracer la decision IA sur le deploiement">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="PATCH" target="method" />
-          <zeebe:input source="=&#34;https://192.168.148.150:6443/apis/apps/v1/namespaces/&#34; + ns + &#34;/deployments/&#34; + cible" target="url" />
-          <zeebe:input source="=25" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Authorization&#34;: &#34;Bearer {{secrets.K8S_TOKEN}}&#34;, &#34;Content-Type&#34;: &#34;application/strategic-merge-patch+json&#34; }" target="headers" />
-          <zeebe:input source="={ metadata: { annotations: { &#34;helios.camunda/aiAction&#34;: actionIA, &#34;helios.camunda/aiType&#34;: typeIA, &#34;helios.camunda/aiConfidence&#34;: string(confianceIA), &#34;helios.camunda/executedAt&#34;: string(now()), &#34;helios.camunda/result&#34;: resultatExec } } }" target="body" />
-        </zeebe:ioMapping>
-      </bpmn:extensionElements>
-      <bpmn:incoming>fa2</bpmn:incoming>
-      <bpmn:incoming>fb1</bpmn:incoming>
-      <bpmn:incoming>fc1</bpmn:incoming>
+      <bpmn:incoming>fx1</bpmn:incoming>
       <bpmn:outgoing>f6</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:sequenceFlow id="f6" sourceRef="Tracer" targetRef="FinExec" />
@@ -314,37 +254,13 @@
     <bpmn:endEvent id="FinIncoherent" name="Diagnostic IA contredit par le cluster : escalade, AUCUNE action">
       <bpmn:incoming>fIncoherent</bpmn:incoming>
     </bpmn:endEvent>
-
-    <!-- = Branche VM : l'API Kubernetes ne sait pas relancer un kubelet. On passe par
-         la passerelle SSH (127.0.0.1:8099 sur la VM de Camunda), qui execute la commande
-         sur le noeud concerne et journalise tout. = -->
-    <bpmn:serviceTask id="ActionNoeud" name="5e. RELANCER kubelet sur la VM (SSH)">
-      <bpmn:extensionElements>
-        <zeebe:taskDefinition type="io.camunda:http-json:1" />
-        <zeebe:ioMapping>
-          <zeebe:input source="POST" target="method" />
-          <zeebe:input source="http://127.0.0.1:8099/exec" target="url" />
-          <zeebe:input source="=60" target="connectionTimeoutInSeconds" />
-          <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
-          <zeebe:input source="={ host: replace(cible, &#34;k8s-&#34;, &#34;&#34;), command: &#34;echo kube | sudo -S -p '' systemctl restart kubelet &amp;&amp; sleep 3 &amp;&amp; systemctl is-active kubelet&#34; }" target="body" />
-        </zeebe:ioMapping>
-        <zeebe:taskHeaders>
-          <zeebe:header key="resultExpression"
-            value="={ execNoeud: response.body.stdout, execCode: response.body.exitCode, execOk: response.body.ok, execCible: response.body.host }" />
-        </zeebe:taskHeaders>
-      </bpmn:extensionElements>
-      <bpmn:incoming>fNoeud</bpmn:incoming>
-      <bpmn:outgoing>fn1</bpmn:outgoing>
-    </bpmn:serviceTask>
-    <bpmn:sequenceFlow id="fn1" sourceRef="ActionNoeud" targetRef="FinNoeud" />
-
-    <bpmn:endEvent id="FinNoeud" name="Action systeme executee sur la VM par Camunda">
-      <bpmn:incoming>fn1</bpmn:incoming>
-    </bpmn:endEvent>
   </bpmn:process>
 
   <bpmndi:BPMNDiagram id="D1">
     <bpmndi:BPMNPlane id="P1" bpmnElement="helios-camunda-full-cycle">
+      <bpmndi:BPMNShape id="sX" bpmnElement="ExecuterSSH"><dc:Bounds x="1050" y="235" width="150" height="70" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="eX" bpmnElement="fExec"><di:waypoint x="995" y="268" /><di:waypoint x="1050" y="268" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="eX1" bpmnElement="fx1"><di:waypoint x="1200" y="268" /><di:waypoint x="1370" y="268" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="s1" bpmnElement="Timer"><dc:Bounds x="140" y="250" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="sCpu" bpmnElement="Cpu"><dc:Bounds x="200" y="330" width="130" height="70" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s2" bpmnElement="Prometheus"><dc:Bounds x="220" y="228" width="130" height="80" /></bpmndi:BPMNShape>
@@ -353,10 +269,6 @@
       <bpmndi:BPMNShape id="s5" bpmnElement="Decision" isMarkerVisible="true"><dc:Bounds x="685" y="243" width="50" height="50" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s6" bpmnElement="IA"><dc:Bounds x="780" y="228" width="130" height="80" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s7" bpmnElement="Routage" isMarkerVisible="true"><dc:Bounds x="945" y="243" width="50" height="50" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s8" bpmnElement="ListerNetpol"><dc:Bounds x="1030" y="90" width="130" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s9" bpmnElement="SupprimerNetpol"><dc:Bounds x="1190" y="90" width="130" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s10" bpmnElement="Scaler"><dc:Bounds x="1030" y="235" width="130" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s11" bpmnElement="Redemarrer"><dc:Bounds x="1030" y="370" width="130" height="70" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s12" bpmnElement="Tracer"><dc:Bounds x="1370" y="235" width="140" height="70" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s13" bpmnElement="FinExec"><dc:Bounds x="1550" y="252" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s14" bpmnElement="FinSain"><dc:Bounds x="692" y="400" width="36" height="36" /></bpmndi:BPMNShape>
@@ -364,11 +276,7 @@
       <bpmndi:BPMNEdge id="eProtege" bpmnElement="fProtege"><di:waypoint x="970" y="293" /><di:waypoint x="970" y="510" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="s16" bpmnElement="Verifier"><dc:Bounds x="855" y="120" width="140" height="70" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="s18" bpmnElement="Noeuds"><dc:Bounds x="220" y="440" width="140" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s19" bpmnElement="ActionNoeud"><dc:Bounds x="1030" y="620" width="150" height="70" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="s20" bpmnElement="FinNoeud"><dc:Bounds x="1230" y="637" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="e2b" bpmnElement="f2b"><di:waypoint x="360" y="475" /><di:waypoint x="440" y="475" /><di:waypoint x="440" y="308" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="eNoeud" bpmnElement="fNoeud"><di:waypoint x="970" y="293" /><di:waypoint x="970" y="655" /><di:waypoint x="1030" y="655" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="en1" bpmnElement="fn1"><di:waypoint x="1180" y="655" /><di:waypoint x="1230" y="655" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="s17" bpmnElement="FinIncoherent"><dc:Bounds x="1052" y="510" width="36" height="36" /></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="e5b" bpmnElement="f5b"><di:waypoint x="995" y="155" /><di:waypoint x="1050" y="155" /><di:waypoint x="1050" y="243" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="eIncoherent" bpmnElement="fIncoherent"><di:waypoint x="995" y="268" /><di:waypoint x="1070" y="268" /><di:waypoint x="1070" y="510" /></bpmndi:BPMNEdge>
@@ -380,13 +288,6 @@
       <bpmndi:BPMNEdge id="e5" bpmnElement="fAno"><di:waypoint x="735" y="268" /><di:waypoint x="780" y="268" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="e6" bpmnElement="fSain"><di:waypoint x="710" y="293" /><di:waypoint x="710" y="400" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="e7" bpmnElement="f5"><di:waypoint x="910" y="268" /><di:waypoint x="945" y="268" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e8" bpmnElement="fNetpol"><di:waypoint x="970" y="243" /><di:waypoint x="970" y="125" /><di:waypoint x="1030" y="125" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e9" bpmnElement="fScale"><di:waypoint x="995" y="268" /><di:waypoint x="1030" y="270" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e10" bpmnElement="fRestart"><di:waypoint x="970" y="293" /><di:waypoint x="970" y="405" /><di:waypoint x="1030" y="405" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e11" bpmnElement="fa1"><di:waypoint x="1160" y="125" /><di:waypoint x="1190" y="125" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e12" bpmnElement="fa2"><di:waypoint x="1320" y="125" /><di:waypoint x="1440" y="125" /><di:waypoint x="1440" y="235" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e13" bpmnElement="fb1"><di:waypoint x="1160" y="270" /><di:waypoint x="1370" y="270" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="e14" bpmnElement="fc1"><di:waypoint x="1160" y="405" /><di:waypoint x="1440" y="405" /><di:waypoint x="1440" y="305" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="e15" bpmnElement="f6"><di:waypoint x="1510" y="270" /><di:waypoint x="1550" y="270" /></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

@@ -96,6 +96,53 @@ Droits de la ServiceAccount `camunda-direct` (vérifiés par `kubectl auth can-i
 | supprimer des pods, supprimer des networkpolicies | lire les Secrets |
 | **lire** les nœuds (`get`/`list`) | créer un pod, **modifier/supprimer/drainer** un nœud |
 
+## Exécution : tout passe par SSH, sans limite RBAC
+
+Depuis la v13, **toutes** les actions passent par un exécuteur unique. La passerelle
+traduit l'action de l'IA en commande réelle et la lance au bon endroit :
+
+| Type d'action | Où | Pourquoi |
+|---|---|---|
+| pods, deployments, scale, netpol, cordon, drain | `kubectl` sur le **master** | le kubeconfig y est **admin** : aucune limite RBAC |
+| kubelet, containerd, disque, horloge | `systemctl` sur le **nœud** concerné | hors périmètre de l'API Kubernetes |
+| VM éteinte | `vmrun` via le watchdog hôte | SSH impossible sans OS |
+
+Vérifié : ce que la ServiceAccount refusait, la voie SSH l'exécute.
+
+```
+lire les Secrets      RBAC=no  -> SSH exit=0
+créer un pod          RBAC=no  -> SSH : pod/test-ssh created
+supprimer un deploy   RBAC=no  -> SSH : deployment "cible" deleted
+```
+
+Une action hors catalogue n'est **pas** exécutée : elle est signalée
+(`execute=false`, `action hors catalogue`) plutôt que traduite au hasard.
+
+### Le traçage dit la vérité
+
+Une commande qui échoue est tracée comme un échec, jamais comme un succès :
+
+```
+reussi = false
+result = ECHEC(exit=1) error: no rollout history found for deployment "ssh-demo"
+```
+
+Ce cas est réel : `rollout undo` ne peut rien faire sur un déploiement sans révision
+antérieure. Le système le dit, au lieu d'annoter une remédiation fantôme.
+
+## Capacité et jugement : deux choses différentes
+
+Camunda **peut** techniquement tout faire (admin par SSH). Il **refuse** pourtant deux cas,
+délibérément :
+
+- **`FinProtege`** — namespaces système. Avec les droits admin, une erreur de diagnostic
+  redémarrerait CoreDNS ou l'opérateur CNPG.
+- **`FinIncoherent`** — le cluster contredit l'IA. Mesuré : sur un blocage DNS réel, le
+  modèle répond « problème d'image » à **0,7188** de confiance.
+
+Ce n'est pas une limite technique, c'est une règle de sûreté. Plus les droits sont larges,
+plus le garde-fou compte : le rayon d'impact d'une erreur est désormais le cluster entier.
+
 ## Actions au niveau des VMs : la passerelle SSH
 
 L'API Kubernetes ne sait pas relancer un kubelet, purger un journal ni rallumer une VM.
