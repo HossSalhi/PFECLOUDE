@@ -1029,98 +1029,6 @@ public class AIOpsOrchestrationService {
         return v == null || v.isNaN() || v.isInfinite() ? 0.0 : v;
     }
 
-    /** Familles d'action, avec les mots par lesquels un texte libre les désigne. */
-    private static final Map<String, String[]> MOTS_PAR_FAMILLE = Map.of(
-            "ROLLBACK", new String[]{"rollback", "roll back", "roll-back", "last healthy revision",
-                                     "previous revision", "last good revision", "revert"},
-            "SUPPRESSION_POD", new String[]{"delete", "deleting", "deletion", "kill the pod", "supprim"},
-            "SCALE", new String[]{"scale", "scaling", "replica count", "add replicas", "remove replicas"},
-            "RESEAU", new String[]{"network policy", "networkpolicy", "netpol"},
-            "REDEMARRAGE", new String[]{"restart", "recreate", "re-create"});
-
-    /** À quelle famille appartient l'action réellement exécutée. */
-    private static String familleDe(String action) {
-        String a = safe(action).toUpperCase(Locale.ROOT);
-        if (a.contains("ROLLBACK")) return "ROLLBACK";
-        if (a.contains("NETWORK")) return "RESEAU";
-        if (a.contains("SCALE")) return "SCALE";
-        if (a.contains("DELETE")) return "SUPPRESSION_POD";
-        if (a.contains("RESTART") || a.contains("RECREATE")) return "REDEMARRAGE";
-        return "";
-    }
-
-    /**
-     * Le raisonnement du LLM décrit-il bien l'action réellement exécutée ?
-     *
-     * Règle : on refuse le texte s'il évoque une famille d'action CONCURRENTE sans jamais évoquer
-     * celle qui a été retenue. Un texte purement diagnostique, qui ne nomme aucune action, est
-     * accepté : il n'affirme rien de faux ("fix the image reference or the pull secret").
-     *
-     * Cas réel qui a motivé cette garde : « deleting the crash-looping pods forces a clean
-     * recreation » affiché sur un incident où HELIOS avait fait un ROLLBACK_DEPLOYMENT.
-     */
-    private boolean raisonnementCoherent(String raisonnement, String actionReelle) {
-        String famille = familleDe(actionReelle);
-        if (famille.isEmpty()) return true;          // action inconnue : on ne juge pas
-        String txt = raisonnement.toLowerCase(Locale.ROOT);
-
-        boolean citeLaBonne = false;
-        for (String mot : MOTS_PAR_FAMILLE.getOrDefault(famille, new String[0])) {
-            if (txt.contains(mot)) { citeLaBonne = true; break; }
-        }
-        if (citeLaBonne) return true;
-
-        for (Map.Entry<String, String[]> e : MOTS_PAR_FAMILLE.entrySet()) {
-            if (e.getKey().equals(famille)) continue;
-            for (String mot : e.getValue()) {
-                if (txt.contains(mot)) return false;  // décrit une AUTRE action : texte trompeur
-            }
-        }
-        return true;                                  // aucune action nommée : diagnostic pur, acceptable
-    }
-
-    /**
-     * Extrait le raisonnement RÉELLEMENT généré par le LLM depuis decision_explanation.
-     *
-     * Le service IA renvoie un texte structuré :
-     *   "TYPE (severity X, confidence Y). Measured evidence: ... Recommended action: A.
-     *    Why: &lt;texte du LLM&gt; [LLM+RAG consensus] Résolution (catalogue HELIOS): ..."
-     *
-     * On ne garde que ce qui suit "Why:" : le reste est déjà couvert par les faits mesurés et le
-     * catalogue, et surtout le "Recommended action:" de l'IA peut contredire l'action finale après
-     * un garde-fou backend. En n'extrayant que le raisonnement, la contradiction disparaît.
-     *
-     * Le modèle laisse parfois fuir ses propres consignes ("Decide the remediation.") ou renvoie des
-     * blocs markdown : mesuré sur 5 générations, une était inexploitable. On nettoie, et si le
-     * résultat n'est pas crédible on rend une chaîne vide pour laisser le repli déterministe jouer.
-     */
-    private String extraireRaisonnementLlm(String decisionExplanation) {
-        String txt = safe(decisionExplanation);
-        if (txt.isBlank()) return "";
-
-        int i = txt.indexOf("Why:");
-        if (i < 0) return "";
-        txt = txt.substring(i + "Why:".length());
-
-        for (String borne : new String[]{"[LLM+RAG", "[LLM", "Résolution (catalogue", "Resolution (catalogue"}) {
-            int j = txt.indexOf(borne);
-            if (j >= 0) txt = txt.substring(0, j);
-        }
-
-        txt = txt.replaceAll("```[a-zA-Z]*", " ")          // clôtures de blocs markdown
-                 .replaceAll("(?is)\\b(explain|describe|decide|answer|output|respond)\\b[^.]{0,80}\\.", " ")
-                 .replaceAll("\\s+", " ")
-                 .trim();
-
-        // trop court, ou réduit à un simple nom d'action en majuscules : pas exploitable
-        if (txt.length() < 25) return "";
-        if (txt.matches("[A-Z_ .]+")) return "";
-
-        if (txt.length() > 600) txt = txt.substring(0, 600).trim() + "…";
-        if (!txt.endsWith(".") && !txt.endsWith("…")) txt += ".";
-        return txt;
-    }
-
     private Incident createIncidentFromPrediction(AIPredictResponse prediction, String namespace, String app) {
         // NOTE: a RESOLUTION_FAILED incident is deliberately LEFT OPEN (status RESOLUTION_FAILED) so a
         // human engineer can review it and intervene later — HELIOS never silently CLOSES it. The
@@ -1129,16 +1037,11 @@ public class AIOpsOrchestrationService {
         Incident incident = new Incident();
         incident.setTitle(buildIncidentTitle(prediction, app));
         incident.setDescription(buildIncidentDescription(prediction));
-        // Explanation = faits MESURÉS + raisonnement RÉELLEMENT GÉNÉRÉ par le LLM + résolution catalogue.
-        //
-        // Historique : on n'utilisait pas du tout decision_explanation, parce que le texte brut de l'IA
-        // porte un "Recommended action: X" qui contredit l'action réelle après un garde-fou backend
-        // (crash-loop, network, image-pull...). Le prix payé était un gabarit identique pour tous les
-        // incidents d'un même type — mesuré : 3 POD_IMAGE_PULL_BACKOFF partageaient UNE seule explication.
-        //
-        // On garde donc les faits mesurés et le catalogue (toujours cohérents), mais on n'extrait du
-        // texte de l'IA que la partie "Why:" — le raisonnement — sans sa recommandation d'action. La
-        // contradiction disparaît à la source, et l'action réellement retenue est rappelée explicitement.
+        // Explanation = real measured "Constat mesuré" + a French rationale that matches the ACTION
+        // HELIOS actually takes. We do NOT reuse the AI's raw decision_explanation here: after a
+        // backend override (crash-loop, network, image-pull...) it still carries the AI's original
+        // wording ("Recommended action: INVESTIGATE...") which contradicts the real action. The
+        // deterministic per-type rationale is always coherent and never mentions INVESTIGATE.
         String signals = describeMeasuredSignals(prediction);
         // Résolution PROFESSIONNELLE de référence issue du catalogue HELIOS des 120 types — calculée sur
         // le TYPE FINAL de l'incident (donc cohérente avec le type affiché, même après un garde-fou
@@ -1148,27 +1051,9 @@ public class AIOpsOrchestrationService {
         if (catalogPro == null || catalogPro.isBlank()) {
             catalogPro = safe(prediction.getCatalogResolution());
         }
-        String actionReelle = safe(prediction.getFinalExecutableAction());
-        if (actionReelle.isBlank()) {
-            actionReelle = safe(prediction.getRecommendedAction());
-        }
-        String raisonnementIa = extraireRaisonnementLlm(prediction.getDecisionExplanation());
-        // On n'affiche le texte du LLM que s'il est VARIÉ, RÉEL **et JUSTE** : un raisonnement qui
-        // décrit une autre action que celle exécutée serait faux pour le lecteur, même avec la ligne
-        // de vérité en dessous. Mesuré : « deleting the crash-looping pods » alors que l'action
-        // retenue était ROLLBACK_DEPLOYMENT. Dans ce cas on retombe sur le rationnel déterministe.
-        String analyse;
-        if (raisonnementIa.isEmpty() || !raisonnementCoherent(raisonnementIa, actionReelle)) {
-            analyse = buildCauseRationaleFr(prediction);
-        } else {
-            analyse = "Analyse IA : " + raisonnementIa;
-            if (!actionReelle.isBlank() && !raisonnementIa.contains(actionReelle)) {
-                analyse += " Action retenue par HELIOS : " + actionReelle + ".";
-            }
-        }
         incident.setExplanation(
                 (signals.isEmpty() ? "" : "Constat mesuré : " + signals + ". ")
-                        + analyse
+                        + buildCauseRationaleFr(prediction)
                         + (catalogPro.isEmpty() ? "" : " Résolution (catalogue HELIOS) : " + catalogPro));
         incident.setSeverity(mapSeverity(prediction.getSeverity()));
         incident.setStatus(IncidentStatus.NEW);
