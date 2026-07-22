@@ -469,8 +469,15 @@ class InferenceEngine:
                     _cands = [c.get("type") for c in (ml_120_shadow.get("top") or [])] if ml_120_shadow else None
                     _hist = self._history_hint(remediation_context)
                     ai_decision = self._llm_decide(incident_type, severity, ev, action, _rc, candidates=_cands, history=_hist)
-                    if (ai_decision and ai_decision.get("explication")
-                            and self._llm_ok(ai_decision["explication"], _rc)):
+                    # CHOIX EXPLICITE : on affiche le texte que le LLM a réellement écrit,
+                    # sans filtre de pertinence. Le repli déterministe ne sert plus que
+                    # lorsque le modèle n'a rien produit (panne, timeout, réponse vide).
+                    #
+                    # Le filtre _llm_ok() reste défini mais n'est plus appelé ici : il
+                    # exigeait que le texte nomme la cause détectée par kubelet, ce qui
+                    # rejetait le LLM sur tous les incidents métriques (pending, latence,
+                    # 5xx) et faisait retomber 7 incidents sur 16 sur la MÊME phrase figée.
+                    if ai_decision and ai_decision.get("explication"):
                         why = ai_decision["explication"]
                 decision_explanation = (
                     f"{incident_type} (severity {severity}, confidence {confidence:.2f}). "
