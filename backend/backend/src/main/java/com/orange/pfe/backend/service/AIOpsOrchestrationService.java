@@ -1203,15 +1203,27 @@ public class AIOpsOrchestrationService {
         }
 
         if (imagePullBackOff) {
-            // The active incident was created for a different condition (e.g. GENERAL_DEGRADATION).
-            // Force-close it so the next poll cycle can create a fresh incident with ROLLBACK_DEPLOYMENT.
             Incident staleIncident = openIncidentOpt.get();
-            staleIncident.setStatus(IncidentStatus.RESOLVED);
-            historyService.record(staleIncident, IncidentStatus.RESOLVED,
-                    "Auto-closed: ImagePullBackOff detected on new pod — next poll will trigger ROLLBACK_DEPLOYMENT");
+            // Si l'incident ouvert est DEJA un POD_IMAGE_PULL_BACKOFF, sa propre remediation + la
+            // verification post-remediation le pilotent. Le re-cle ici ferait boucler la ligne
+            // (RESOLVED -> nouvel incident -> RESOLVED ...) et ferait clignoter la timeline entre
+            // "resolu" et "echec". On laisse le flux existant conclure (RESOLUTION_FAILED ou RESOLVED reel).
+            if ("POD_IMAGE_PULL_BACKOFF".equals(staleIncident.getIncidentType())) {
+                log.debug("ImagePullBackOff persiste pour {}/{} sur l'incident deja type id={} — "
+                        + "on defere a sa remediation/verification (aucun re-cle, aucune boucle)",
+                        namespace, app, staleIncident.getId());
+                return false;
+            }
+            // L'incident actif a ete cree pour une AUTRE condition (ex. GENERAL_DEGRADATION).
+            // On le clot en CLOSED (neutre/gris, PAS "resolu") pour que le prochain cycle ouvre un
+            // incident correctement type POD_IMAGE_PULL_BACKOFF -> ROLLBACK_DEPLOYMENT.
+            staleIncident.setStatus(IncidentStatus.CLOSED);
+            historyService.record(staleIncident, IncidentStatus.CLOSED,
+                    "Re-indexe en POD_IMAGE_PULL_BACKOFF (ImagePullBackOff detecte sur le nouveau pod) — "
+                    + "remediation ROLLBACK_DEPLOYMENT au prochain cycle");
             incidentRepository.save(staleIncident);
-            log.info("Auto-closed stale incident id={} for {}/{} — ImagePullBackOff on new pod, rollback incoming",
-                    staleIncident.getId(), namespace, app);
+            log.info("Re-cle de l'incident id={} ({} -> POD_IMAGE_PULL_BACKOFF) pour {}/{} — rollback a venir",
+                    staleIncident.getId(), staleIncident.getIncidentType(), namespace, app);
             return true;
         }
 

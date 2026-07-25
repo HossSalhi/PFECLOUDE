@@ -6,6 +6,9 @@ metadata:
   labels:
     app: backend
     aiops.io/monitor: "true"
+    # HELIOS se surveille LUI-MEME (meme perimetre que le detecteur camunda-direct / Grafana =
+    # tout le cluster). Mettre "false" pour re-exclure le backend s'il se remedie a tort.
+    helios.io/monitor: "true"
     aiops.io/app: "backend"
 spec:
   replicas: 2

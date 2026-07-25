@@ -59,3 +59,5 @@ scripts/train-120/*.csv
 scripts/train-120/artifacts/*.joblib
 scripts/train-120/artifacts/*.png
 *.gguf
+camunda-direct/bridge/bridge_token.txt
+infra/**/ksm.kubeconfig

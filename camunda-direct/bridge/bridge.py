@@ -20,7 +20,8 @@ Perimetre de securite :
   - cibles limitees a une table fixe (master / worker1 / worker2).
   - toute commande est journalisee dans /var/log/helios-ssh-bridge.log AVANT execution.
 """
-import json, os, re, subprocess, time
+import json, os, re, smtplib, subprocess, threading, time
+from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 NOEUDS = {"master": "192.168.148.153", "worker1": "192.168.148.158", "worker2": "192.168.148.155",
@@ -31,6 +32,22 @@ JETON = os.environ.get("HELIOS_BRIDGE_TOKEN", "")
 WATCHDOG = os.environ.get("HELIOS_WATCHDOG", "http://192.168.148.1:9099")
 JOURNAL = "/var/log/helios-ssh-bridge.log"
 DELAI = 90
+
+# --- Verification post-remediation + rapport email ------------------------------
+# La solution a-t-elle resolu ? Le cycle de detection continu sert lui-meme de verif :
+# a chaque /detecter, on re-teste la sante des remediations recentes. Si l'app est
+# saine -> succes (l'alarme se clarifie). Si elle reste cassee -> EMAIL rapport complet.
+# Email : Gmail REEL via le relais sur l'hote (le TCP direct .161->Gmail est casse par
+# le NAT), avec repli MailHog pour que la demo ne rate jamais.
+RELAY_HOST = os.environ.get("HELIOS_RELAY_HOST", "192.168.148.1")   # relais hote -> Gmail
+RELAY_PORT = int(os.environ.get("HELIOS_RELAY_PORT", "2526"))
+MAILHOG_HOST = os.environ.get("HELIOS_MAILHOG_HOST", "127.0.0.1")
+MAILHOG_PORT = int(os.environ.get("HELIOS_MAILHOG_PORT", "1025"))
+EMAIL_FROM = os.environ.get("HELIOS_EMAIL_FROM", "helios-aiops@orange.tn")
+EMAIL_TO = os.environ.get("HELIOS_EMAIL_TO", "houssamsalhi972@gmail.com")
+GRACE_VERIF = int(os.environ.get("HELIOS_GRACE_VERIF", "40"))   # s : laisser la remediation agir
+SUIVI = {}                       # (ns,cible) -> {type,action,resultat,ok,ts,emailed,echecs}
+_SUIVI_LOCK = threading.Lock()
 
 SUR = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}$")   # noms K8s : pas d'injection shell
 
@@ -123,6 +140,27 @@ def catalogue(action, ns, cible, noeud):
     # rallumage d'une VM eteinte : hors SSH, seul l'hyperviseur peut le faire
     if action in ("RESTART_VM", "RESTART_NODE_VM", "VM_DOWN"):
         return "__watchdog__", noeud
+    # REPLI PAR FAMILLE : l'IA renvoie parfois une VARIANTE de nom absente de la table
+    # (ex. ROLLBACK_LAST_REVISION_AND_RESTART vs ..._RELEASE_...). Plutot que de ne RIEN
+    # faire, on deduit la commande du mot-cle. Une escalade explicite n'est jamais executee.
+    a = action.upper()
+    if "ESCALATE" in a or "HUMAN" in a or "MANUAL" in a:
+        return "__escalade__", None
+    fam = None
+    if "ROLLBACK" in a:
+        fam = "kubectl rollout undo deployment/{c} -n {ns}"
+    elif "RECREATE" in a or "ROLLING" in a or ("RESTART" in a and "KUBELET" not in a and "CONTAINERD" not in a):
+        fam = "kubectl rollout restart deployment/{c} -n {ns}"
+    elif "SCALE" in a and "DOWN" in a:
+        fam = "kubectl scale deployment/{c} -n {ns} --replicas=1"
+    elif "SCALE" in a or "AUTOSCAL" in a:
+        fam = "kubectl scale deployment/{c} -n {ns} --replicas=2"
+    elif "NETWORK" in a or "NETPOL" in a or "POLICY" in a:
+        fam = "kubectl delete networkpolicy -n {ns} --all --ignore-not-found"
+    elif "DELETE" in a and "POD" in a:
+        fam = "kubectl delete pod -n {ns} -l app={c} --ignore-not-found"
+    if fam:
+        return "master", fam.format(**d)
     return None, None
 
 
@@ -142,6 +180,90 @@ def rallumer(noeud):
         tracer("VMRUN", noeud, "KO", e)
         return {"host": noeud, "command": "vmrun start (watchdog)", "exitCode": 1,
                 "stdout": "", "stderr": str(e), "ok": False}
+
+
+def envoyer_email(sujet, corps):
+    """Gmail REEL via le relais hote, repli MailHog. Renvoie la voie utilisee."""
+    msg = EmailMessage()
+    msg["Subject"] = sujet
+    msg["From"] = EMAIL_FROM
+    msg["To"] = EMAIL_TO
+    msg.set_content(corps)
+    try:
+        with smtplib.SMTP(RELAY_HOST, RELAY_PORT, timeout=12) as s:
+            s.send_message(msg)
+        return "gmail(relais %s:%s)" % (RELAY_HOST, RELAY_PORT)
+    except Exception as e1:
+        try:
+            with smtplib.SMTP(MAILHOG_HOST, MAILHOG_PORT, timeout=8) as s:
+                s.send_message(msg)
+            return "mailhog(repli; gmail KO: %s)" % str(e1)[:80]
+        except Exception as e2:
+            return "ECHEC(gmail=%s ; mailhog=%s)" % (str(e1)[:60], str(e2)[:60])
+
+
+def envoyer_rapport(ns, cible, s, etat):
+    """Rapport complet : detecte / propose par l'IA / execute par Camunda / resultat obtenu."""
+    sujet = "[HELIOS] Echec de remediation — %s sur %s/%s" % (s.get("type", "?"), ns, cible)
+    corps = (
+        "HELIOS — Rapport d'incident (la remediation automatique n'a PAS resolu le probleme)\n"
+        "===================================================================================\n\n"
+        "1) INCIDENT DETECTE  (VM monitoring .160 — detecteur appele par Camunda)\n"
+        "   Type       : %s\n   Namespace  : %s\n   Cible      : %s\n\n"
+        "2) SOLUTION PROPOSEE PAR L'IA  (stack IA .161)\n"
+        "   Action     : %s\n\n"
+        "3) EXECUTION PAR CAMUNDA  (connexion SSH sur le cluster Kubernetes)\n"
+        "   Resultat   : %s\n   Commande reussie : %s\n\n"
+        "4) VERIFICATION POST-REMEDIATION\n"
+        "   Etat du deploiement : %s  (repliques pretes attendues)\n"
+        "   => L'incident PERSISTE : la solution executee n'a pas retabli l'application.\n\n"
+        "CONCLUSION : escalade a l'operateur humain. L'alarme reste active dans le monitoring\n"
+        "et Camunda continue de detecter l'incident a chaque cycle.\n\n"
+        "Horodatage : %s\n"
+        % (s.get("type", "?"), ns, cible, s.get("action", "?"),
+           s.get("resultat", "(vide)") or "(vide)", s.get("ok"),
+           etat or "inconnu", time.strftime("%Y-%m-%dT%H:%M:%S"))
+    )
+    voie = envoyer_email(sujet, corps)
+    tracer("EMAIL", ns, cible, "| rapport envoye via", voie)
+
+
+def sante_deploiement(ns, cible):
+    """True si le deploiement a toutes ses repliques pretes (proxy universel de resolution)."""
+    r = executer("master",
+                 "kubectl get deploy %s -n %s -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null"
+                 % (cible, ns))
+    etat = (r.get("stdout") or "").strip()
+    ok = False
+    if "/" in etat:
+        a, b = (etat.split("/") + ["", ""])[:2]
+        ok = (a == b) and a not in ("", "0")
+    return ok, etat or "?"
+
+
+def verifier_suivi():
+    """Appele a chaque /detecter : re-teste les remediations recentes, email si echec persistant."""
+    maintenant = time.time()
+    with _SUIVI_LOCK:
+        cles = list(SUIVI.items())
+    for (ns, cible), s in cles:
+        age = maintenant - s["ts"]
+        if age < GRACE_VERIF:
+            continue                       # laisser la remediation agir
+        ok, etat = sante_deploiement(ns, cible)
+        if ok:
+            tracer("VERIF RESOLU", ns, cible, "| deploy", etat, "-> succes (alarme se clarifie)")
+            with _SUIVI_LOCK:
+                SUIVI.pop((ns, cible), None)
+        else:
+            s["echecs"] = s.get("echecs", 0) + 1
+            tracer("VERIF ECHEC", ns, cible, "| deploy", etat, "| tentative", s["echecs"])
+            if s["echecs"] >= 2 and not s.get("emailed"):
+                s["emailed"] = True
+                threading.Thread(target=envoyer_rapport, args=(ns, cible, dict(s), etat), daemon=True).start()
+            if age > 900:
+                with _SUIVI_LOCK:
+                    SUIVI.pop((ns, cible), None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -197,6 +319,9 @@ class Handler(BaseHTTPRequestHandler):
                                            "monitoringFiable": False,
                                            "preuve": "detecteur illisible: %s" % e})
             tracer("DETECT", inc.get("type"), inc.get("ns"), inc.get("cible"), "|", inc.get("preuve", ""))
+            # Le cycle de detection continu sert de verification : re-teste les
+            # remediations recentes et envoie un rapport email si l'incident persiste.
+            threading.Thread(target=verifier_suivi, daemon=True).start()
             return self.repondre(200, inc)
 
         if self.path == "/trace":
@@ -219,6 +344,19 @@ class Handler(BaseHTTPRequestHandler):
                 cmd = "kubectl annotate node %s %s --overwrite" % (cible, ann)
             else:
                 cmd = "kubectl annotate deployment %s -n %s %s --overwrite" % (cible, ns, ann)
+                # enregistre/actualise la remediation pour la verification post-execution.
+                # Camunda RE-EXECUTE a chaque cycle tant que l'incident persiste : on PRESERVE
+                # le compteur d'echecs, l'horodatage initial et l'etat "email envoye" pour
+                # qu'ils s'accumulent (sinon echecs repart a 0 chaque cycle et l'email ne part jamais).
+                with _SUIVI_LOCK:
+                    ancien = SUIVI.get((ns, cible)) or {}
+                    SUIVI[(ns, cible)] = {
+                        "type": str(d.get("type", "")), "action": str(d.get("action", "")),
+                        "resultat": str(d.get("resultat", ""))[:300], "ok": d.get("ok"),
+                        "ts": ancien.get("ts", time.time()),
+                        "emailed": ancien.get("emailed", False),
+                        "echecs": ancien.get("echecs", 0)}
+                tracer("SUIVI", ns, cible, "| remediation tracee -> verification a venir")
             return self.repondre(200, executer("master", cmd))
 
         if self.path == "/action":
@@ -236,6 +374,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.repondre(200, {"action": action, "execute": False, "ok": False,
                                            "exitCode": -1, "stdout": "",
                                            "stderr": "action hors catalogue : %s" % action})
+            if h == "__escalade__":
+                # L'IA demande explicitement une escalade humaine : on ne traduit RIEN
+                # au hasard, on le dit. (Securite / control-plane = jamais d'auto-action.)
+                tracer("ESCALADE", action, "-> aucune action automatique (operateur humain)")
+                return self.repondre(200, {"action": action, "execute": False, "ok": False,
+                                           "escalade": True, "exitCode": -1, "stdout": "",
+                                           "stderr": "escalade humaine : aucune action deterministe"})
             if h == "__watchdog__":
                 r = rallumer(cmd)
             else:

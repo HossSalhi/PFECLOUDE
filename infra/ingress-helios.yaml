@@ -1,0 +1,26 @@
+# Objet Ingress : tout le trafic helios.orange.tn -> service frontend.
+# Le frontend (nginx interne au pod) sert l'app Angular ET proxifie /api/ vers le backend,
+# donc on route TOUT vers le frontend (pas de split /api separe) — c'est ce montage qui
+# reproduit le comportement de l'ancien acces NodePort. Annotations : SSE (temps reel) sans buffering.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: helios-ingress
+  namespace: pfe
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: helios.orange.tn
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80

@@ -60,14 +60,19 @@ REGLES = [
     ("POD_CONFIG_ERROR", 'kube_pod_container_status_waiting_reason{reason=~"CreateContainerConfigError|CreateContainerError"} > 0', "prom", "pod"),
     ("MEMORY_STRESS", 'kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} > 0', "prom", "pod"),
     ("POD_INIT_CONTAINER_FAILURE", 'kube_pod_init_container_status_ready == 0', "prom", "pod"),
-    ("POD_PENDING_INSUFFICIENT_RESOURCES", 'kube_pod_status_phase{phase="Pending"} > 0', "prom", "pod"),
+    # 'phase=Pending' est TROP LARGE : un pod en ContainerCreating (qui telecharge encore
+    # son image) a lui aussi la phase Pending. Resultat mesure : une image invalide etait
+    # classee POD_PENDING au lieu de POD_IMAGE_PULL_BACKOFF, parce que la detection tombait
+    # pendant le telechargement, avant que l'echec ne soit confirme.
+    # 'scheduled=false' ne matche QUE les pods que le scheduler n'a pas pu placer.
+    ("POD_PENDING_INSUFFICIENT_RESOURCES", 'kube_pod_status_scheduled{condition="false"} > 0', "prom", "pod"),
     ("SERVICE_UNAVAILABLE", 'kube_endpoint_address_available == 0 and on(namespace,endpoint) '
                             'label_replace(kube_deployment_status_replicas_available > 0, "endpoint", "$1", "deployment", "(.*)")', "prom", "endpoint"),
-    ("DNS_FAILURE", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers"} '
+    ("DNS_FAILURE", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers", filename!~".*_(kube-system|calico-system|tigera-operator|falco|cnpg-system|local-path-storage|monitoring)_.*"} '
                     '|~ "(?i)(no such host|SERVFAIL|name resolution|bad address|lookup .* on )" [5m]))) > 3', "loki", "fichier"),
-    ("DATABASE_CONNECTIVITY", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers"} '
+    ("DATABASE_CONNECTIVITY", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers", filename!~".*_(kube-system|calico-system|tigera-operator|falco|cnpg-system|local-path-storage|monitoring)_.*"} '
                               '|~ "(?i)(could not connect to server|refused.*5432|FATAL.*database|password authentication failed)" [5m]))) > 3', "loki", "fichier"),
-    ("NETWORK_PARTITION", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers"} '
+    ("NETWORK_PARTITION", 'topk(1, sum by (filename) (count_over_time({job="k8s-containers", filename!~".*_(kube-system|calico-system|tigera-operator|falco|cnpg-system|local-path-storage|monitoring)_.*"} '
                           '|~ "(?i)(i/o timeout|no route to host|connection timed out|network is unreachable)" [5m]))) > 3', "loki", "fichier"),
     ("HIGH_ERROR_RATE", 'sum by (namespace,app) (rate(http_requests_total{status=~"5.."}[3m])) > 0.1', "prom", "app"),
     ("LATENCY_DEGRADATION", 'histogram_quantile(0.95, sum by (namespace,app,le) '
@@ -116,7 +121,7 @@ def main():
         return
 
     nb_logs = 0
-    d = loki('sum(count_over_time({job="k8s-containers"} |~ "(?i)(error|exception|panic)" [5m]))')
+    d = loki('sum(count_over_time({job="k8s-containers", filename!~".*_(kube-system|calico-system|tigera-operator|falco|cnpg-system|local-path-storage|monitoring)_.*"} |~ "(?i)(error|exception|panic)" [5m]))')
     if d:
         try:
             nb_logs = int(float(d[0]["value"][1]))

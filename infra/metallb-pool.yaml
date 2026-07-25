@@ -1,0 +1,22 @@
+# MetalLB — pool d'adresses pour les services type=LoadBalancer (bare-metal).
+# Installé au prealable : kubectl apply -f \
+#   https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+# NOTE : sur ce reseau VMware NAT, l'annonce L2 (ARP) n'est pas joignable de l'exterieur ;
+# l'acces reel aux apps passe par nginx sur .160 (voir nginx-apps-lb.conf).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: helios-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.148.200-192.168.148.210
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: helios-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - helios-pool
