@@ -72,9 +72,9 @@ data:
   INFRA_HEALTH_AI_SERVICE_URL: "http://192.168.148.161:8000"
   INFRA_HEALTH_CAMUNDA_URL: "http://192.168.148.161:8080"
   INFRA_HEALTH_OLLAMA_URL: "http://192.168.148.161:11434"
-  # Inclut la VIP HA 192.168.148.150 : c'est l'URL d'acces STABLE (flotte vers un noeud vivant).
-  # Sans elle, le login via la VIP echoue en 403 (origine CORS non autorisee).
-  # Acces via le LB nginx sur .160 (Ingress). Meme origine frontend/API donc CORS peu sollicite,
+  # Point d'entree = LB nginx sur .160 (Ingress). Le VIP keepalived .150 a ete SUPPRIME
+  # (voir infra/README.md) ; l'endpoint HA de l'API est desormais HAProxy sur .160:6443.
+  # Meme origine frontend/API donc CORS peu sollicite,
   # mais le navigateur envoie un header Origin sur les POST -> .160 doit etre autorise.
   APP_SECURITY_CORS_ALLOWED_ORIGINS: "http://192.168.148.160,http://192.168.148.160:80,http://helios.orange.tn,http://192.168.148.153:30880,http://192.168.148.158:30880,http://192.168.148.155:30880"
   # SecurityStartupValidator : en prod réelle, fournir un vrai JWT_SECRET
@@ -98,7 +98,7 @@ data:
   # LOW = email pour toutes severites (demo) ; HIGH = seulement HIGH/CRITICAL (prod)
   NOTIFICATION_EMAIL_MIN_SEVERITY: "LOW"
   NOTIFICATION_MIN_SEVERITY: "LOW"
-  # VIP HA (et non l'IP du master) : les liens des emails restent valides meme master coupe.
+  # Point d'entree stable des apps = LB nginx sur .160 (les liens email restent valides).
   NOTIFICATION_EMAIL_DASHBOARD_URL: "http://192.168.148.160/"
   # Relais SMTP (plaintext, pas d'auth, pas de STARTTLS) — host-relay (Internet OK)
   MAIL_HOST: "192.168.148.1"
