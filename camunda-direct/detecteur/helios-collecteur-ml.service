@@ -1,0 +1,18 @@
+[Unit]
+Description=HELIOS - collecteur d'exemples REELS pour l'entrainement futur du ML (incidents host)
+After=network-online.target helios-ssh-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/helios/collecteur_ml_host.py
+Restart=always
+RestartSec=15
+Environment=HELIOS_PROM_URL=http://192.168.148.160:9090
+Environment=HELIOS_BRIDGE_URL=http://127.0.0.1:8099/detecter
+Environment=HELIOS_ML_DATASET=/opt/pfe-ai-service/datasets/host_incidents_reels.csv
+Environment=HELIOS_COLLECTEUR_PERIODE=30
+# HELIOS_BRIDGE_TOKEN injecte au deploiement (meme jeton que helios-ssh-bridge)
+
+[Install]
+WantedBy=multi-user.target

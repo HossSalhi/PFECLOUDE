@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: backend
+    {{- include "helios.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        aiops.io/app: backend
+        aiops.io/monitor: "true"
+    spec:
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.backend.antiAffinity }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: backend
+            topologyKey: kubernetes.io/hostname
+      {{- end }}
+      containers:
+      - name: backend
+        image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+        imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.backend.containerPort }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.backend.envFrom.configMap }}
+        - secretRef:
+            name: {{ .Values.backend.envFrom.secret }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.backend.probes.liveness.path }}
+            port: {{ .Values.backend.containerPort }}
+          initialDelaySeconds: {{ .Values.backend.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.backend.probes.liveness.periodSeconds }}
+          failureThreshold: {{ .Values.backend.probes.liveness.failureThreshold }}
+          timeoutSeconds: {{ .Values.backend.probes.liveness.timeoutSeconds }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.backend.probes.readiness.path }}
+            port: {{ .Values.backend.containerPort }}
+          initialDelaySeconds: {{ .Values.backend.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.backend.probes.readiness.periodSeconds }}
+          failureThreshold: {{ .Values.backend.probes.readiness.failureThreshold }}
+          timeoutSeconds: {{ .Values.backend.probes.readiness.timeoutSeconds }}
+        resources:
+          {{- toYaml .Values.backend.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.backend.securityContext | nindent 10 }}

@@ -1,0 +1,16 @@
+HELIOS deploye via Helm (release {{ .Release.Name }}, namespace {{ .Values.namespace }}).
+
+  Backend  : {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}  x{{ .Values.backend.replicas }}
+  Frontend : {{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}  x{{ .Values.frontend.replicas }}
+{{- if .Values.ingress.enabled }}
+  Acces    : {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}/
+{{- end }}
+
+Rappels :
+  - Le ConfigMap "{{ .Values.backend.envFrom.configMap }}" et le Secret "{{ .Values.backend.envFrom.secret }}"
+    sont geres HORS de ce chart (un secret n'est jamais versionne). Les creer avant :
+      kubectl apply -f backend/backend/infra/k8s/backend-configmap.yaml
+      # + le Secret via scripts/generate-production-secrets.sh (valeurs reelles)
+  - Verifier le deploiement :
+      helm status {{ .Release.Name }} -n {{ .Values.namespace }}
+      kubectl -n {{ .Values.namespace }} rollout status deploy/backend

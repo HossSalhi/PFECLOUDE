@@ -1,0 +1,120 @@
+# =============================================================================
+#  NetworkPolicies "production" — modele zero-trust pour un namespace applicatif
+#  VERROUILLE (default-deny puis autorisations minimales).
+#
+#  ⚠️ NON APPLIQUE au namespace `pfe` : c'est le BAC A SABLE de chaos. La remediation
+#  HELIOS execute `kubectl delete networkpolicy -n pfe --all` (elle effacerait ces
+#  policies) et le detecteur y INJECTE des NetworkPolicies pour simuler des pannes
+#  reseau/DNS. Un reseau plat est donc necessaire dans `pfe`.
+#
+#  Ce fichier est le LIVRABLE "comment on ferait en prod" : a appliquer dans un
+#  namespace applicatif dedie (ici `helios-prod`) ou l'app tourne SANS chaos.
+#  Prerequis : un CNI qui applique les NetworkPolicies — Calico (deja en place) le fait.
+# =============================================================================
+
+---
+# 1) DEFAULT-DENY : bloque TOUT le trafic entrant ET sortant du namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: helios-prod
+spec:
+  podSelector: {}            # s'applique a tous les pods
+  policyTypes: [Ingress, Egress]
+
+---
+# 2) DNS : autoriser tous les pods a resoudre via CoreDNS (sinon plus aucune resolution).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: helios-prod
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+    ports:
+    - {protocol: UDP, port: 53}
+    - {protocol: TCP, port: 53}
+
+---
+# 3) INGRESS -> frontend : seuls les pods d'ingress-nginx peuvent joindre le frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: helios-prod
+spec:
+  podSelector:
+    matchLabels: {app: frontend}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+    ports:
+    - {protocol: TCP, port: 8080}
+
+---
+# 4) frontend -> backend : le backend n'accepte QUE le frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: helios-prod
+spec:
+  podSelector:
+    matchLabels: {app: backend}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {app: frontend}
+    ports:
+    - {protocol: TCP, port: 8080}
+
+---
+# 5) backend -> sorties : DB (postgres 5432) + services externes IA/Camunda (.161).
+#    En prod, restreindre `to: []` par bloc ipBlock (CIDR de la VM IA) plutot qu'ouvert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-egress
+  namespace: helios-prod
+spec:
+  podSelector:
+    matchLabels: {app: backend}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - podSelector:
+        matchLabels: {cnpg.io/cluster: postgres}
+    ports:
+    - {protocol: TCP, port: 5432}
+  - to: []                   # IA (.161:8000), Camunda (:8080/:26500), SMTP — a filtrer par ipBlock en prod
+    ports:
+    - {protocol: TCP, port: 8000}
+    - {protocol: TCP, port: 8080}
+    - {protocol: TCP, port: 26500}
+
+---
+# 6) backend -> postgres : la base n'accepte QUE le backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-postgres
+  namespace: helios-prod
+spec:
+  podSelector:
+    matchLabels: {cnpg.io/cluster: postgres}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {app: backend}
+    ports:
+    - {protocol: TCP, port: 5432}

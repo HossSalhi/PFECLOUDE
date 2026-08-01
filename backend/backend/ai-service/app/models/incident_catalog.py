@@ -81,6 +81,20 @@ INCIDENT_CATALOG: dict[str, dict] = {
     "NODE_FILESYSTEM_READONLY":           {"category": "Nœuds", "resolution": "Réparer le système de fichiers.", "auto": False},
     "NODE_UNREACHABLE":                   {"category": "Nœuds", "resolution": "Restaurer le réseau / rallumer la VM (watchdog).", "auto": True},
 
+    # -- Nouveaux types HOTE/CONTROL-PLANE ajoutes le 01/08 (node-exporter + etcd) --
+    "NODE_CORDONED":                      {"category": "Nœuds", "resolution": "Le nœud est devenu non programmable car il a été volontairement retiré de l'ordonnancement, l'action UNCORDON_NODE le rétablit en le rendant à nouveau disponible pour les tâches.", "auto": True},
+    "NODE_NETWORK_UNAVAILABLE":           {"category": "Nœuds", "resolution": "Le symptôme de NODE_NETWORK_UNAVAILABLE se produit lorsque le kubelet signale son propre réseau comme indisponible, la cause étant probablement un problème de configuration ou de connectivité réseau, et l'ACTION ESCALATE_NODE_NETWORK_OUTAGE permet d'escalader le problème pour une intervention humaine afin d'éviter une aggravation potentielle de la partition réseau.", "auto": False},
+    "NODE_INODES_FULL":                   {"category": "Nœuds", "resolution": "Le symptôme de saturation d'inodes sur le disque root (/) est résolu par l'action HOST_CLEAN_INODES, qui purge les journaux tournés et les fichiers temporaires anciens, réduisant ainsi le nombre de fichiers et résolvant le problème de saturation d'inodes.", "auto": True},
+    "NODE_FD_EXHAUSTED":                  {"category": "Nœuds", "resolution": "Le nœud est saturé en descripteurs de fichiers, empêchant l'ouverture de nouveaux sockets ou fichiers, l'escalade humaine via ESCALATE_NODE_FD_EXHAUSTION permet d'identifier le processus à l'origine de la fuite pour une résolution ciblée.", "auto": False},
+    "NODE_OOM_KILL":                      {"category": "Nœuds", "resolution": "L'augmentation du compteur OOM-killer du noyau indique que le noyau Linux a tué un processus faute de mémoire, l'escalade humaine via ESCALATE_NODE_OOM_EVENT permet d'identifier le processus visé.", "auto": False},
+    "NODE_CPU_STEAL":                     {"category": "Nœuds", "resolution": "Le temps CPU volé par l'hyperviseur dépasse 20%, causé par une sur-souscription de l'hôte, ESCALATE_HYPERVISOR_CONTENTION est déclenché pour intervenir sur la contention de l'hyperviseur.", "auto": False},
+    "NODE_DISK_SLOW":                     {"category": "Nœuds", "resolution": "Le nœud présente une saturation des entrées/sorties disque, causant une latence élevée, et l'escalade humaine via ESCALATE_NODE_DISK_LATENCY permet d'intervenir sur le problème pour rétablir les performances.", "auto": False},
+    "NODE_NETWORK_ERRORS":                {"category": "Nœuds", "resolution": "Le taux d'erreurs de réception réseau > 1/s sur un nœud indique des problèmes matériels sur l'interface réseau, l'escalade humaine via ESCALATE_NODE_NIC_ERRORS permet un diagnostic et une correction physiques.", "auto": False},
+
+    "ETCD_NO_LEADER":                     {"category": "ControlPlane", "resolution": "Le symptôme est l'indisponibilité du quorum etcd, la cause est la perte de la majorité des membres, et l'escalade humaine via ESCALATE_ETCD_QUORUM_LOSS permet de restaurer le quorum et de rétablir les écritures dans le cluster.", "auto": False},
+    "ETCD_SLOW_FSYNC":                    {"category": "ControlPlane", "resolution": "La latence d'écriture disque etcd élevée (> 0,5 seconde) provoque des expirations de baux de leader, entraînant des redémarrages en cascade, que l'escalade humaine via ESCALATE_ETCD_DISK_LATENCY peut diagnostiquer et corriger.", "auto": False},
+    "ETCD_LEADER_FLAPPING":               {"category": "ControlPlane", "resolution": "L'ETCD_LEADER_FLAPPING, caractérisé par plus de 5 changements de leader etcd en 1 heure, indique une instabilité réseau ou disque, résolue par l'escalade humaine via ESCALATE_ETCD_INSTABILITY pour intervention manuelle.", "auto": False},
+
     # ── E. Control Plane ──────────────────────────────────────────────────────
     "API_SERVER_DOWN":                    {"category": "ControlPlane", "resolution": "Redémarrer kube-apiserver.", "auto": False},
     "API_SERVER_HIGH_LATENCY":            {"category": "ControlPlane", "resolution": "Augmenter les ressources ou optimiser ETCD.", "auto": False},
@@ -96,6 +110,8 @@ INCIDENT_CATALOG: dict[str, dict] = {
     "ADMISSION_WEBHOOK_FAILURE":          {"category": "ControlPlane", "resolution": "Réparer/retirer le webhook d'admission fautif.", "auto": False},
 
     # ── F. Stockage ───────────────────────────────────────────────────────────
+    "PVC_NOT_BOUND":                      {"category": "Stockage", "resolution": "Le PVC non lié bloque le démarrage du pod, le redémarrage du provisionneur local-path-provisioner via RESTART_STORAGE_PROVISIONER permet de résoudre le blocage et de lier le PVC pour permettre au pod de démarrer.", "auto": True},
+
     "PVC_PENDING":                        {"category": "Stockage", "resolution": "Vérifier la StorageClass ; re-bind sur la SC par défaut.", "auto": True},
     "PVC_LOST":                           {"category": "Stockage", "resolution": "Recréer le PVC.", "auto": False},
     "PV_LOST":                            {"category": "Stockage", "resolution": "Restaurer le volume.", "auto": False},
@@ -293,6 +309,18 @@ INCIDENT_ACTIONS: dict[str, str] = {
     "ANOMALOUS_TRAFFIC_PATTERN": "ESCALATE_BLOCK_OR_LIMIT_ANOMALOUS_TRAFFIC",
     "PREDICTED_NODE_FAILURE": "DRAIN_NODE_TO_EVACUATE_WORKLOADS",
     "PREDICTED_DISK_EXHAUSTION": "ESCALATE_EXTEND_STORAGE_PREEMPTIVELY",
+    "NODE_CORDONED": "UNCORDON_NODE",
+    "NODE_NETWORK_UNAVAILABLE": "ESCALATE_NODE_NETWORK_OUTAGE",
+    "NODE_INODES_FULL": "HOST_CLEAN_INODES",
+    "NODE_FD_EXHAUSTED": "ESCALATE_NODE_FD_EXHAUSTION",
+    "NODE_OOM_KILL": "ESCALATE_NODE_OOM_EVENT",
+    "NODE_CPU_STEAL": "ESCALATE_HYPERVISOR_CONTENTION",
+    "NODE_DISK_SLOW": "ESCALATE_NODE_DISK_LATENCY",
+    "NODE_NETWORK_ERRORS": "ESCALATE_NODE_NIC_ERRORS",
+    "ETCD_NO_LEADER": "ESCALATE_ETCD_QUORUM_LOSS",
+    "ETCD_SLOW_FSYNC": "ESCALATE_ETCD_DISK_LATENCY",
+    "ETCD_LEADER_FLAPPING": "ESCALATE_ETCD_INSTABILITY",
+    "PVC_NOT_BOUND": "RESTART_STORAGE_PROVISIONER",
 }
 
 

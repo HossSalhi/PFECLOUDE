@@ -98,7 +98,14 @@
          0.7188 de confiance. DEPLOYMENT_UNAVAILABLE est exclu : c'est un symptome
          generique que l'IA a le droit d'affiner. -->
     <bpmn:sequenceFlow id="fIncoherent" name="diagnostic IA contredit par le cluster" sourceRef="Routage" targetRef="FinIncoherent">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA != typeDetecte and typeDetecte != "DEPLOYMENT_UNAVAILABLE"</bpmn:conditionExpression>
+      <!-- Le garde-fou ne s'applique QU'AUX types que l'IA est capable de juger.
+           Les types prefixes NODE_ / ETCD_ / PVC_ viennent d'une MESURE (node-exporter,
+           etcd, kube-state-metrics) : le cluster ne peut pas "contredire" une mesure.
+           Les inclure ici bloquait TOUTE remediation hote (verifie : 0 action hote en 24 h,
+           l'IA repondant systematiquement un type applicatif). Pour ces types, la passerelle
+           applique le catalogue deterministe ; les incidents dangereux (etcd, hyperviseur)
+           y sont volontairement mappes en ESCALATE_* et ne seront jamais executes. -->
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=typeIA != typeDetecte and typeDetecte != "DEPLOYMENT_UNAVAILABLE" and not(starts with(typeDetecte, "NODE_")) and not(starts with(typeDetecte, "ETCD_")) and not(starts with(typeDetecte, "PVC_"))</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fExec" name="executer (SSH, aucune limite RBAC)" sourceRef="Routage" targetRef="ExecuterSSH" />
 
@@ -115,7 +122,13 @@
           <zeebe:input source="http://127.0.0.1:8099/action" target="url" />
           <zeebe:input source="=110" target="connectionTimeoutInSeconds" />
           <zeebe:input source="={ &#34;Content-Type&#34;: &#34;application/json&#34;, &#34;X-Helios-Token&#34;: &#34;{{secrets.HELIOS_BRIDGE_TOKEN}}&#34; }" target="headers" />
-          <zeebe:input source="={ action: actionIA, ns: ns, cible: cible, noeud: cible }" target="body" />
+          <!-- `type` = le type MESURE par le detecteur. La passerelle s'en sert pour les
+               incidents issus d'une mesure directe (NODE_*, ETCD_*, PVC_*) : sur ceux-la
+               l'action vient du catalogue deterministe, car l'IA - qui raisonne sur des
+               metriques applicatives - se trompe de categorie (mesure du 01/08 :
+               NODE_HIGH_CPU -> elle repond POD_PENDING_INSUFFICIENT_RESOURCES).
+               Pour tout le reste, c'est bien `actionIA` qui est executee. -->
+          <zeebe:input source="={ action: actionIA, type: typeDetecte, ns: ns, cible: cible, noeud: cible }" target="body" />
         </zeebe:ioMapping>
         <zeebe:taskHeaders>
           <zeebe:header key="resultExpression"

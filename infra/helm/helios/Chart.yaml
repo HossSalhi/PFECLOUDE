@@ -1,0 +1,12 @@
+apiVersion: v2
+name: helios
+description: >-
+  HELIOS AIOps Platform — packaging Helm de l'application (backend Spring Boot +
+  frontend React) pour le cluster Kubernetes HA. Le ConfigMap et le Secret sont
+  gérés hors chart (voir values : backend.envFrom).
+type: application
+version: 0.1.0            # version du chart
+appVersion: "0.2.150"    # version de l'application (backend)
+maintainers:
+  - name: HELIOS / Orange Tunisie
+keywords: [aiops, kubernetes, self-healing, orange]

@@ -76,11 +76,12 @@ data:
   # (voir infra/README.md) ; l'endpoint HA de l'API est desormais HAProxy sur .160:6443.
   # Meme origine frontend/API donc CORS peu sollicite,
   # mais le navigateur envoie un header Origin sur les POST -> .160 doit etre autorise.
-  APP_SECURITY_CORS_ALLOWED_ORIGINS: "http://192.168.148.160,http://192.168.148.160:80,http://helios.orange.tn,http://192.168.148.153:30880,http://192.168.148.158:30880,http://192.168.148.155:30880"
-  # SecurityStartupValidator : en prod réelle, fournir un vrai JWT_SECRET
-  # (openssl rand -base64 32) + BACKEND_API_PASSWORD via le Secret, puis remettre
-  # à "true". "false" = parité avec l'ancienne image (secrets par défaut, pas d'abort).
-  SECURITY_STRICT_MODE: "false"
+  APP_SECURITY_CORS_ALLOWED_ORIGINS: "http://helios.orange.tn,https://helios.orange.tn,http://192.168.148.160,http://192.168.148.160:80,http://192.168.148.153,https://192.168.148.153,http://192.168.148.155,https://192.168.148.155,http://192.168.148.158,https://192.168.148.158,http://192.168.148.153:30880,http://192.168.148.158:30880,http://192.168.148.155:30880"
+  # SecurityStartupValidator : ACTIVE ("true"). Le backend REFUSE de demarrer si
+  # JWT_SECRET / BACKEND_API_PASSWORD sont des valeurs par defaut. Les vrais secrets
+  # sont fournis via le Secret backend-secret (JWT_SECRET 56c, BACKEND_API_PASSWORD).
+  # Rollback si abort au demarrage : remettre "false" (les anciens pods continuent de servir).
+  SECURITY_STRICT_MODE: "true"
   # Rôles utilisateurs (override via Secret en production)
   SUPER_ADMIN_USERNAME: "superadmin"
   ADMIN_USERNAME: "admin"

@@ -50,9 +50,49 @@ Nana recommande un deny-by-default. **Non fait dans `pfe`** car :
   des pannes réseau/DNS. Un réseau plat y est nécessaire.
 En production, un namespace applicatif dédié serait verrouillé (default-deny + allows DNS/ingress/DB).
 
-## Écarts restants (bonnes pratiques, à planifier hors démo)
-- `SECURITY_STRICT_MODE=true` + vrai `JWT_SECRET`/`BACKEND_API_PASSWORD` via Secret (redémarrage backend).
-- Rotation de la clé de chiffrement etcd (planifiée).
-- GitOps (ArgoCD) et généralisation de Helm (packaging backend/frontend).
+## 5. TLS / HTTPS — APPLIQUÉ
+`https://helios.orange.tn` disponible. Certificat auto-signé (CN + SAN `helios.orange.tn` + IP
+`.153/.155/.158`, 825 j) :
+- **Secret TLS `helios-tls`** (ns `pfe`) + bloc `tls:` sur l'objet `helios-ingress` (TLS natif K8s),
+  annotation `ssl-redirect: "false"`.
+- **Terminaison TLS par l'ingress**, pas par le LB : HAProxy (`.160`/`.162`, `infra/haproxy-apps-lb.cfg`)
+  écoute `:443` en **mode tcp** (simple relais, aucune clé privée sur le LB) vers le NodePort https
+  (`:31411`) ; c'est `ingress-nginx` qui termine réellement le TLS avec le Secret `helios-tls`. `:80`
+  reste servi en mode http (frontend `apps_http`, relais vers NodePort `:31756`).
+- Prod : remplacer l'auto-signé par Let's Encrypt / CA d'entreprise (le navigateur avertit sinon).
+
+## 6. Backups de la base — APPLIQUÉ
+`CronJob pfe/postgres-backup` (`infra/postgres-backup.yaml`) : `pg_dump` quotidien **02:00**, gzip vers
+le PVC `postgres-backups` (local-path 5Gi), **rétention 7**. Réutilise l'image CNPG + secret `postgres-app`
+(user `appuser`). Testé : dump `pfe_db-*.sql.gz` produit. Restauration : `gunzip | psql -h postgres-rw ...`.
+(Étape suivante possible : backup CNPG natif barman-cloud vers MinIO/S3.)
+
+## 7. Mode strict + secrets réels — APPLIQUÉ
+`SECURITY_STRICT_MODE=true` (le backend **refuse de démarrer** avec des secrets par défaut, cf.
+`SecurityStartupValidator`). Régénéré dans `backend-secret` (hors git) : **`JWT_SECRET`** (`openssl rand
+-base64 32` — l'ancien défaut était **public** ⇒ tokens forgeables), `SUPER_ADMIN_PASSWORD`,
+`BACKEND_API_PASSWORD` (ce dernier = *legacy, plus utilisé pour l'auth*). Vérifié : log
+« Security startup check PASSED », login `admin` toujours OK (mot de passe en base, inchangé par le JWT).
+Fait en **rolling update** : le pod strict qui échoue laisse l'ancien servir (zéro coupure).
+
+## 8. Rotation de la clé etcd — APPLIQUÉE (une fois)
+Rotation faite : nouvelle clé `key2` **en tête** de l'`EncryptionConfiguration` (chiffre les nouveaux
+écrits), `key1` conservée en 2ᵉ (lecteur). Config déployée identique sur les 3 masters, apiserver
+redémarrés **un par un** (manifest sorti/remis, API servie par les 2 autres), puis re-chiffrement
+`kubectl get secrets -A -o json | kubectl replace -f -`. Preuve : `etcdctl get .../backend-secret`
+→ `k8s:enc:aescbc:v1:**key2**:`. `key1` désormais **inerte** (plus rien chiffré avec) — la retirer
+(round 2 : config `[key2, identity]` + restart) est une simple maintenance ultérieure. Backups de
+sécurité : snapshots etcd + `encryption-config.yaml.bak-rot-*`.
+
+## 9. Snapshot etcd planifié — APPLIQUÉ
+`helios-etcd-snapshot.timer` (systemd, **quotidien 01:30**) sur les 3 masters → `/var/backups/etcd/`
+(`etcdctl snapshot save`, rétention 7). `etcdctl` copié sur `.155`/`.158` (n'était que sur `.153`).
+
+## 10. NetworkPolicies (production) — LIVRÉ EN CODE (non appliqué à `pfe`)
+`infra/network-policies.yaml` : modèle zero-trust (default-deny + DNS + ingress→frontend→backend→postgres)
+pour un namespace applicatif de prod. **Pas appliqué à `pfe`** (bac à sable chaos) — voir §4.
+
+## Écarts restants (bonnes pratiques, hors démo)
+- GitOps (ArgoCD) : optionnel. **Helm** : charts fournis (`infra/helm/helios/`).
 - `--anonymous-auth=false` sur l'apiserver : **piège** — les probes liveness/readiness des static pods
   frappent `/livez`/`/readyz` en anonyme ; à ne faire qu'avec des probes authentifiées.

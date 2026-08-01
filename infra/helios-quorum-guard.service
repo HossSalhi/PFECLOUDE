@@ -1,0 +1,27 @@
+[Unit]
+Description=HELIOS - Gardien de quorum etcd (reprise auto sur 1 seul noeud)
+Documentation=file:///opt/helios/etcd-recuperation-quorum.sh
+# Le gardien a besoin d'etcd local : on demarre apres kubelet, sans en dependre
+# strictement (si kubelet est mort, le gardien doit justement pouvoir observer).
+After=network-online.target kubelet.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/helios/helios-quorum-guard.py
+Restart=always
+RestartSec=20
+User=root
+# Delais : 20 s entre deux sondes, 90 s de quorum perdu EN CONTINU avant d'agir.
+# Pourquoi 90 s et non 300 : la vraie protection contre le split-brain n'est pas
+# l'attente, c'est l'AVIS DE L'ARBITRE (garde-fou 4) — un LB exterieur qui confirme
+# que les autres noeuds sont injoignables pour lui aussi. L'attente ne sert plus
+# qu'a absorber une bascule de leader etcd normale (quelques secondes).
+# Resultat : « 1 noeud cluster + 1 seul LB » repart en ~2 min au lieu de ~6.
+Environment=HELIOS_GUARD_PERIODE=20
+Environment=HELIOS_GUARD_CONFIRMATION=90
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

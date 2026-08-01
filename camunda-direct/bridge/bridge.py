@@ -25,7 +25,8 @@ from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 NOEUDS = {"master": "192.168.148.153", "worker1": "192.168.148.158", "worker2": "192.168.148.155",
-          "monitoring": "192.168.148.160"}   # .160 : detection (Prometheus/Loki/Grafana en local)
+          "monitoring": "192.168.148.160",   # .160 : detection (Prometheus/Loki/Grafana en local)
+          "iacamunda": "192.168.148.161"}    # .161 : remediation host possible (RAM Ollama, etc.)
 UTIL = os.environ.get("HELIOS_SSH_USER", "kube")
 MDP = os.environ.get("HELIOS_SSH_PASS", "kube")
 JETON = os.environ.get("HELIOS_BRIDGE_TOKEN", "")
@@ -88,14 +89,140 @@ def executer(noeud, commande):
     return res
 
 
+# ------------------------------------------------- choix du noeud qui lance kubectl
+# Historiquement TOUTES les commandes kubectl partaient sur "master" (.153) en dur.
+# Consequence : si .153 est justement le noeud qui tombe, HELIOS ne peut plus rien
+# remedier alors que .155/.158 sont sains — et chacun des 3 a son propre kubeconfig
+# admin pointant sur son apiserver LOCAL (verifie). On choisit donc a chaud le premier
+# noeud cluster dont l'apiserver repond REELLEMENT (pas seulement le SSH).
+NOEUDS_CLUSTER = ("master", "worker1", "worker2")
+CACHE_KUBECTL = 60                                   # s : evite de sonder a chaque appel
+_KUBECTL = {"noeud": None, "ts": 0.0}
+_KUBECTL_LOCK = threading.Lock()
+
+
+def _apiserver_repond(noeud):
+    """Vrai test de sante : le noeud repond en SSH ET son apiserver sert /readyz.
+    Un simple ping SSH ne suffit pas : un noeud peut etre joignable avec un
+    apiserver mort (quorum etcd perdu, par exemple).
+
+    Delais LARGES a dessein : mesure faite pendant un incident reel (.153 coupe),
+    les apiservers survivants absorbent toute la charge et /readyz est passe a
+    >6 s sur .158 — un noeud SAIN etait donc rejete au pire moment. Au repos les
+    3 repondent en ~1-3 s ; 15 s laisse la marge necessaire sous charge."""
+    argv = ["sshpass", "-p", MDP, "ssh",
+            "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
+            "%s@%s" % (UTIL, NOEUDS[noeud]),
+            "kubectl get --raw /readyz --request-timeout=15s 2>/dev/null"]
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=35)
+        return p.returncode == 0 and "ok" in p.stdout
+    except Exception:
+        return False
+
+
+def noeud_kubectl(force=False):
+    """Nom du noeud cluster ou lancer kubectl : le premier des 3 qui repond.
+    Resultat mis en cache CACHE_KUBECTL s ; force=True re-sonde immediatement
+    (utilise quand la commande vient d'echouer pour cause d'injoignabilite)."""
+    with _KUBECTL_LOCK:
+        if not force and _KUBECTL["noeud"] and (time.time() - _KUBECTL["ts"]) < CACHE_KUBECTL:
+            return _KUBECTL["noeud"]
+        for n in NOEUDS_CLUSTER:
+            if _apiserver_repond(n):
+                if _KUBECTL["noeud"] != n:
+                    tracer("KUBECTL noeud retenu =", n, NOEUDS[n])
+                _KUBECTL["noeud"], _KUBECTL["ts"] = n, time.time()
+                return n
+        # Aucun ne repond : on rend "master" pour que l'echec soit trace explicitement
+        # (une commande qui echoue et le dit vaut mieux qu'un silence).
+        tracer("KUBECTL AUCUN noeud cluster ne repond -> repli master (echec attendu)")
+        _KUBECTL["noeud"], _KUBECTL["ts"] = "master", time.time()
+        return "master"
+
+
+def executer_kubectl(commande):
+    """kubectl sur un noeud vivant, avec BASCULE si celui retenu vient de tomber.
+    Une remediation ne doit pas echouer juste parce que le noeud habituel est mort."""
+    n = noeud_kubectl()
+    res = executer(n, commande)
+    # 255 = SSH injoignable, 124 = timeout : le noeud est tombe depuis la mise en cache
+    if not res["ok"] and res["exitCode"] in (124, 255):
+        n2 = noeud_kubectl(force=True)
+        if n2 != n:
+            tracer("KUBECTL bascule", n, "->", n2, "| nouvelle tentative")
+            res = executer(n2, commande)
+    return res
+
+
+# ------------------------------------------- action deterministe par TYPE MESURE
+# POURQUOI CETTE TABLE EXISTE
+# Le type rendu par le detecteur (.160) est une MESURE : « CPU a 96,5 % sur k8s-worker1 »
+# vient de node-exporter, ce n'est pas une supposition. L'IA, elle, raisonne a partir de
+# metriques applicatives : interrogee sur un incident HOTE elle repond a cote (mesure du
+# 01/08 : pour NODE_HIGH_CPU elle rend POD_PENDING_INSUFFICIENT_RESOURCES a 0,66).
+# Le garde-fou BPMN voyait alors typeIA != typeDetecte et escaladait : resultat, AUCUN
+# incident hote n'etait jamais repare automatiquement (verifie : 0 action hote en 24 h).
+# Pour ces types-la, l'action vient donc du catalogue deterministe ci-dessous, pas de l'IA.
+# L'IA garde son role : expliquer et decider pour tout ce qui est applicatif.
+# Les types dangereux (etcd, materiel hyperviseur) sont volontairement en ESCALATE_* :
+# le bridge ne les executera JAMAIS, il alertera un humain.
+ACTION_PAR_TYPE_MESURE = {
+    # --- reparables sans risque ---
+    "NODE_HIGH_CPU":            "RESTART_POD_TO_REBALANCE_LOAD",
+    "NODE_HIGH_MEMORY":         "RESTART_POD_TO_RECLAIM_MEMORY",
+    "NODE_DISK_FULL":           "HOST_IMAGE_GC",
+    "NODE_INODES_FULL":         "HOST_CLEAN_INODES",
+    "NODE_TIME_DRIFT":          "HOST_SYNC_TIME",
+    "NODE_CORDONED":            "UNCORDON_NODE",
+    "NODE_DISK_PRESSURE":       "NODE_DISK_PRESSURE",
+    "NODE_NOT_READY":           "RESTART_NODE_VM",
+    "PVC_NOT_BOUND":            "RESTART_STORAGE_PROVISIONER",
+    # --- ESCALADE VOLONTAIRE : jamais d'action automatique ---
+    # etcd : une mauvaise manipulation detruit le cluster (perte de donnees irreversible).
+    "ETCD_NO_LEADER":           "ESCALATE_ETCD_QUORUM_LOSS",
+    "ETCD_SLOW_FSYNC":          "ESCALATE_ETCD_DISK_LATENCY",
+    "ETCD_LEADER_FLAPPING":     "ESCALATE_ETCD_INSTABILITY",
+    # descripteurs epuises : il faut identifier le service fautif, pas tuer au hasard.
+    "NODE_FD_EXHAUSTED":        "ESCALATE_NODE_FD_EXHAUSTION",
+    # PID epuises : demande d'augmenter une limite systeme, decision humaine.
+    "NODE_PID_PRESSURE":        "ESCALATE_INCREASE_NODE_PID_LIMIT",
+    # reseau du noeud coupe : redemarrer a l'aveugle peut aggraver une partition.
+    "NODE_NETWORK_UNAVAILABLE": "ESCALATE_NODE_NETWORK_OUTAGE",
+    "NODE_NETWORK_ERRORS":      "ESCALATE_NODE_NIC_ERRORS",
+    # CPU vole / disque lent : la cause est DANS L'HYPERVISEUR, aucune action interne n'aide.
+    "NODE_CPU_STEAL":           "ESCALATE_HYPERVISOR_CONTENTION",
+    "NODE_DISK_SLOW":           "ESCALATE_NODE_DISK_LATENCY",
+    # OOM : c'est un fait PASSE (un processus a deja ete tue), pas un etat a corriger.
+    "NODE_OOM_KILL":            "ESCALATE_NODE_OOM_EVENT",
+}
+
+
 # ---------------------------------------------------------------- catalogue
-# K = commande kubectl lancee sur le MASTER (kubeconfig admin, aucune limite RBAC)
+# K = commande kubectl lancee sur un NOEUD CLUSTER VIVANT (kubeconfig admin, aucune limite RBAC)
 # N = commande systeme lancee sur le NOEUD concerne
 # V = rallumage par l'hyperviseur (watchdog hote) : seule voie si la VM est ETEINTE
 def catalogue(action, ns, cible, noeud):
     d = {"ns": ns, "c": cible}
-    K = lambda cmd: ("master", cmd)
+    nk = noeud_kubectl()          # resolu UNE fois par appel (et non par entree du dict)
+    K = lambda cmd: (nk, cmd)
     N = lambda cmd: (noeud, "echo %s | sudo -S -p '' bash -c '%s'" % (MDP, cmd))
+    # commandes HOST (SSH sur la VM) reutilisees par les noms de TYPE (detecteur) ET d'ACTION (catalogue IA)
+    # PAS de `crictl rmi --prune` : ce cluster est AIR-GAP (images locales sans registre) -> le prune
+    # supprimerait des images non re-telechargeables (ex. pfe-backend) => ImagePullBackOff. Uniquement
+    # journaux/logs/temp (sur). `crictl rmi --prune` serait sur seulement avec un vrai registre.
+    _DISK = 'journalctl --vacuum-size=200M >/dev/null 2>&1; rm -f /tmp/inc* /tmp/fill* /root/incfill /root/bigfile 2>/dev/null; find /var/log -type f -name "*.gz" -delete 2>/dev/null; find /var/log -type f -name "*.[0-9]" -delete 2>/dev/null; df -h / | tail -1'
+    _CPU  = 'pkill -9 -x yes 2>/dev/null; pkill -9 stress 2>/dev/null; pkill -9 cpuburn 2>/dev/null; pkill -9 -x dd 2>/dev/null; uptime'
+    _MEM  = 'sync; echo 3 > /proc/sys/vm/drop_caches; pkill -9 stress 2>/dev/null; pkill -9 cpuburn 2>/dev/null; free -h | head -2'
+    _TIME = 'timedatectl set-ntp true 2>/dev/null; systemctl restart systemd-timesyncd 2>/dev/null; chronyc makestep 2>/dev/null; timedatectl 2>/dev/null | grep -iE "synchro|NTP"'
+    # Inodes satures : ce sont les PETITS fichiers qui comptent, pas leur taille. On vise les
+    # endroits qui en accumulent des milliers (journaux tournes, caches, /tmp).
+    _INODES = ('journalctl --vacuum-files=3 >/dev/null 2>&1; '
+               'find /var/log -type f \\( -name "*.gz" -o -name "*.[0-9]" \\) -delete 2>/dev/null; '
+               'find /tmp /var/tmp -type f -mtime +1 -delete 2>/dev/null; '
+               'find /var/lib/containerd -type f -name "*.tmp" -delete 2>/dev/null; '
+               'df -i / | tail -1')
 
     table = {
         # --- pods ---
@@ -133,6 +260,20 @@ def catalogue(action, ns, cible, noeud):
         "NODE_DISK_PRESSURE":          N("journalctl --vacuum-size=150M; crictl rmi --prune || true"),
         "ESCALATE_NODE_OUTAGE_AND_REBALANCE": N("systemctl restart kubelet"),
         "NODE_NOT_READY":              N("systemctl restart kubelet"),
+        # --- HOTE : liberer les ressources BRUTES de la VM (SSH). ALIGNE : chaque incident host repond
+        # a la fois par son NOM DE TYPE (detecteur) ET par le NOM D'ACTION recommande par l'IA (catalogue),
+        # pour que "l'IA recommande -> Camunda execute" marche de bout en bout. pkill par NOM (pas -f) sinon auto-kill.
+        "NODE_DISK_FULL":    N(_DISK), "HOST_IMAGE_GC":                 N(_DISK),
+        "NODE_HIGH_CPU":     N(_CPU),  "RESTART_POD_TO_REBALANCE_LOAD": N(_CPU), "NODE_CPU_SATURATION":  N(_CPU),
+        "NODE_HIGH_MEMORY":  N(_MEM),  "RESTART_POD_TO_RECLAIM_MEMORY": N(_MEM), "NODE_MEMORY_PRESSURE": N(_MEM),
+        "NODE_TIME_DRIFT":   N(_TIME), "HOST_SYNC_TIME":                N(_TIME),
+        # --- incidents host ajoutes le 01/08 : REPARABLES sans risque ---
+        "NODE_INODES_FULL":  N(_INODES), "HOST_CLEAN_INODES":           N(_INODES),
+        # un noeud laisse en cordon apres une maintenance : le remettre en service est sans danger
+        "NODE_CORDONED":     K("kubectl uncordon {c}"), "UNCORDON_NODE": K("kubectl uncordon {c}"),
+        # PVC non lie : c'est le provisionneur de stockage qui est coince, on le relance
+        "PVC_NOT_BOUND":     K("kubectl -n local-path-storage rollout restart deployment/local-path-provisioner"),
+        "RESTART_STORAGE_PROVISIONER": K("kubectl -n local-path-storage rollout restart deployment/local-path-provisioner"),
     }
     if action in table:
         h, cmd = table[action]
@@ -160,7 +301,7 @@ def catalogue(action, ns, cible, noeud):
     elif "DELETE" in a and "POD" in a:
         fam = "kubectl delete pod -n {ns} -l app={c} --ignore-not-found"
     if fam:
-        return "master", fam.format(**d)
+        return nk, fam.format(**d)
     return None, None
 
 
@@ -230,9 +371,9 @@ def envoyer_rapport(ns, cible, s, etat):
 
 def sante_deploiement(ns, cible):
     """True si le deploiement a toutes ses repliques pretes (proxy universel de resolution)."""
-    r = executer("master",
-                 "kubectl get deploy %s -n %s -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null"
-                 % (cible, ns))
+    r = executer_kubectl(
+        "kubectl get deploy %s -n %s -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null"
+        % (cible, ns))
     etat = (r.get("stdout") or "").strip()
     ok = False
     if "/" in etat:
@@ -281,10 +422,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/sante":
-            return self.repondre(200, {"statut": "ok", "noeuds": sorted(NOEUDS)})
+            # expose AUSSI le noeud cluster actuellement retenu pour kubectl : c'est
+            # l'information utile quand un noeud tombe (sur quelle VM on remedie).
+            return self.repondre(200, {"statut": "ok", "noeuds": sorted(NOEUDS),
+                                       "noeudKubectl": noeud_kubectl()})
         if self.path == "/actions":
-            h, _ = catalogue("RESTART_POD", "x", "y", "master")
-            noms = sorted(catalogue.__defaults__ or []) if False else None
             return self.repondre(200, {"catalogue": sorted(_NOMS)})
         self.repondre(404, {"erreur": "chemin inconnu"})
 
@@ -357,10 +499,11 @@ class Handler(BaseHTTPRequestHandler):
                         "emailed": ancien.get("emailed", False),
                         "echecs": ancien.get("echecs", 0)}
                 tracer("SUIVI", ns, cible, "| remediation tracee -> verification a venir")
-            return self.repondre(200, executer("master", cmd))
+            return self.repondre(200, executer_kubectl(cmd))
 
         if self.path == "/action":
             action = str(d.get("action", "")).strip()
+            typ = str(d.get("type", "")).strip().upper()   # type MESURE par le detecteur
             ns = str(d.get("ns", "")).strip()
             cible = str(d.get("cible", "")).strip()
             noeud = str(d.get("noeud", "")).strip() or "master"
@@ -368,6 +511,17 @@ class Handler(BaseHTTPRequestHandler):
             for v in (ns, cible):
                 if v and not SUR.match(v):
                     return self.repondre(400, {"erreur": "nom invalide", "valeur": v})
+            # Le type MESURE prime sur la proposition de l'IA : sur un incident hote, l'IA
+            # raisonne avec des metriques applicatives et se trompe de categorie (mesure :
+            # NODE_HIGH_CPU -> elle rend POD_PENDING_INSUFFICIENT_RESOURCES). L'IA reste
+            # maitre pour tout le reste (pods, services, logs) : on ne surcharge QUE les
+            # types issus d'une mesure directe.
+            if typ in ACTION_PAR_TYPE_MESURE:
+                deterministe = ACTION_PAR_TYPE_MESURE[typ]
+                if deterministe != action:
+                    tracer("CATALOGUE", typ, "| action IA:", action or "(vide)",
+                           "-> action deterministe:", deterministe)
+                action = deterministe
             h, cmd = catalogue(action, ns, cible, noeud)
             if h is None:
                 tracer("INCONNU action", action, "-> aucune commande")
@@ -383,7 +537,11 @@ class Handler(BaseHTTPRequestHandler):
                                            "stderr": "escalade humaine : aucune action deterministe"})
             if h == "__watchdog__":
                 r = rallumer(cmd)
+            elif cmd.startswith("kubectl"):
+                # commande cluster : passe par le selecteur (bascule si le noeud tombe)
+                r = executer_kubectl(cmd)
             else:
+                # commande HOST (systemctl/pkill...) : doit s'executer sur CETTE VM precise
                 r = executer(h, cmd)
             r["action"] = action
             r["execute"] = True

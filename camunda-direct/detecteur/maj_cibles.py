@@ -9,7 +9,12 @@ avec une liste de cibles rafraichie ici et relue automatiquement par Prometheus.
 """
 import json, os, ssl, urllib.request
 
-API = "https://192.168.148.150:6443"
+# On passe par le HAProxy LOCAL de la VM monitoring (:6443 -> les 3 apiservers).
+# Avantage : aucune adresse d'apiserver en dur, et si un noeud tombe HAProxy
+# route vers un survivant. (Avant : le VIP keepalived .150, SUPPRIME depuis —
+# les cibles etaient donc toutes DOWN.)
+API_HOTE = "192.168.148.160:6443"
+API = "https://" + API_HOTE
 JETON = "/etc/prometheus/scraper-token"
 SORTIE = "/etc/prometheus/targets/pods.json"
 PORT = 9898                      # port des metriques podinfo
@@ -40,7 +45,7 @@ def main():
             continue
         nom = meta["name"]
         cibles.append({
-            "targets": ["192.168.148.150:6443"],
+            "targets": [API_HOTE],
             "labels": {
                 "__metrics_path__": "/api/v1/namespaces/%s/pods/%s:%d/proxy/metrics" % (ns, nom, PORT),
                 "namespace": ns,

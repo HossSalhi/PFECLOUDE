@@ -1,0 +1,73 @@
+# Valeurs par defaut du chart HELIOS. Reflete l'etat deploye (backend 0.2.150, frontend 1.1.6).
+# Surcharger par environnement : helm install helios ./helios -f values-prod.yaml
+
+namespace: pfe
+
+backend:
+  image:
+    repository: pfe-backend
+    tag: "0.2.150"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  containerPort: 8080
+  # Config + secrets geres HORS chart (un secret ne doit jamais etre dans un chart versionne).
+  envFrom:
+    configMap: backend-config
+    secret: backend-secret
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+  probes:
+    liveness:  { path: /api/test/health-liveness,  initialDelaySeconds: 40, periodSeconds: 15, failureThreshold: 20, timeoutSeconds: 3 }
+    readiness: { path: /api/test/health-readiness, initialDelaySeconds: 20, periodSeconds: 10, failureThreshold: 6,  timeoutSeconds: 3 }
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities: { drop: [ALL] }
+  nodeSelector:
+    node-type: worker
+  antiAffinity: true            # force 1 replique par noeud (HA)
+  service:
+    type: ClusterIP
+    port: 8080
+  nodePort:                      # acces direct hors Ingress (hérité)
+    enabled: true
+    port: 8080
+    nodePort: 30808
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 2
+    cpuUtilization: 70
+    memoryUtilization: 80
+
+frontend:
+  image:
+    repository: pfe-frontend
+    tag: "1.1.6"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  containerPort: 8080
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+  probes:
+    liveness:  { path: /, initialDelaySeconds: 10, periodSeconds: 15, failureThreshold: 3, timeoutSeconds: 3 }
+    readiness: { path: /, initialDelaySeconds: 5,  periodSeconds: 10, failureThreshold: 3, timeoutSeconds: 3 }
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities: { drop: [ALL] }
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30880
+
+ingress:
+  enabled: true
+  className: nginx
+  host: helios.orange.tn
+  sslRedirect: false             # terminaison TLS faite au bord (nginx des noeuds)
+  tls:
+    enabled: true
+    secretName: helios-tls

@@ -1,0 +1,72 @@
+# Backups logiques de la base HELIOS (pg_dump) — CronJob quotidien 02:00, retention 7.
+# Sans stockage objet (S3/MinIO), on dumpe vers un PVC local-path dedie (postgres-backups).
+# Restauration : gunzip < pfe_db-<ts>.sql.gz | psql -h postgres-rw.pfe.svc -U appuser -d pfe_db
+# Reutilise l'image CNPG deja presente + le secret applicatif postgres-app (appuser).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+  namespace: pfe
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: pfe
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+            helios.io/monitor: "false"
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 26
+            fsGroup: 26
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+          - name: dump
+            image: ghcr.io/cloudnative-pg/postgresql:16
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/bash","-c"]
+            args:
+            - |
+              set -euo pipefail
+              TS=$(date +%Y%m%d-%H%M%S)
+              F=/backups/pfe_db-$TS.sql.gz
+              echo "[backup] demarrage $TS"
+              pg_dump -h postgres-rw.pfe.svc.cluster.local -U "$PGUSER" -d pfe_db --no-owner --no-privileges | gzip > "$F"
+              echo "[backup] OK: $(du -h "$F" | cut -f1)"
+              ls -1t /backups/pfe_db-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
+              echo "[backup] fichiers:"; ls -lh /backups/pfe_db-*.sql.gz
+            env:
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: postgres-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-app, key: password}}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              limits: {cpu: 250m, memory: 256Mi}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+            - {name: backups, mountPath: /backups}
+          volumes:
+          - name: backups
+            persistentVolumeClaim: {claimName: postgres-backups}

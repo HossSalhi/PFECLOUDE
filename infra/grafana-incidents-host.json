@@ -1,0 +1,1034 @@
+{
+  "uid": "helios-host-incidents",
+  "title": "HELIOS — Incidents HOST (métriques brutes des VMs)",
+  "tags": [
+    "helios",
+    "host",
+    "incidents"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Incident détecté en ce moment (verdict du détecteur .160)",
+      "description": "Vient de l'exporteur helios-alarme :9110, qui publie le verdict de detecter.py. Il n'y a PAS de détection parallèle : ce que vous voyez ici est exactement ce que Camunda reçoit.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "helios_incident",
+          "legendFormat": "{{type}} → {{cible}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "ACTIF",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "noValue": "Aucun incident",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_HIGH_CPU — CPU utilisé par VM (seuil détecteur : 96 %)",
+      "description": "Expression identique à la règle NODE_HIGH_CPU de detecter.py. Au-dessus de la ligne rouge, le détecteur lève l'incident.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[3m])) * 100)",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 96
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_HIGH_MEMORY — RAM utilisée par VM (seuil détecteur : 95 %)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_DISK_FULL — disque / utilisé par VM (seuil détecteur : 85 %)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(1 - (node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs\"})) * 100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_TIME_DRIFT — dérive d'horloge réelle par VM (seuil : 5 s)",
+      "description": "Mesure la dérive VRAIE : heure du nœud comparée à l'horodatage du scrape Prometheus. Plus fiable que le drapeau NTP, qui reste à 0 en air-gap même quand les horloges sont justes.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "abs(node_time_seconds - timestamp(node_time_seconds))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Conditions kubelet des 3 nœuds (NotReady / DiskPressure / MemoryPressure / PIDPressure)",
+      "description": "Ces conditions viennent du kubelet lui-même. NODE_NOT_READY et NODE_DISK_PRESSURE sont les règles prioritaires du détecteur : elles masquent les autres quand elles sont actives.",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_node_status_condition{condition=~\"Ready|DiskPressure|MemoryPressure|PIDPressure\",status=\"true\"}",
+          "legendFormat": "{{node}} · {{condition}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "non",
+                  "color": "text",
+                  "index": 0
+                },
+                "1": {
+                  "text": "OUI",
+                  "color": "blue",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*Pressure.*"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "1": {
+                        "text": "PRESSION",
+                        "color": "red",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Joignabilité des VMs (node-exporter)",
+      "description": "Une VM injoignable = incident host le plus grave : le détecteur ne voit plus rien d'elle.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"vm-node-exporters\"}",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INJOIGNABLE",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "CONTROL-PLANE — etcd (cause des pannes en cascade)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "ETCD_SLOW_FSYNC — latence d'ecriture disque p99 (seuil 0,5 s)",
+      "description": "Un fsync lent fait expirer les baux de leader du controller-manager et du scheduler -> CrashLoopBackOff en cascade. C'est la cause reelle des 478 redemarrages du 31/07. Au repos : 0,007 a 0,130 s.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by(instance,le)(rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "ETCD_NO_LEADER — chaque membre a-t-il un leader ?",
+      "description": "Sans leader, plus AUCUNE ecriture n'aboutit dans le cluster : kubectl apply, scale et rollout echouent tous.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "etcd_server_has_leader",
+          "legendFormat": "{{instance}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "SANS LEADER",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "noValue": "aucun",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "SATURATIONS HOTE (au-dela de CPU/RAM/disque)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_INODES_FULL — inodes utilises (seuil 85 %)",
+      "description": "Un disque peut etre sature en inodes sans etre plein en octets : des millions de petits fichiers. Invisible pour NODE_DISK_FULL. Au repos : 7,7 a 16,1 %.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(1-(node_filesystem_files_free{mountpoint=\"/\"}/node_filesystem_files{mountpoint=\"/\"}))*100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          },
+          "max": 100
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_DISK_SLOW — disque occupe en E/S (seuil 80 %)",
+      "description": "Un disque sature en entrees/sorties ralentit etcd et provoque en cascade les expirations de baux. Au repos : 0,8 a 8,4 %.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by(instance)(rate(node_disk_io_time_seconds_total[5m]))*100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          },
+          "max": 100
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_CPU_STEAL — CPU vole par l'hyperviseur (seuil 20 %)",
+      "description": "Temps ou la VM etait prete mais attendait le PC hote. Specifique a un cluster virtualise : signale une sur-souscription de l'hote, pas une surcharge interne. Au repos : 0 %.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by(instance)(rate(node_cpu_seconds_total{mode=\"steal\"}[5m]))*100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          },
+          "max": 100
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_FD_EXHAUSTED — descripteurs de fichiers (seuil 80 %)",
+      "description": "Epuises, plus aucun socket ni fichier ne peut etre ouvert : les services tombent sans message clair. Au repos : 0 %.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(node_filefd_allocated/node_filefd_maximum)*100",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          },
+          "max": 100
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "ETAT DES NOEUDS ET DES VOLUMES",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "NODE_CORDONED / PID / RESEAU — signaux kubelet supplementaires",
+      "description": "Cordon = noeud volontairement retire de l'ordonnancement (souvent un oubli apres maintenance). PIDPressure = plus de processus disponibles.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 57
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_node_spec_unschedulable or kube_node_status_condition{condition=~\"PIDPressure|NetworkUnavailable\",status=\"true\"}",
+          "legendFormat": "{{node}} {{condition}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "PROBLEME",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "noValue": "aucun",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "PVC_NOT_BOUND — volumes persistants non lies",
+      "description": "Un PVC Pending ou Lost = le pod qui l'attend ne demarrera jamais. Ici : les 3 volumes PostgreSQL. NB : le remplissage n'est pas mesurable (local-path n'expose pas kubelet_volume_stats).",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 57
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_persistentvolumeclaim_status_phase{phase=~\"Pending|Lost\"}",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} {{phase}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "NON LIE",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "noValue": "aucun",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "NODE_OOM_KILL — processus tues par le noyau faute de RAM",
+      "description": "Compteur du noyau : chaque increment signifie qu'un processus a ete tue. Au repos : 0.",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(node_vmstat_oom_kill[5m])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom.thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0
+      }
+    ]
+  }
+}
