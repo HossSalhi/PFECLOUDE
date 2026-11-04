@@ -1,0 +1,104 @@
+{
+ "lb": "160",
+ "rollback": false,
+ "abort": null,
+ "criteria": [
+  {
+   "c": "contrôleur de .160 en mode enforce",
+   "ok": true,
+   "v": "enforce"
+  },
+  {
+   "c": "dnsmasq .160 publie .160 seule (les 2 noms), TTL 30",
+   "ok": true,
+   "v": {
+    "helios.orange.tn": [
+     [
+      "192.168.148.160"
+     ],
+     30
+    ],
+    "api.helios.orange.tn": [
+     [
+      "192.168.148.160"
+     ],
+     30
+    ]
+   }
+  },
+  {
+   "c": "fichier hostsdir de .160 = .160 seule",
+   "ok": true,
+   "v": "# géré par helios-dns-health (mode enforce) — ne pas éditer à la main | 192.168.148.160 helios.orange.tn api.helios.orange.tn"
+  },
+  {
+   "c": "l'AUTRE LB (.162) n'a pas changé de réponses DNS",
+   "ok": true,
+   "v": {
+    "avant": {
+     "helios.orange.tn": [
+      [
+       "192.168.148.160"
+      ],
+      30
+     ],
+     "api.helios.orange.tn": [
+      [
+       "192.168.148.160"
+      ],
+      30
+     ]
+    },
+    "après": {
+     "helios.orange.tn": [
+      [
+       "192.168.148.160"
+      ],
+      30
+     ],
+     "api.helios.orange.tn": [
+      [
+       "192.168.148.160"
+      ],
+      30
+     ]
+    }
+   }
+  },
+  {
+   "c": "script enforce-dns-health.sh terminé sans erreur",
+   "ok": true,
+   "v": 0
+  },
+  {
+   "c": "[Windows] web >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 38 ms | BRUT: 100.0 % / 0.0 s / p95 38 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 44 ms | BRUT: 100.0 % / 0.0 s / p95 44 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 28 ms | BRUT: 100.0 % / 0.0 s / p95 28 ms"
+  },
+  {
+   "c": "[.161] web >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 22 ms | BRUT: 100.0 % / 0.0 s / p95 22 ms"
+  },
+  {
+   "c": "[.161] api_app >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 19 ms | BRUT: 100.0 % / 0.0 s / p95 19 ms"
+  },
+  {
+   "c": "[.161] kube_api >= 99,5 % et série <= 10 s pendant le passage (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 20 ms | BRUT: 100.0 % / 0.0 s / p95 20 ms"
+  }
+ ]
+}

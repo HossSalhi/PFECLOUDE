@@ -1,0 +1,69 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/17s"
+ },
+ {
+  "check": "RAM hôte >= 1500 Mo",
+  "ok": true,
+  "detail": 2473
+ },
+ {
+  "check": "LB .160 sert web + API en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "LB .162 sert web + API en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "différences limitées aux backends web (['backend ingress_http', 'backend ingress_https'])",
+  "ok": true,
+  "detail": [
+   "backend ingress_http",
+   "backend ingress_https"
+  ]
+ },
+ {
+  "check": "la cible contient 2 contrôles /ping sur :8082",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "check": "/ping de Traefik joignable depuis .160 vers .155:8082",
+  "ok": true,
+  "detail": "200"
+ },
+ {
+  "check": "/ping de Traefik joignable depuis .160 vers .158:8082",
+  "ok": true,
+  "detail": "200"
+ },
+ {
+  "check": "aucune minuterie ha01-* résiduelle sur .160",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

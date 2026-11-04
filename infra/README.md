@@ -9,6 +9,26 @@ Le cluster est un **HA 3-masters** (kubeadm, stacked etcd) : `k8s-master (.153)`
 Aucun composant n'est un SPOF : ni un nœud cluster, ni une machine de LB, ni `.160` (monitoring) prise
 isolément.
 
+> ⚠️ **Mise en garde (nov. 2026)** : les affirmations de juillet ci-dessus (« aucun composant n'est un SPOF : ni une machine de LB… », « un seul des deux LB en vie ») n'ont été **re-prouvées par arrêt réel de VM que pour `.160`, `.155` et `.158`**.
+> La perte réelle de **`.162`** (devenu LB actif du DNS) n'a **pas** été testée : voir la section suivante et `ha01/results/2026-11-03/GATE-4.md` (R9).
+
+## État actuel après HA-01 (4 nov. 2026) — survivre à la perte d'UNE VM (`.160`, `.155` ou `.158`)
+> Cette section **prime** sur les sections suivantes (état de fin juillet) en cas de divergence. Détail, écarts E1-E17, runbooks, retours arrière : [`ha01/README-HA-01.md`](ha01/README-HA-01.md) ·
+> verdict et réserves : `ha01/results/2026-11-03/GATE-4.md` · mesures de chaque arrêt réel : `ha01/results/2026-11-03/GATE-4-mesures.md`.
+
+- **Entrée web** : HAProxy actif/actif sur `.160` + `.162`, configuration canonique **identique** [`ha01/haproxy/haproxy.cfg`](ha01/haproxy/haproxy.cfg), **sans VIP**. Le DNS (dnsmasq sur chaque LB + contrôleur
+  `helios-dns-health`, [`ha01/dns/`](ha01/dns/)) ne publie que le LB sain : **`.162` est le LB actif**, `.160` le secours. Santé des serveurs web = `GET /ping` de Traefik (:8082), détection en ~4 s.
+- **Contrôleur d'ingress** : **Traefik v3.7** en `hostNetwork` (:8000/:8443) sur `.155` et `.158` ([`ha01/k8s/traefik-shadow.yaml`](ha01/k8s/traefik-shadow.yaml)). **ingress-nginx** (retiré par l'amont) est conservé **inactif**,
+  non décommissionné. ⚠️ Les délais d'un service du fournisseur Ingress NGINX se règlent par `--providers.kubernetesingressnginx.*` (connexion 1 s, 4 tentatives), **pas** par `--serversTransport.*` (sans effet, mesuré).
+- **Frontend → backend** : nginx joint le Service headless `backend-headless` ([`ha01/k8s/`](ha01/k8s/)) avec connexion 1 s et reprise sur l'autre pod.
+- **Base** : CloudNativePG 2 instances (réplication **asynchrone**), sonde de vivacité `failureThreshold 9`. Sauvegardes **hors VM** sur `.161` (timer 03:00 UTC, dump + snapshot etcd) et CronJob B sur `.155`.
+  Après les essais, le primaire courant est `postgres-5` (`.155`) ; CNPG est symétrique.
+- **Placement** : `.153` = control-plane seul (taint) ; deux réplicas (anti-affinité) sur `.155` et `.158`.
+- **Preuves** (arrêts brutaux réels, mesurés depuis 3 points de vue) : `.160` **29/29**, `.155` **27/27** (3e essai, après deux échecs qui ont révélé et fait corriger 3 défauts réels), `.158` **26/27** (tous les critères de service tenus,
+  reprise des écritures en 54 s, 0 écriture acquittée perdue).
+- **NON testé** : la perte réelle de **`.162`** (LB actif du DNS). Seul l'arrêt du service HAProxy de `.162` a été injecté (avant que `.162` ne devienne le LB actif) ; la perte du LB actif avait coupé un client DNS 8 à 25 s selon son cache (écart E12). **Trois** arrêts réels validés, pas quatre.
+- **Limites assumées** : RPO ≈ lag (asynchrone) ; `.153` fragile (rafales CPU) et l'opérateur CNPG qui y est épinglé redémarre lors des gels d'E/S de l'hôte ; gels d'E/S du SSD de l'hôte (7 en 30 h) ; Kubernetes 1.29 hors support.
+
 ## Point d'entrée des applications — HAProxy actif/actif sur `.160` + `.162`, SANS VIP
 - **nginx a été entièrement supprimé** (3 nœuds du cluster + `.160`) et remplacé par **HAProxy**, présent
   sur **deux** machines dédiées : `.160` (monitoring) et `.162` (`k8s-lb2`, VM créée pour ce seul rôle).

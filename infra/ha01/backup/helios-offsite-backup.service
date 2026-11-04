@@ -1,0 +1,12 @@
+[Unit]
+Description=HELIOS HA-01 - sauvegarde hors cluster (pg_dump + snapshot etcd) sur .161
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kube
+ExecStart=/usr/local/bin/helios-offsite-backup.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=900

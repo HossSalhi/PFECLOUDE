@@ -1,0 +1,6 @@
+VM: 155
+VM-nom: k8s-worker2 (192.168.148.155)
+Confirmé le: 2026-11-04T09:46:06Z
+Action confirmée: extinction BRUTALE (vmrun stop hard) de la VM .155, mesure de 10 min, relance puis stabilisation de 30 min. Départ APRÈS la fin de la stabilisation de .160.
+Conséquences annoncées à l'utilisateur avant sa réponse: .155 est le leader etcd (réélection, 4/5 membres) et porte la réplique PostgreSQL (primaire sur .158, pas de perte de données attendue) ; un backend, un frontend, un Traefik et un CoreDNS en moins, pods Pending par anti-affinité (attendu) ; .158 porte seul la charge (mémoire serrée) ; nœud NotReady vers 40 s ; HELIOS actif (incident / e-mail possibles), agent de relance suspendu ; relance automatique, filet Windows, abandon automatique.
+Réponse de l'utilisateur (verbatim): "OUI, éteindre .155"

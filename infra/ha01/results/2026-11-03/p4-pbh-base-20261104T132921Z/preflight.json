@@ -1,0 +1,73 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "canari ha01-canary-w1 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.1
+ },
+ {
+  "check": "canari ha01-canary-w2 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.0
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/1s"
+ },
+ {
+  "check": "RAM hôte >= 1500 Mo",
+  "ok": true,
+  "detail": 2513
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ },
+ {
+  "check": "LB .160 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "LB .162 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": ".160 : iptables disponible, aucune règle ha01-pbh résiduelle",
+  "ok": true,
+  "detail": "iptables v1.8.10 (nf_tables)"
+ },
+ {
+  "check": ".162 : iptables disponible, aucune règle ha01-pbh résiduelle",
+  "ok": true,
+  "detail": "iptables v1.8.10 (nf_tables)"
+ },
+ {
+  "check": ".158 : iptables disponible, aucune règle ha01-pbh résiduelle",
+  "ok": true,
+  "detail": "iptables v1.8.10 (nf_tables)"
+ },
+ {
+  "check": "blocs de pods de la victime identifiés",
+  "ok": true,
+  "detail": [
+   "172.16.126.0/26"
+  ]
+ }
+]

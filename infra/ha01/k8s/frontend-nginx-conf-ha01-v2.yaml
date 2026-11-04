@@ -1,0 +1,91 @@
+# HA-01 (écart E16) — configuration nginx du frontend, v2, TELLE QUE DÉPLOYÉE le 4 nov. 2026 14:09Z (ConfigMap utilisé par le Deployment `frontend`).
+# Différences avec la configuration d'origine (ConfigMap `frontend-nginx-conf`) : nginx joint le Service headless `backend-headless` (IP de chaque pod backend) avec
+# connexion 1 s, reprise sur l'autre pod (proxy_next_upstream), résolution DNS 30 s / 1 s et keepalive_timeout 0. Chaîne : -ha01 (v1) -> -ha01-v2 ; retour : `kubectl -n pfe rollout undo deploy/frontend`.
+# ATTENTION : le manifeste du dépôt backend/backend/infra/k8s/frontend-nginx-configmap.yaml est DIFFÉRENT de la configuration vivante d'origine (dérive préexistante).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-conf-ha01-v2
+  namespace: pfe
+  labels:
+    app: frontend
+    ha01: e16
+data:
+  default.conf: |
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=30r/s;
+
+    server {
+        listen 8080;
+        server_name _;
+
+        resolver 10.96.0.10 valid=30s ipv6=off;
+        resolver_timeout 1s;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        add_header X-Content-Type-Options    "nosniff"                        always;
+        add_header X-Frame-Options           "SAMEORIGIN"                     always;
+        add_header X-XSS-Protection          "1; mode=block"                  always;
+        add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy        "camera=(), microphone=(), geolocation=()" always;
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        set $backend_upstream "backend-headless.pfe.svc.cluster.local:8080";
+        # E16 : le nom headless renvoie l'IP de CHAQUE pod backend prêt ; connexion vers un pod mort -> abandon après 2 s puis essai sur l'autre pod.
+        proxy_connect_timeout 1s;
+        proxy_next_upstream error timeout;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout 5s;
+        # E16 v2 : pas de connexion persistante vers Traefik (cf. transform_nginx_v2 dans p4_webchange.py).
+        keepalive_timeout 0;
+
+        location /api/ {
+            limit_req zone=api_limit burst=60 nodelay;
+            proxy_pass http://$backend_upstream;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 1s;
+            proxy_send_timeout    30s;
+            proxy_read_timeout    30s;
+        }
+
+        location /api/events/ {
+            proxy_pass http://$backend_upstream;
+            proxy_set_header Host       $host;
+            proxy_set_header X-Real-IP  $remote_addr;
+            proxy_set_header Connection "";
+            proxy_http_version  1.1;
+            proxy_read_timeout  3600s;
+            proxy_send_timeout  3600s;
+            proxy_buffering     off;
+            proxy_cache         off;
+            chunked_transfer_encoding on;
+        }
+
+        location /actuator/ {
+            proxy_pass http://$backend_upstream;
+            proxy_set_header Host      $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            allow 10.0.0.0/8;
+            allow 192.168.0.0/16;
+            deny  all;
+        }
+
+        gzip on;
+        gzip_vary on;
+        gzip_proxied any;
+        gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
+        gzip_min_length 1000;
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+            access_log off;
+        }
+    }

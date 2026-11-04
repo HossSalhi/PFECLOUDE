@@ -1,0 +1,23 @@
+[Unit]
+Description=HELIOS HA-01 - controle de sante des LB et publication DNS (actif/passif)
+After=network-online.target dnsmasq.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# LB actif publié par le DNS : .162 en tête (écart E12). Retour à l'ordre historique : HELIOS_DNS_ORDER=160,162 (ops/p2b_primary.py --primary 160)
+Environment=HELIOS_DNS_ORDER=162,160
+ExecStart=/usr/bin/python3 /usr/local/bin/helios-dns-health.py
+Restart=always
+RestartSec=2
+# Le service n'ecrit que dans ses repertoires (ils doivent exister : cf. install-dns-health.sh)
+ProtectSystem=strict
+ReadWritePaths=/etc/dnsmasq-helios.d /var/lib/helios-dns-health /etc/helios-dns-health
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+MemoryMax=64M
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

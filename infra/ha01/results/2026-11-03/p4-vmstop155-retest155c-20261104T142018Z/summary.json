@@ -1,0 +1,174 @@
+{
+ "vm": "155",
+ "label": "retest155c",
+ "t_stop": 1793802078.685325,
+ "t_vm_start": 1793802692.313853,
+ "observe_s": 600,
+ "abort": null,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant le test (informatif ; mesures concernées classées hors gel, E6)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "la VM .155 est bien arrêtée pendant la mesure (contrôle de l'injection)",
+   "ok": true,
+   "v": "vmrun rc=0  ; VM absente de `vmrun list`: True"
+  },
+  {
+   "c": "[Windows] web >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.829 % / 1.0 s / p95 67 ms | BRUT: 99.829 % / 1.0 s / p95 67 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 1051 ms | BRUT: 100.0 % / 0.0 s / p95 1051 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 27 ms | BRUT: 100.0 % / 0.0 s / p95 27 ms"
+  },
+  {
+   "c": "[.161 sans cache] web >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.83 % / 1.0 s / p95 75 ms | BRUT: 99.83 % / 1.0 s / p95 75 ms"
+  },
+  {
+   "c": "[.161 sans cache] api_app >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.828 % / 1.0 s / p95 79 ms | BRUT: 99.828 % / 1.0 s / p95 79 ms"
+  },
+  {
+   "c": "[.161 sans cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 16 ms | BRUT: 100.0 % / 0.0 s / p95 16 ms"
+  },
+  {
+   "c": "[.161 avec cache] web >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.653 % / 1.0 s / p95 57 ms | BRUT: 99.653 % / 1.0 s / p95 57 ms"
+  },
+  {
+   "c": "[.161 avec cache] api_app >= 98.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 1009 ms | BRUT: 100.0 % / 0.0 s / p95 1009 ms"
+  },
+  {
+   "c": "[.161 avec cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 16 ms | BRUT: 100.0 % / 0.0 s / p95 16 ms"
+  },
+  {
+   "c": "canari ha01-canary-w1 : 0 écriture acquittée perdue",
+   "ok": true,
+   "v": "perdues=0 acquittées=3274"
+  },
+  {
+   "c": "canari ha01-canary-w1 (survivant) : 0 échec hors gel",
+   "ok": true,
+   "v": "échecs hors gel=0 (bruts 0) trou max hors gel=0.3s"
+  },
+  {
+   "c": "canari ha01-canary-w2 : 0 écriture acquittée perdue (canari du worker éteint)",
+   "ok": true,
+   "v": "perdues=0 acquittées=27"
+  },
+  {
+   "c": "nœuds : .153 et le survivant sans aucune transition NotReady",
+   "ok": true,
+   "v": "aucune"
+  },
+  {
+   "c": "le nœud k8s-worker2 passe NotReady (comportement attendu)",
+   "ok": true,
+   "v": "après 45 s"
+  },
+  {
+   "c": "etcd : 4/4 membres sains en <= 10 s après l'arrêt",
+   "ok": true,
+   "v": "1 s"
+  },
+  {
+   "c": "etcd : <= 2 élections pendant le test (terme Raft)",
+   "ok": true,
+   "v": "terme 1806 -> 1808, leader 8816046531553481068 -> 11635180085688803564"
+  },
+  {
+   "c": "mémoire : survivants >= 300 Mo et .153 >= 500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": {
+    "153": 615,
+    "158": 659
+   }
+  },
+  {
+   "c": "0 OOMKilled et 0 éviction pour mémoire pendant le test",
+   "ok": true,
+   "v": "OOM=0 évictions=0"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": "5821 Mo"
+  },
+  {
+   "c": "placement : pods Pending documentés (anti-affinité = conséquence attendue, pas une panne)",
+   "ok": true,
+   "v": {
+    "T+90s": [
+     "ingress-nginx        ingress-nginx-controller-84977f46dc-8cjxl   1/1   Terminating   0                 107m    172.16.126.29     k8s-worker2   <none>   <none>",
+     "ingress-nginx        ingress-nginx-controller-84977f46dc-f7s4s   0/1   Pending       0                 71s     <none>            <none>        <none>   <none>",
+     "pfe                  backend-75b8d9569b-f7qpn                    0/1   Pending       0                 71s     <none>            <none>        <none>   <none>",
+     "pfe                  backend-75b8d9569b-lrwwm                    1/1   Terminating   0                 107m    172.16.126.5      k8s-worker2   <none>   <none>",
+     "pfe                  frontend-788c665d7c-ltd5q                   0/1   Pending       0                 71s     <none>            <none>        <none>   <none>",
+     "pfe                  frontend-788c665d7c-p5vxl                   1/1   Terminating   0                 13m     172.16.126.26     k8s-worker2   <none>   <none>",
+     "traefik              traefik-5747ccdb79-47fgk                    0/1   Pending       0                 71s     <none>            <none>        <none>   <none>",
+     "traefik              traefik-5747ccdb79-qbtjr                    1/1   Terminating   0                 30m     192.168.148.155   k8s-worker2   <none>   <none>"
+    ],
+    "T+300s": [
+     "ingress-nginx        ingress-nginx-controller-84977f46dc-8cjxl   1/1   Terminating   0                 110m    172.16.126.29     k8s-worker2   <none>   <none>",
+     "ingress-nginx        ingress-nginx-controller-84977f46dc-f7s4s   0/1   Pending       0                 4m47s   <none>            <none>        <none>   <none>",
+     "kube-system          metrics-server-696f6dff9c-2tmpr             0/1   Pending       0                 17s     <none>            <none>        <none>   <none>",
+     "kube-system          metrics-server-696f6dff9c-hn79v             1/1   Terminating   0                 106m    172.16.126.59     k8s-worker2   <none>   <none>",
+     "pfe                  backend-75b8d9569b-f7qpn                    0/1   Pending       0                 4m47s   <none>            <none>        <none>   <none>",
+     "pfe                  backend-75b8d9569b-lrwwm                    1/1   Terminating   0                 110m    172.16.126.5      k8s-worker2   <none>   <none>",
+     "pfe                  frontend-788c665d7c-ltd5q                   0/1   Pending       0                 4m47s   <none>            <none>        <none>   <none>",
+     "pfe                  frontend-788c665d7c-p5vxl                   1/1   Terminating   0                 17m     172.16.126.26     k8s-worker2   <none>   <none>",
+     "pfe                  ha01-canary-w2-59df8bdcd8-9lg82             0/1   Pending       0                 17s     <none>            <none>        <none>   <none>",
+     "pfe                  ha01-canary-w2-59df8bdcd8-gfgnv             1/1   Terminating   0                 106m    172.16.126.58     k8s-worker2   <none>   <none>",
+     "pfe                  postgres-5                                  1/1   Terminating   0                 100m    172.16.126.37     k8s-worker2   <none>   <none>",
+     "traefik              traefik-5747ccdb79-47fgk                    0/1   Pending       0                 4m47s   <none>            <none>        <none>   <none>",
+     "traefik              traefik-5747ccdb79-qbtjr                    1/1   Terminating   0                 33m     192.168.148.155   k8s-worker2   <none>   <none>"
+    ]
+   }
+  },
+  {
+   "c": "retour : nœud Ready <= 300 s et etcd 5/5 <= 300 s après la relance",
+   "ok": true,
+   "v": "ssh=53 ready=53 etcd5=39"
+  },
+  {
+   "c": "retour : CNPG 2/2 sain <= 15 min après la relance",
+   "ok": true,
+   "v": "96 s"
+  },
+  {
+   "c": "retour : aucun pod non sain (Pending résorbés)",
+   "ok": true,
+   "v": "96 s"
+  },
+  {
+   "c": "stabilisation 1800 s : nœuds Ready, etcd 5/5, aucun pod non sain, sondes par nom OK (creux etcd isolés expliqués par une rafale CPU de .153 listés à part, E17)",
+   "ok": true,
+   "v": "aucune anomalie inexpliquée"
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

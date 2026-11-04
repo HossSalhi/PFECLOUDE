@@ -1,0 +1,83 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "aucun pod non sain",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "canari ha01-canary-w1 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.2
+ },
+ {
+  "check": "canari ha01-canary-w2 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.2
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/1s"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo",
+  "ok": true,
+  "detail": 3154
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 1194
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 737
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ },
+ {
+  "check": "kubectl-cnpg disponible sur .158",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "check": "état avant consigné (primaire, seuils)",
+  "ok": true,
+  "detail": {
+   "primaire": [
+    "postgres-7",
+    "k8s-worker1"
+   ],
+   "seuils": {
+    "postgres-5": [
+     3,
+     "k8s-worker2",
+     "replica"
+    ],
+    "postgres-7": [
+     3,
+     "k8s-worker1",
+     "primary"
+    ]
+   }
+  }
+ }
+]

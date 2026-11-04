@@ -1,0 +1,62 @@
+{
+ "lb": "162",
+ "t_deploy": 1793799383.596835,
+ "abort": null,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant l'observation (informatif, E6)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "config finale de .162 = config canonique (sha256 808d3a9c4580eca6)",
+   "ok": true,
+   "v": "808d3a9c4580eca6"
+  },
+  {
+   "c": "HAProxy .162 : tous les serveurs UP",
+   "ok": true,
+   "v": []
+  },
+  {
+   "c": "[Windows] lb162_web >= 99,9 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 68 ms | BRUT: 100.0 % / 0.0 s / p95 68 ms"
+  },
+  {
+   "c": "[Windows] lb162_api >= 99,9 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 32 ms | BRUT: 100.0 % / 0.0 s / p95 32 ms"
+  },
+  {
+   "c": "[Windows] web >= 99.0 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 67 ms | BRUT: 100.0 % / 0.0 s / p95 67 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99.0 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 79 ms | BRUT: 100.0 % / 0.0 s / p95 79 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99.0 % et série <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 33 ms | BRUT: 100.0 % / 0.0 s / p95 33 ms"
+  },
+  {
+   "c": "charge 10 req/s forcée vers .162 : >= 99,9 % de succès (hors gels), p95 < 1500 ms",
+   "ok": true,
+   "v": "1251/1251 p95=74 ms"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": 2433
+  },
+  {
+   "c": "pas d'abandon (sinon config d'origine restaurée)",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

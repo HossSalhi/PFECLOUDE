@@ -1,0 +1,75 @@
+# baseline Prometheus — fenêtre 24h se terminant le 2026-11-03 14:39:26 UTC
+== etcd : changements de leader vus (24h)
+  192.168.148.153:2381                 22.0
+  192.168.148.155:2381                 6.0
+  192.168.148.158:2381                 5.0
+  192.168.148.160:2381                 7.0
+  192.168.148.162:2381                 8.0
+== etcd : échecs d'envoi de heartbeat (24h)
+  192.168.148.153:2381                 0
+  192.168.148.155:2381                 1173
+  192.168.148.158:2381                 819
+  192.168.148.160:2381                 16
+  192.168.148.162:2381                 36
+== etcd : propositions échouées (24h)
+  192.168.148.153:2381                 309
+  192.168.148.155:2381                 5
+  192.168.148.158:2381                 15
+  192.168.148.160:2381                 0
+  192.168.148.162:2381                 0
+== etcd : fsync WAL p99 max sur fenêtres 5 min (s)
+  192.168.148.153:2381                 2.744
+  192.168.148.155:2381                 0.508
+  192.168.148.158:2381                 0.717
+  192.168.148.160:2381                 0.683
+  192.168.148.162:2381                 0.876
+== etcd : commit backend p99 max sur fenêtres 5 min (s)
+  192.168.148.153:2381                 8.192
+  192.168.148.155:2381                 0.438
+  192.168.148.158:2381                 0.497
+  192.168.148.160:2381                 0.486
+  192.168.148.162:2381                 0.488
+== nœuds K8s : transitions Ready (24h)
+  k8s-master                           95
+  k8s-worker1                          0
+  k8s-worker2                          0
+== redémarrages de conteneurs (> 0 sur 24h)
+  calico-node-96lhn                                  calico-node      +13
+  cnpg-controller-manager-5546f56fbc-h87ct           manager          +3
+  cnpg-controller-manager-69f484f986-6knd7           manager          +3
+  cnpg-controller-manager-69f484f986-crq79           manager          +6
+  cnpg-controller-manager-69f484f986-fv54v           manager          +25
+  cnpg-controller-manager-69f484f986-pdsvd           manager          +3
+  cnpg-controller-manager-69f484f986-x69g5           manager          +1
+  cnpg-controller-manager-69f484f986-z9wsg           manager          +5
+  etcd-k8s-master                                    etcd             +2
+  falco-wnhwl                                        falco            +13
+  falco-wnhwl                                        falcoctl-artifac +1
+  ingress-nginx-controller-84977f46dc-2jdgf          controller       +2
+  ingress-nginx-controller-84977f46dc-2ljks          controller       +1
+  ingress-nginx-controller-84977f46dc-4wldm          controller       +3
+  ingress-nginx-controller-84977f46dc-cvtnk          controller       +4
+  ingress-nginx-controller-84977f46dc-jbj56          controller       +1
+  ingress-nginx-controller-84977f46dc-kqwnf          controller       +1
+  ingress-nginx-controller-84977f46dc-pd7cj          controller       +2
+  ingress-nginx-controller-84977f46dc-qddps          controller       +5
+  ingress-nginx-controller-84977f46dc-r52cw          controller       +2
+  ingress-nginx-controller-84977f46dc-t7klv          controller       +6
+  ingress-nginx-controller-84977f46dc-tqcvl          controller       +1
+  ingress-nginx-controller-84977f46dc-vt2hm          controller       +9
+  ingress-nginx-controller-84977f46dc-xghtk          controller       +2
+  ingress-nginx-controller-84977f46dc-xvpkc          controller       +2
+  kube-apiserver-k8s-master                          kube-apiserver   +36
+  kube-controller-manager-k8s-master                 kube-controller- +1
+  kube-proxy-vws8v                                   kube-proxy       +1
+  kube-scheduler-k8s-master                          kube-scheduler   +1
+  speaker-xt99q                                      speaker          +34
+== VMs : MemAvailable min (Mo) / load1 max / pression CPU max (s/s)
+  192.168.148.153:9100           671     90.0    0.96
+  192.168.148.155:9100           996      4.3    0.13
+  192.168.148.158:9100           630     14.4    0.21
+  192.168.148.160:9100           348      4.2    0.19
+  192.168.148.161:9100          1287      4.3    0.06
+  192.168.148.162:9100           644      3.0    0.19
+== .153 : dernier instant où fsync WAL p99 > 0,1 s
+  11-03 11:39 UTC (il y a 180 min)

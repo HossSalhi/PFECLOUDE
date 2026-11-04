@@ -1,0 +1,117 @@
+# HA-01 — canaris d'écriture PostgreSQL « B » : DEUX instruments, un par worker (.158 et .155), SANS dépendance DNS.
+#
+# Pourquoi (écart E7, cf. README-HA-01.md) : le canari historique `ha01-canary` est épinglé sur .153, le nœud le plus
+# chargé (2 vCPU, PSI CPU jusqu'à 0,96). Mesuré le 4 nov. : dizaines de trous de 1 à 12 s côté client, 2 coupures de
+# session (02:00 et 05:00 UTC) et un trou de 48 s dont ~30 s de résolution DNS bloquée (connect_timeout ne couvre pas
+# getaddrinfo). Un instrument hébergé sur le nœud malade mesure .153, pas la base. Ici :
+#   - host = IP du Service postgres-rw (variable POSTGRES_RW_SERVICE_HOST injectée par kubelet) -> pas de DNS ;
+#   - un canari par worker : lorsqu'un worker est drainé (Phase 2a) ou éteint (Phase 4), l'AUTRE reste vivant et fait foi
+#     (le canari du worker perdu est évincé/Pending : c'est attendu, il n'est pas une panne) ;
+#   - mêmes paramètres de reconnexion rapide que l'ancien (connect_timeout 3 s, keepalives 2+3x1 s, tcp_user_timeout 4 s).
+# Le canari .153 (`ha01-canary`) est conservé tel quel, à titre INFORMATIF.
+# Écrit 5 lignes/s dans ha01.canary (src = w1 | w2) et journalise "<epoch.µs> <id>" par écriture acquittée, sinon l'erreur.
+# Analyse : infra/ha01/probes/ha01_canary_report.py --deploy ha01-canary-w1 (ou -w2).
+# Retrait : kubectl -n pfe delete deploy ha01-canary-w1 ha01-canary-w2   (la base ha01 se supprime à la clôture).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha01-canary-w1
+  namespace: pfe
+  labels: {app: ha01-canary-w1, helios.io/monitor: "false", ha01/role: canary}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ha01-canary-w1}
+  template:
+    metadata:
+      labels: {app: ha01-canary-w1, helios.io/monitor: "false", ha01/role: canary}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 26
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: canary
+          image: ghcr.io/cloudnative-pg/postgresql:16
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              H="${POSTGRES_RW_SERVICE_HOST:?variable de service absente}"
+              SRC=w1
+              CS="host=$H port=5432 dbname=ha01 user=$PGUSER connect_timeout=3 keepalives=1 keepalives_idle=2 keepalives_interval=1 keepalives_count=3 tcp_user_timeout=4000 application_name=ha01-canary-$SRC"
+              while true; do
+                { while true; do echo "INSERT INTO canary(src) VALUES ('$SRC') RETURNING id;"; sleep 0.2; done; } \
+                  | psql "$CS" -At -q -w -v ON_ERROR_STOP=0 2>&1 \
+                  | while IFS= read -r l; do echo "${EPOCHREALTIME} $l"; done
+                echo "${EPOCHREALTIME} SESSION_END"
+                sleep 0.5
+              done
+          env:
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: postgres-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-app, key: password}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}   # LimitRange pfe-limits : minimum 32Mi par conteneur
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha01-canary-w2
+  namespace: pfe
+  labels: {app: ha01-canary-w2, helios.io/monitor: "false", ha01/role: canary}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ha01-canary-w2}
+  template:
+    metadata:
+      labels: {app: ha01-canary-w2, helios.io/monitor: "false", ha01/role: canary}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-worker2
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 26
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: canary
+          image: ghcr.io/cloudnative-pg/postgresql:16
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              H="${POSTGRES_RW_SERVICE_HOST:?variable de service absente}"
+              SRC=w2
+              CS="host=$H port=5432 dbname=ha01 user=$PGUSER connect_timeout=3 keepalives=1 keepalives_idle=2 keepalives_interval=1 keepalives_count=3 tcp_user_timeout=4000 application_name=ha01-canary-$SRC"
+              while true; do
+                { while true; do echo "INSERT INTO canary(src) VALUES ('$SRC') RETURNING id;"; sleep 0.2; done; } \
+                  | psql "$CS" -At -q -w -v ON_ERROR_STOP=0 2>&1 \
+                  | while IFS= read -r l; do echo "${EPOCHREALTIME} $l"; done
+                echo "${EPOCHREALTIME} SESSION_END"
+                sleep 0.5
+              done
+          env:
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: postgres-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-app, key: password}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

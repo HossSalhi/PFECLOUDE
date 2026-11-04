@@ -1,0 +1,18 @@
+# HA-01 (écart E16) — Service headless des pods backend : le DNS renvoie l'IP de CHAQUE pod prêt, ce qui permet à nginx (frontend) de rejouer une requête sur l'autre pod
+# quand l'un d'eux est mort (l'IP de cluster `backend` n'offre qu'un seul candidat). Ne remplace pas le Service `backend` (inchangé).
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-headless
+  namespace: pfe
+  labels:
+    app: backend
+    ha01: e16
+spec:
+  clusterIP: None
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

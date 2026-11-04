@@ -1,0 +1,6 @@
+VM: 158
+VM-nom: k8s-worker1 (192.168.148.158) — PRIMAIRE PostgreSQL
+Confirmé le: 2026-11-04T10:28:57Z
+Action confirmée: extinction BRUTALE (vmrun stop hard) de la VM .158, mesure de 10 min, relance puis stabilisation de 30 min. Départ APRÈS la fin de la stabilisation de .155 et APRÈS une sauvegarde fraîche hors cluster.
+Conséquences annoncées à l'utilisateur avant sa réponse: bascule de la base sur la réplique (.155) en ~1-2 min avec écritures en échec pendant ce laps ; réplication ASYNCHRONE : jusqu'à ~1 s d'écritures acquittées peut être PERDUE (seul test avec un risque réel, minime, de perte de données) ; plus de réplique jusqu'au retour de .158 (reconstruction <= 15 min) ; .155 porte seule la charge ; un backend, un frontend, un Traefik et un CoreDNS en moins (Pending attendus) ; bail du planificateur HELIOS repris en ~5 min ; sauvegardes indépendantes disponibles ; relance automatique, filet Windows, abandon automatique.
+Réponse de l'utilisateur (verbatim): "OUI, éteindre .158"

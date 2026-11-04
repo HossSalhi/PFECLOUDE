@@ -1,0 +1,354 @@
+{
+ "label": "w2",
+ "node": "k8s-worker2",
+ "t_taint": "2026-11-04T07:24:36Z",
+ "t_untaint": "2026-11-04T07:34:38Z",
+ "switchover": null,
+ "probes": {
+  "api_app": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 29,
+   "lat_ms_p95": 65,
+   "lat_ms_max": 222,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.281Z",
+   "last": "2026-11-04T07:34:38.283Z"
+  },
+  "kube_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 13,
+   "lat_ms_p95": 29,
+   "lat_ms_max": 254,
+   "ips": {
+    "192.168.148.160": 303,
+    "192.168.148.162": 300
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.334Z",
+   "last": "2026-11-04T07:34:38.324Z"
+  },
+  "lb160_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 20,
+   "lat_ms_p95": 31,
+   "lat_ms_max": 101,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.332Z",
+   "last": "2026-11-04T07:34:38.336Z"
+  },
+  "lb160_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 24,
+   "lat_ms_p95": 54,
+   "lat_ms_max": 183,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.259Z",
+   "last": "2026-11-04T07:34:38.266Z"
+  },
+  "lb162_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 11,
+   "lat_ms_p95": 32,
+   "lat_ms_max": 320,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.253Z",
+   "last": "2026-11-04T07:34:38.275Z"
+  },
+  "lb162_web": {
+   "n": 603,
+   "ok": 602,
+   "availability_pct": 99.834,
+   "failures": 1,
+   "longest_failure_s": 1.0,
+   "failure_runs": [
+    [
+     "07:24:39",
+     1.0
+    ]
+   ],
+   "lat_ms_p50": 23,
+   "lat_ms_p95": 56,
+   "lat_ms_max": 189,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {
+    "HTTP HTTP/1.1 502 Bad Gateway": 1
+   },
+   "first": "2026-11-04T07:24:36.280Z",
+   "last": "2026-11-04T07:34:38.262Z"
+  },
+  "web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 25,
+   "lat_ms_p95": 61,
+   "lat_ms_max": 178,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.275Z",
+   "last": "2026-11-04T07:34:38.281Z"
+  }
+ },
+ "probes_raw": {
+  "api_app": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 29,
+   "lat_ms_p95": 65,
+   "lat_ms_max": 222,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.281Z",
+   "last": "2026-11-04T07:34:38.283Z"
+  },
+  "kube_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 13,
+   "lat_ms_p95": 29,
+   "lat_ms_max": 254,
+   "ips": {
+    "192.168.148.160": 303,
+    "192.168.148.162": 300
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.334Z",
+   "last": "2026-11-04T07:34:38.324Z"
+  },
+  "lb160_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 20,
+   "lat_ms_p95": 31,
+   "lat_ms_max": 101,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.332Z",
+   "last": "2026-11-04T07:34:38.336Z"
+  },
+  "lb160_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 24,
+   "lat_ms_p95": 54,
+   "lat_ms_max": 183,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.259Z",
+   "last": "2026-11-04T07:34:38.266Z"
+  },
+  "lb162_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 11,
+   "lat_ms_p95": 32,
+   "lat_ms_max": 320,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.253Z",
+   "last": "2026-11-04T07:34:38.275Z"
+  },
+  "lb162_web": {
+   "n": 603,
+   "ok": 602,
+   "availability_pct": 99.834,
+   "failures": 1,
+   "longest_failure_s": 1.0,
+   "failure_runs": [
+    [
+     "07:24:39",
+     1.0
+    ]
+   ],
+   "lat_ms_p50": 23,
+   "lat_ms_p95": 56,
+   "lat_ms_max": 189,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {
+    "HTTP HTTP/1.1 502 Bad Gateway": 1
+   },
+   "first": "2026-11-04T07:24:36.280Z",
+   "last": "2026-11-04T07:34:38.262Z"
+  },
+  "web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 25,
+   "lat_ms_p95": 61,
+   "lat_ms_max": 178,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:24:36.275Z",
+   "last": "2026-11-04T07:34:38.281Z"
+  }
+ },
+ "host_stalls": [],
+ "canary_deploy": "ha01-canary-w1",
+ "canary": {
+  "acked": 3601,
+  "failures": 0,
+  "failures_total": 0,
+  "failures_excluded": 0,
+  "session_end": 0,
+  "first_ack_ts": 1793777045.287145,
+  "last_ack_ts": 1793777784.687253,
+  "max_gap_s": 0.34,
+  "max_gap_start_utc": "07:30:40",
+  "max_gap_hors_gel_s": 0.34,
+  "gaps_over_1s": [],
+  "acked_lost": 0,
+  "acked_lost_ids_sample": []
+ },
+ "mem_survivor_min": 650,
+ "mem_153_min": 666,
+ "host_min_mb": 1844,
+ "oom": 0,
+ "recovered_s": 59.20862078666687,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant la répétition (informatif ; mesures concernées classées hors gel)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "web >= 98 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "api_app >= 98 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "kube_api >= 99 % et trou <= 15 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "canari ha01-canary-w1 : trou d'écriture <= 120 s (hors gels)",
+   "ok": true,
+   "v": "0.34 s (brut 0.34 s)"
+  },
+  {
+   "c": "canari ha01-canary-w1 : 0 écriture acquittée perdue (jamais exemptée)",
+   "ok": true,
+   "v": "0"
+  },
+  {
+   "c": "MemAvailable survivant >= 300 Mo",
+   "ok": true,
+   "v": "650 Mo"
+  },
+  {
+   "c": "MemAvailable .153 >= 500 Mo",
+   "ok": true,
+   "v": "666 Mo"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo",
+   "ok": true,
+   "v": "1844 Mo"
+  },
+  {
+   "c": "0 OOMKilled",
+   "ok": true,
+   "v": 0
+  },
+  {
+   "c": "0 éviction pour mémoire",
+   "ok": true,
+   "v": 0
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  },
+  {
+   "c": "récupération complète <= 15 min",
+   "ok": true,
+   "v": "59 s"
+  }
+ ]
+}

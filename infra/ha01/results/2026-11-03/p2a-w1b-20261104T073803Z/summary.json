@@ -1,0 +1,370 @@
+{
+ "label": "w1b",
+ "node": "k8s-worker1",
+ "t_taint": "2026-11-04T07:39:42Z",
+ "t_untaint": "2026-11-04T07:49:44Z",
+ "switchover": {
+  "new_primary": "postgres-5",
+  "seconds_to_healthy": 29.3,
+  "retour_primaire": {
+   "vers": "postgres-7",
+   "s": 25.8
+  }
+ },
+ "probes": {
+  "api_app": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 30,
+   "lat_ms_p95": 76,
+   "lat_ms_max": 429,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.281Z",
+   "last": "2026-11-04T07:49:44.276Z"
+  },
+  "kube_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 13,
+   "lat_ms_p95": 31,
+   "lat_ms_max": 113,
+   "ips": {
+    "192.168.148.162": 273,
+    "192.168.148.160": 330
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.307Z",
+   "last": "2026-11-04T07:49:44.330Z"
+  },
+  "lb160_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 20,
+   "lat_ms_p95": 34,
+   "lat_ms_max": 344,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.324Z",
+   "last": "2026-11-04T07:49:44.346Z"
+  },
+  "lb160_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 24,
+   "lat_ms_p95": 69,
+   "lat_ms_max": 195,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.266Z",
+   "last": "2026-11-04T07:49:44.272Z"
+  },
+  "lb162_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 12,
+   "lat_ms_p95": 30,
+   "lat_ms_max": 350,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.262Z",
+   "last": "2026-11-04T07:49:44.265Z"
+  },
+  "lb162_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 25,
+   "lat_ms_p95": 66,
+   "lat_ms_max": 413,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.267Z",
+   "last": "2026-11-04T07:49:44.262Z"
+  },
+  "web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 26,
+   "lat_ms_p95": 70,
+   "lat_ms_max": 337,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.272Z",
+   "last": "2026-11-04T07:49:44.258Z"
+  }
+ },
+ "probes_raw": {
+  "api_app": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 30,
+   "lat_ms_p95": 76,
+   "lat_ms_max": 429,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.281Z",
+   "last": "2026-11-04T07:49:44.276Z"
+  },
+  "kube_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 13,
+   "lat_ms_p95": 31,
+   "lat_ms_max": 113,
+   "ips": {
+    "192.168.148.162": 273,
+    "192.168.148.160": 330
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.307Z",
+   "last": "2026-11-04T07:49:44.330Z"
+  },
+  "lb160_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 20,
+   "lat_ms_p95": 34,
+   "lat_ms_max": 344,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.324Z",
+   "last": "2026-11-04T07:49:44.346Z"
+  },
+  "lb160_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 24,
+   "lat_ms_p95": 69,
+   "lat_ms_max": 195,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.266Z",
+   "last": "2026-11-04T07:49:44.272Z"
+  },
+  "lb162_api": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 12,
+   "lat_ms_p95": 30,
+   "lat_ms_max": 350,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.262Z",
+   "last": "2026-11-04T07:49:44.265Z"
+  },
+  "lb162_web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 25,
+   "lat_ms_p95": 66,
+   "lat_ms_max": 413,
+   "ips": {
+    "192.168.148.162": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.267Z",
+   "last": "2026-11-04T07:49:44.262Z"
+  },
+  "web": {
+   "n": 603,
+   "ok": 603,
+   "availability_pct": 100.0,
+   "failures": 0,
+   "longest_failure_s": 0.0,
+   "failure_runs": [],
+   "lat_ms_p50": 26,
+   "lat_ms_p95": 70,
+   "lat_ms_max": 337,
+   "ips": {
+    "192.168.148.160": 603
+   },
+   "top_errors": {},
+   "first": "2026-11-04T07:39:42.272Z",
+   "last": "2026-11-04T07:49:44.258Z"
+  }
+ },
+ "host_stalls": [],
+ "canary_deploy": "ha01-canary-w2",
+ "canary": {
+  "acked": 3728,
+  "failures": 73,
+  "failures_total": 73,
+  "failures_excluded": 0,
+  "session_end": 35,
+  "first_ack_ts": 1793777891.840099,
+  "last_ack_ts": 1793778696.887411,
+  "max_gap_s": 15.62,
+  "max_gap_start_utc": "07:50:26",
+  "max_gap_hors_gel_s": 15.62,
+  "gaps_over_1s": [
+   [
+    12.8,
+    "07:38:42"
+   ],
+   [
+    8.7,
+    "07:43:12"
+   ],
+   [
+    15.6,
+    "07:50:26"
+   ]
+  ],
+  "acked_lost": 0,
+  "acked_lost_ids_sample": [],
+  "failure_kinds": {
+   "psql: error: connection to server at \"10.102.59.175\", port 5432 failed: Connection refused": 32,
+   "Is the server running on that host and accepting TCP/IP connections?": 32,
+   "FATAL:  terminating connection due to administrator command": 3,
+   "SSL connection has been closed unexpectedly": 3
+  },
+  "failure_window_utc": [
+   "07:38:42",
+   "07:50:40"
+  ]
+ },
+ "mem_survivor_min": 939,
+ "mem_153_min": 616,
+ "host_min_mb": 3280,
+ "oom": 0,
+ "recovered_s": 37.119115114212036,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant la répétition (informatif ; mesures concernées classées hors gel)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "web >= 98 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "api_app >= 98 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "kube_api >= 99 % et trou <= 15 s (hors gels)",
+   "ok": true,
+   "v": "100.0 % / 0.0 s ; brut 100.0 % / 0.0 s"
+  },
+  {
+   "c": "canari ha01-canary-w2 : trou d'écriture <= 120 s (hors gels)",
+   "ok": true,
+   "v": "15.62 s (brut 15.62 s)"
+  },
+  {
+   "c": "canari ha01-canary-w2 : 0 écriture acquittée perdue (jamais exemptée)",
+   "ok": true,
+   "v": "0"
+  },
+  {
+   "c": "MemAvailable survivant >= 300 Mo",
+   "ok": true,
+   "v": "939 Mo"
+  },
+  {
+   "c": "MemAvailable .153 >= 500 Mo",
+   "ok": true,
+   "v": "616 Mo"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo",
+   "ok": true,
+   "v": "3280 Mo"
+  },
+  {
+   "c": "0 OOMKilled",
+   "ok": true,
+   "v": 0
+  },
+  {
+   "c": "0 éviction pour mémoire",
+   "ok": true,
+   "v": 0
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  },
+  {
+   "c": "récupération complète <= 15 min",
+   "ok": true,
+   "v": "37 s"
+  }
+ ]
+}

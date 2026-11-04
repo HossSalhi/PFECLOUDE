@@ -1,0 +1,139 @@
+{
+ "mode": "isolate",
+ "lb": "160",
+ "label": "i160b",
+ "duration_s": 240,
+ "t_inject": 1793781876.3257666,
+ "t_restore": 1793782117.096231,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant le test (informatif ; mesures concernées classées hors gel, E6)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "[Windows] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": false,
+   "v": "hors gel: 98.611 % / 1.0 s / p95 3038 ms | BRUT: 98.611 % / 1.0 s / p95 3038 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": false,
+   "v": "hors gel: 98.611 % / 1.0 s / p95 3043 ms | BRUT: 98.611 % / 1.0 s / p95 3043 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 37 ms | BRUT: 100.0 % / 0.0 s / p95 37 ms"
+  },
+  {
+   "c": "[Windows] LB survivant .162 en direct (lb162_web) >= 99,5 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 26 ms | BRUT: 100.0 % / 0.0 s / p95 26 ms"
+  },
+  {
+   "c": "[Windows] LB survivant .162 en direct (lb162_api) >= 99,5 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 27 ms | BRUT: 100.0 % / 0.0 s / p95 27 ms"
+  },
+  {
+   "c": "[Windows] contrôle de l'injection : LB visé .160 en direct (lb160_web) en échec pendant >= 80 % de la panne",
+   "ok": true,
+   "v": "BRUT: 43.357 % / 238.5 s / p95 28 ms"
+  },
+  {
+   "c": "[Windows] contrôle de l'injection : LB visé .160 en direct (lb160_api) en échec pendant >= 80 % de la panne",
+   "ok": true,
+   "v": "BRUT: 41.259 % / 241.5 s / p95 28 ms"
+  },
+  {
+   "c": "[.161 sans cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.67 % / 1.0 s / p95 22 ms | BRUT: 99.67 % / 1.0 s / p95 22 ms"
+  },
+  {
+   "c": "[.161 sans cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.67 % / 1.0 s / p95 24 ms | BRUT: 99.67 % / 1.0 s / p95 24 ms"
+  },
+  {
+   "c": "[.161 sans cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 30 ms | BRUT: 100.0 % / 0.0 s / p95 30 ms"
+  },
+  {
+   "c": "[.161 avec cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 31 ms | BRUT: 100.0 % / 0.0 s / p95 31 ms"
+  },
+  {
+   "c": "[.161 avec cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 35 ms | BRUT: 100.0 % / 0.0 s / p95 35 ms"
+  },
+  {
+   "c": "[.161 avec cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 29 ms | BRUT: 100.0 % / 0.0 s / p95 29 ms"
+  },
+  {
+   "c": "canari ha01-canary-w1 : 0 échec hors gel, 0 écriture acquittée perdue",
+   "ok": true,
+   "v": "acquittées=1513 échecs hors gel=0 (bruts 0) perdues=0 trou max hors gel=0.2s (brut 0.2s)"
+  },
+  {
+   "c": "canari ha01-canary-w2 : 0 échec hors gel, 0 écriture acquittée perdue",
+   "ok": true,
+   "v": "acquittées=1511 échecs hors gel=0 (bruts 0) perdues=0 trou max hors gel=0.3s (brut 0.3s)"
+  },
+  {
+   "c": "nœuds : 0 transition NotReady",
+   "ok": true,
+   "v": "aucune"
+  },
+  {
+   "c": "etcd : au moins 4 membres sains pendant tout le test",
+   "ok": true,
+   "v": "min=4"
+  },
+  {
+   "c": "etcd : <= 2 élections pendant le test (terme Raft)",
+   "ok": true,
+   "v": "terme 1801 -> 1801, leader 8816046531553481068 -> 8816046531553481068"
+  },
+  {
+   "c": "mémoire : workers >= 300 Mo et .153 >= 500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": {
+    "153": 635,
+    "155": 932,
+    "158": 900
+   }
+  },
+  {
+   "c": "0 OOMKilled et 0 éviction pour mémoire pendant le test",
+   "ok": true,
+   "v": "OOM=0 évictions=0"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": "3156 Mo"
+  },
+  {
+   "c": "retour : LB sain, HAProxy UP et nœuds Ready en <= 300 s",
+   "ok": true,
+   "v": "32 s"
+  },
+  {
+   "c": "retour : DNS revenu à son état nominal en <= 180 s",
+   "ok": true,
+   "v": "26 s (mode enforce)"
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

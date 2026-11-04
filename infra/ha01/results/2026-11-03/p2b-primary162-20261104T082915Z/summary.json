@@ -1,0 +1,76 @@
+{
+ "primary": "162",
+ "criteria": [
+  {
+   "c": "[Windows] web >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 31 ms | BRUT: 100.0 % / 0.0 s / p95 31 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 38 ms | BRUT: 100.0 % / 0.0 s / p95 38 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 30 ms | BRUT: 100.0 % / 0.0 s / p95 30 ms"
+  },
+  {
+   "c": "[.161] web >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 21 ms | BRUT: 100.0 % / 0.0 s / p95 21 ms"
+  },
+  {
+   "c": "[.161] api_app >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 31 ms | BRUT: 100.0 % / 0.0 s / p95 31 ms"
+  },
+  {
+   "c": "[.161] kube_api >= 99,5 % et série <= 10 s pendant le changement (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 24 ms | BRUT: 100.0 % / 0.0 s / p95 24 ms"
+  },
+  {
+   "c": "contrôleur .162 : enforce, publie .162 seule, dnsmasq cohérent",
+   "ok": true,
+   "v": {
+    "mode": "enforce",
+    "publish": [
+     "192.168.148.162"
+    ],
+    "dnsmasq": {
+     "helios.orange.tn": [
+      "192.168.148.162"
+     ],
+     "api.helios.orange.tn": [
+      "192.168.148.162"
+     ]
+    }
+   }
+  },
+  {
+   "c": "contrôleur .160 : enforce, publie .162 seule, dnsmasq cohérent",
+   "ok": true,
+   "v": {
+    "mode": "enforce",
+    "publish": [
+     "192.168.148.162"
+    ],
+    "dnsmasq": {
+     "helios.orange.tn": [
+      "192.168.148.162"
+     ],
+     "api.helios.orange.tn": [
+      "192.168.148.162"
+     ]
+    }
+   }
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

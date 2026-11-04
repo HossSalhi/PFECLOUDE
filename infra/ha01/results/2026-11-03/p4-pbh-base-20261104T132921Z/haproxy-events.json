@@ -1,0 +1,29 @@
+{
+ "160": [
+  "2026-11-04T13:30:00+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_http/node-155 is DOWN, reason: Layer4 timeout, check duration: 2001ms. 1 active and 0 backup servers left. 1 sessions active, 0 requeued,",
+  "2026-11-04T13:30:00+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_https/node-155 is DOWN, reason: Layer4 timeout, check duration: 2001ms. 1 active and 0 backup servers left. 1 sessions active, 0 requeued",
+  "2026-11-04T13:30:18+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_http/node-158 is DOWN, reason: Layer7 timeout, check duration: 3002ms. 0 active and 0 backup servers left. 7 sessions active, 0 requeued,",
+  "2026-11-04T13:30:18+00:00 k8s-monitoring haproxy[61652]: [ALERT]    (61652) : backend 'ingress_http' has no server available!",
+  "2026-11-04T13:30:28+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_https/node-158 is DOWN, reason: Layer7 timeout, check duration: 3002ms. 0 active and 0 backup servers left. 6 sessions active, 0 requeued",
+  "2026-11-04T13:30:28+00:00 k8s-monitoring haproxy[61652]: [ALERT]    (61652) : backend 'ingress_https' has no server available!",
+  "2026-11-04T13:30:31+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_https/node-158 is UP, reason: Layer7 check passed, code: 200, check duration: 3ms. 1 active and 0 backup servers online. 0 sessions reque",
+  "2026-11-04T13:30:43+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_http/node-158 is UP, reason: Layer7 check passed, code: 200, check duration: 2ms. 1 active and 0 backup servers online. 0 sessions requeu",
+  "2026-11-04T13:30:43+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_http/node-155 is UP, reason: Layer7 check passed, code: 200, check duration: 2ms. 2 active and 0 backup servers online. 0 sessions requeu",
+  "2026-11-04T13:30:44+00:00 k8s-monitoring haproxy[61652]: [WARNING]  (61652) : Server ingress_https/node-155 is UP, reason: Layer7 check passed, code: 200, check duration: 3ms. 2 active and 0 backup servers online. 0 sessions reque"
+ ],
+ "162": [
+  "2026-11-04T13:30:01+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_http/node-155 is DOWN, reason: Layer4 timeout, check duration: 2001ms. 1 active and 0 backup servers left. 1 sessions active, 0 requeued, 0 ",
+  "2026-11-04T13:30:01+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-155 is DOWN, reason: Layer4 timeout, check duration: 2001ms. 1 active and 0 backup servers left. 6 sessions active, 0 requeued, 0",
+  "2026-11-04T13:30:06+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-158 is DOWN, reason: Layer7 timeout, check duration: 3001ms. 0 active and 0 backup servers left. 6 sessions active, 0 requeued, 0",
+  "2026-11-04T13:30:06+00:00 k8s-lb2 haproxy[1449312]: [ALERT]    (1449312) : backend 'ingress_https' has no server available!",
+  "2026-11-04T13:30:25+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-158 is UP, reason: Layer7 check passed, code: 200, check duration: 2ms. 1 active and 0 backup servers online. 0 sessions requeued",
+  "2026-11-04T13:30:28+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_http/node-158 is DOWN, reason: Layer7 timeout, check duration: 3002ms. 0 active and 0 backup servers left. 10 sessions active, 0 requeued, 0",
+  "2026-11-04T13:30:28+00:00 k8s-lb2 haproxy[1449312]: [ALERT]    (1449312) : backend 'ingress_http' has no server available!",
+  "2026-11-04T13:30:36+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-158 is DOWN, reason: Layer7 timeout, check duration: 3002ms. 0 active and 0 backup servers left. 5 sessions active, 0 requeued, 0",
+  "2026-11-04T13:30:36+00:00 k8s-lb2 haproxy[1449312]: [ALERT]    (1449312) : backend 'ingress_https' has no server available!",
+  "2026-11-04T13:30:39+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-158 is UP, reason: Layer7 check passed, code: 200, check duration: 1ms. 1 active and 0 backup servers online. 0 sessions requeued",
+  "2026-11-04T13:30:43+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_http/node-158 is UP, reason: Layer7 check passed, code: 200, check duration: 3ms. 1 active and 0 backup servers online. 0 sessions requeued,",
+  "2026-11-04T13:30:44+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_http/node-155 is UP, reason: Layer7 check passed, code: 200, check duration: 2ms. 2 active and 0 backup servers online. 0 sessions requeued,",
+  "2026-11-04T13:30:44+00:00 k8s-lb2 haproxy[1449312]: [WARNING]  (1449312) : Server ingress_https/node-155 is UP, reason: Layer7 check passed, code: 200, check duration: 2ms. 2 active and 0 backup servers online. 0 sessions requeued"
+ ]
+}

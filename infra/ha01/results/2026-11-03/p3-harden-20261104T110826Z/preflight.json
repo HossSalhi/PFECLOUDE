@@ -1,0 +1,52 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "Traefik : 2 pods Ready, un par worker, Service en Cluster (état avant)",
+  "ok": true,
+  "detail": {
+   "pods": [
+    "k8s-worker1",
+    "k8s-worker2"
+   ],
+   "policy": "Cluster"
+  }
+ },
+ {
+  "check": "LB .160 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "LB .162 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/2s"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo",
+  "ok": true,
+  "detail": 2570
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

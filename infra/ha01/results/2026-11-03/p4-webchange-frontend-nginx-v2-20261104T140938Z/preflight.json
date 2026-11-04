@@ -1,0 +1,81 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/7s"
+ },
+ {
+  "check": "RAM hôte >= 1500 Mo",
+  "ok": true,
+  "detail": 2308
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 1234
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 678
+ },
+ {
+  "check": "LB .160 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "LB .162 sert en direct, serveurs UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": ".160 : aucune règle d'injection ha01-pbh",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "check": ".162 : aucune règle d'injection ha01-pbh",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "check": ".158 : aucune règle d'injection ha01-pbh",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ },
+ {
+  "check": "frontend : 2 pods Ready",
+  "ok": true,
+  "detail": "frontend-5797f4cdc8-dhlg4   1/1   Running   0     5m43s | frontend-5797f4cdc8-hmjp2   1/1   Running   0     5m56s"
+ },
+ {
+  "check": "backend : 2 pods Ready",
+  "ok": true,
+  "detail": "backend-75b8d9569b-5f6gt   1/1   Running   0     6h29m | backend-75b8d9569b-lrwwm   1/1   Running   0     92m"
+ },
+ {
+  "check": "frontend utilise le ConfigMap de base attendu (frontend-nginx-conf-ha01)",
+  "ok": true,
+  "detail": "frontend-nginx-conf-ha01"
+ }
+]

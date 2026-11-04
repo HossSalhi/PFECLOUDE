@@ -1,0 +1,71 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/7s"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo",
+  "ok": true,
+  "detail": 2302
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 939
+ },
+ {
+  "check": "image traefik préchargée sur .155",
+  "ok": true,
+  "detail": "1"
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 699
+ },
+ {
+  "check": "image traefik préchargée sur .158",
+  "ok": true,
+  "detail": "1"
+ },
+ {
+  "check": "namespace traefik absent (premier déploiement)",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "check": "NodePorts 32080 et 32443 libres",
+  "ok": true,
+  "detail": "32080/32443 absents"
+ },
+ {
+  "check": "Ingress pfe/helios-ingress présent",
+  "ok": true,
+  "detail": "helios-ingress:nginx"
+ },
+ {
+  "check": "ingress-nginx : 2 pods Ready (inchangés)",
+  "ok": true,
+  "detail": "ingress-nginx-controller-84977f46dc-9sk9q   1/1   Running   0     41h | ingress-nginx-controller-84977f46dc-n527v   1/1   Running   0     43"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

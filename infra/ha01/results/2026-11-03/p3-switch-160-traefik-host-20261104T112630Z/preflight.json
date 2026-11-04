@@ -1,0 +1,105 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/1s"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo",
+  "ok": true,
+  "detail": 3548
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 1243
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 707
+ },
+ {
+  "check": "LB .160 sert web + API en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .160 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "LB .162 sert web + API en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .162 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "config de .160 utilise les ports de traefik (2 http, 2 https, 1 check)",
+  "ok": true,
+  "detail": {
+   "http": 2,
+   "https": 2,
+   "check": 1
+  }
+ },
+ {
+  "check": "config actuelle valide, /usr/sbin/haproxy présent, aucune minuterie ha01-* résiduelle",
+  "ok": true,
+  "detail": "Configuration file is valid | haproxy-bin-ok | 0"
+ },
+ {
+  "check": "Traefik : 2 pods Ready",
+  "ok": true,
+  "detail": "traefik-588c59bdcb-4ff9m   1/1   Running   0     6m57s | traefik-588c59bdcb-xt8hs   1/1   Running   0     7m4s"
+ },
+ {
+  "check": "ingress-nginx : 2 pods Ready (retour arrière possible)",
+  "ok": true,
+  "detail": "ingress-nginx-controller-84977f46dc-7x9cd   1/1   Running   0     68m | ingress-nginx-controller-84977f46dc-zz5j8   1/1 "
+ },
+ {
+  "check": "recette du shadow PASS de moins de 24 h",
+  "ok": true,
+  "detail": "p3-accept-20261104T112257Z.md (0.0 h)"
+ },
+ {
+  "check": "Traefik en hostNetwork",
+  "ok": true,
+  "detail": "true"
+ },
+ {
+  "check": "Traefik répond DIRECTEMENT sur .155:8000 et :8443",
+  "ok": true,
+  "detail": "http=200 https=200"
+ },
+ {
+  "check": "Traefik répond DIRECTEMENT sur .158:8000 et :8443",
+  "ok": true,
+  "detail": "http=200 https=200"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

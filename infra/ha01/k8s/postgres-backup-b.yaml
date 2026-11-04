@@ -1,0 +1,83 @@
+# HA-01 — 2e sauvegarde logique INDÉPENDANTE de .158 : CronJob + PVC local-path sur k8s-worker2 (.155).
+# Le CronJob d'origine (infra/postgres-backup.yaml, PVC sur .158) est CONSERVÉ tel quel, sans aucune modification
+# ni suppression de ses fichiers. Ici : dump écrit sous un nom .partial, validé (gzip -t + taille minimale) puis
+# renommé — un dump raté ne devient jamais un « bon » fichier et ne consomme pas de place de rétention.
+# Rétention propre à CE PVC : 7 dumps valides.  Restauration : cf. infra/ha01/ops/test_restore.sh
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups-b
+  namespace: pfe
+  labels: {ha01/role: backup-b}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup-b
+  namespace: pfe
+  labels: {ha01/role: backup-b}
+spec:
+  schedule: "30 2 * * *"            # 02:30 UTC (le CronJob A tourne à 02:00)
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 7200     # si le contrôleur était indisponible à 02:30, rattrapage dans les 2 h
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: postgres-backup-b
+            helios.io/monitor: "false"
+        spec:
+          restartPolicy: Never
+          nodeSelector:
+            kubernetes.io/hostname: k8s-worker2
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 26
+            fsGroup: 26
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+          - name: dump
+            image: ghcr.io/cloudnative-pg/postgresql:16
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/bash", "-c"]
+            args:
+            - |
+              set -euo pipefail
+              TS=$(date +%Y%m%d-%H%M%S)
+              F=/backups/pfe_db-$TS.sql.gz
+              T=$F.partial
+              trap 'rm -f "$T"' ERR
+              echo "[backup-b] demarrage $TS"
+              pg_dump -h postgres-rw.pfe.svc.cluster.local -U "$PGUSER" -d pfe_db --no-owner --no-privileges | gzip > "$T"
+              gzip -t "$T"
+              [ "$(stat -c %s "$T")" -gt 10240 ] || { echo "[backup-b] dump anormalement petit"; exit 1; }
+              mv "$T" "$F"
+              echo "[backup-b] OK: $(du -h "$F" | cut -f1)"
+              ls -1t /backups/pfe_db-*.sql.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
+              echo "[backup-b] fichiers:"; ls -lh /backups/pfe_db-*.sql.gz
+            env:
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: postgres-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-app, key: password}}
+            resources:
+              requests: {cpu: 50m, memory: 64Mi}
+              limits: {cpu: 250m, memory: 256Mi}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+            volumeMounts:
+            - {name: backups, mountPath: /backups}
+          volumes:
+          - name: backups
+            persistentVolumeClaim: {claimName: postgres-backups-b}

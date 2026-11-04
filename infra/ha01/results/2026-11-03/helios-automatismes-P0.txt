@@ -1,0 +1,42 @@
+# Inventaire des automatismes HELIOS pouvant interférer avec les tests (D7) — 2026-11-03T14:50:21Z
+
+## Hôte Windows : agents capables de rallumer une VM
+port 9999 : REPOND (test TCP réel ; processus pythonw pid 16176 = helios-vmpower-agent.py, démarré le 2 nov. 09:19) — NB : Get-NetTCPConnection ne le liste pas, ne pas s'y fier
+port 9099 : ne répond pas (watchdog HTTP absent)
+(agent 9999 = C:\Users\houss\helios-vmpower-agent.py : POST /restart/k8s-worker1|k8s-worker2 -> vmrun start ; appelé par le backend REMEDIATION_WATCHDOG_BASE_URL)
+(9099 = watchdog HTTP : appelé par le Bridge pour VM_DOWN/RESTART_NODE_VM ; non démarré => l'action échoue sans effet)
+
+## Bridge .161 (cycle de détection toutes les 5 min)
+{"statut": "ok", "noeuds": ["iacamunda", "lb2", "master", "monitoring", "worker1", "worker2"], "noeudKubectl": "master"}
+2026-11-03T14:14:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:14:32 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:19:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:19:32 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:24:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:24:32 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:29:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:29:33 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:34:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:34:33 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:39:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:39:33 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:44:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:44:32 DETECT NO_INCIDENT aucun aucun |
+2026-11-03T14:49:32 EXEC monitoring 192.168.148.160 | python3 /opt/helios/detecter.py
+2026-11-03T14:49:32 DETECT NO_INCIDENT aucun aucun |
+
+## Règles du Bridge susceptibles d agir pendant les tests (camunda-direct/bridge/bridge.py ACTION_PAR_TYPE_MESURE)
+NODE_CORDONED -> UNCORDON_NODE (auto) | NODE_NOT_READY -> HOST_RESTART_KUBELET (auto, SSH) | VM_DOWN/VM_POWERED_OFF -> RESTART_NODE_VM (watchdog :9099)
+etcd (ETCD_NO_LEADER/ETCD_SLOW_FSYNC/ETCD_LEADER_FLAPPING), NODE_NETWORK_*, NODE_CPU_STEAL, NODE_DISK_SLOW, NODE_OOM_KILL -> ESCALADE (aucune action automatique)
+
+## Backend (ConfigMap backend-config)
+  REMEDIATION_ALLOWED_ACTIONS                  HOST_SERVICE_CPU_QUOTA
+  REMEDIATION_ALLOWLISTED_NAMESPACES           k8s-nodes
+  REMEDIATION_AUTOMATION_ENABLED               true
+  REMEDIATION_COOLDOWN_MINUTES                 2
+  REMEDIATION_MASTER_WATCHDOG_URL              http://192.168.148.1:9099
+  REMEDIATION_WATCHDOG_BASE_URL                http://192.168.148.1:9999
+
+## Décision D7 (appliquée par défaut sous l'autorisation du 3 nov. 2026)
+- Phase 2a (répétitions) : taint NoExecute personnalisé (pas de cordon) => NODE_CORDONED non déclenché ; HELIOS laissé actif et ses réactions journalisées.
+- Phase 4 (arrêts de VM) : agent hôte :9999 suspendu pendant chaque test (ops/helios-pause.ps1 pause), rétabli ensuite (resume) ; Bridge/Camunda/backend laissés actifs, journal du Bridge archivé.

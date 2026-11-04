@@ -1,0 +1,11 @@
+[Unit]
+Description=HELIOS HA-01 - sauvegarde hors cluster quotidienne (03:00 UTC)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+Unit=helios-offsite-backup.service
+
+[Install]
+WantedBy=timers.target

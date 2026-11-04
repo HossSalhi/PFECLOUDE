@@ -1,0 +1,56 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "1s/6s"
+ },
+ {
+  "check": "contrôleur DNS de .160 en mode shadow, les 2 LB UP",
+  "ok": true,
+  "detail": {
+   "mode": "shadow",
+   "publish": [
+    "192.168.148.160"
+   ]
+  }
+ },
+ {
+  "check": "bash de Git for Windows disponible",
+  "ok": true,
+  "detail": "C:\\Program Files\\Git\\bin\\bash.exe"
+ },
+ {
+  "check": "dnsmasq .160 répond",
+  "ok": true,
+  "detail": {
+   "helios.orange.tn": [
+    [
+     "192.168.148.160",
+     "192.168.148.162"
+    ],
+    30
+   ],
+   "api.helios.orange.tn": [
+    [
+     "192.168.148.160",
+     "192.168.148.162"
+    ],
+    30
+   ]
+  }
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

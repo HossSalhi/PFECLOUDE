@@ -1,0 +1,152 @@
+[
+ {
+  "check": "3 nœuds Ready",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "etcd 5/5 sain",
+  "ok": true,
+  "detail": 5
+ },
+ {
+  "check": "CNPG sain 2/2",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "aucun pod non sain",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "canari ha01-canary-w1 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.2
+ },
+ {
+  "check": "canari ha01-canary-w2 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.2
+ },
+ {
+  "check": "harnais actif (sondes Windows < 15 s, échantillonneur < 60 s)",
+  "ok": true,
+  "detail": "sondes 0s échantillonneur 1s"
+ },
+ {
+  "check": "sonde .161 (ha01-probe-161) active",
+  "ok": true,
+  "detail": "active"
+ },
+ {
+  "check": "RAM hôte disponible >= 2000 Mo",
+  "ok": true,
+  "detail": "3885 Mo"
+ },
+ {
+  "check": ".153 MemAvailable >= 500 Mo",
+  "ok": true,
+  "detail": 692
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 965
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 948
+ },
+ {
+  "check": "LB .160 sert le web et l'API Kubernetes en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .160 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "contrôleur DNS de .160 : les 2 LB UP",
+  "ok": true,
+  "detail": {
+   "mode": "enforce",
+   "publish": [
+    "192.168.148.162"
+   ],
+   "lbs": {
+    "162": "UP",
+    "160": "UP"
+   }
+  }
+ },
+ {
+  "check": "LB .162 sert le web et l'API Kubernetes en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .162 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "contrôleur DNS de .162 : les 2 LB UP",
+  "ok": true,
+  "detail": {
+   "mode": "enforce",
+   "publish": [
+    "192.168.148.162"
+   ],
+   "lbs": {
+    "162": "UP",
+    "160": "UP"
+   }
+  }
+ },
+ {
+  "check": "mode DNS identique sur les 2 LB (shadow = DNS statique, enforce = gating)",
+  "ok": true,
+  "detail": {
+   "160": "enforce",
+   "162": "enforce"
+  }
+ },
+ {
+  "check": "aucune minuterie ha01-* résiduelle sur .160",
+  "ok": true,
+  "detail": "0"
+ },
+ {
+  "check": "chaîne INPUT de .160 vide (policy ACCEPT, aucune règle)",
+  "ok": true,
+  "detail": "-P INPUT ACCEPT"
+ },
+ {
+  "check": "IP du poste vue par .160 (exception SSH)",
+  "ok": true,
+  "detail": "192.168.148.1"
+ },
+ {
+  "check": "script de rétablissement installé et inoffensif à vide sur .160",
+  "ok": false,
+  "detail": "/usr/local/sbin/ha01-unisolate.sh"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ },
+ {
+  "check": "cycle de détection du Bridge HELIOS lisible (alignement)",
+  "ok": true,
+  "detail": 4
+ }
+]

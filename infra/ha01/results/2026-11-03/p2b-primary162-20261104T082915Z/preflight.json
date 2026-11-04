@@ -1,0 +1,51 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "0s/4s"
+ },
+ {
+  "check": "LB .162 sain (direct + serveurs UP)",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "contrôleur DNS .162 : enforce, les 2 LB UP, publie l'IP de .160 seule",
+  "ok": true,
+  "detail": {
+   "mode": "enforce",
+   "publish": [
+    "192.168.148.160"
+   ]
+  }
+ },
+ {
+  "check": "LB .160 sain (direct + serveurs UP)",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "contrôleur DNS .160 : enforce, les 2 LB UP, publie l'IP de .160 seule",
+  "ok": true,
+  "detail": {
+   "mode": "enforce",
+   "publish": [
+    "192.168.148.160"
+   ]
+  }
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]

@@ -1,0 +1,60 @@
+# HA-01 — canari d'écriture PostgreSQL (mesure de la continuité d'écriture et du RPO).
+# Écrit 5 lignes/s dans la base dédiée `ha01` (table canary) via le Service postgres-rw ; journalise
+# "<epoch.µs> <id>" pour chaque écriture acquittée, ou le message d'erreur. Épinglé sur k8s-master
+# (.153) : survivant commun des 3 scénarios, donc le canari lui-même ne tombe jamais.
+# Analyse : infra/ha01/probes/ha01_canary_report.py. Retrait : kubectl -n pfe delete deploy ha01-canary ;
+#           DROP DATABASE ha01 (en dernier recours, après la clôture de HA-01).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha01-canary
+  namespace: pfe
+  labels: {app: ha01-canary, helios.io/monitor: "false", ha01/role: canary}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ha01-canary}
+  template:
+    metadata:
+      labels: {app: ha01-canary, helios.io/monitor: "false", ha01/role: canary}
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k8s-master
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+        - {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 300}
+        - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 300}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 26
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: canary
+          image: ghcr.io/cloudnative-pg/postgresql:16
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              H=postgres-rw.pfe.svc.cluster.local
+              CS="host=$H port=5432 dbname=ha01 user=$PGUSER connect_timeout=3 keepalives=1 keepalives_idle=2 keepalives_interval=1 keepalives_count=3 tcp_user_timeout=4000 application_name=ha01-canary"
+              while true; do
+                { while true; do echo "INSERT INTO canary(src) VALUES ('c') RETURNING id;"; sleep 0.2; done; } \
+                  | psql "$CS" -At -q -w -v ON_ERROR_STOP=0 2>&1 \
+                  | while IFS= read -r l; do echo "${EPOCHREALTIME} $l"; done
+                echo "${EPOCHREALTIME} SESSION_END"
+                sleep 0.5
+              done
+          env:
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: postgres-app, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-app, key: password}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}   # LimitRange pfe-limits : minimum 32Mi par conteneur
+            limits: {cpu: 100m, memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

@@ -1,0 +1,162 @@
+{
+ "vm": "160",
+ "label": "stop160",
+ "t_stop": 1793784820.821433,
+ "t_vm_start": 1793785427.3188806,
+ "observe_s": 600,
+ "abort": null,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant le test (informatif ; mesures concernées classées hors gel, E6)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "la VM .160 est bien arrêtée pendant la mesure (contrôle de l'injection)",
+   "ok": true,
+   "v": "vmrun rc=0  ; VM absente de `vmrun list`: True"
+  },
+  {
+   "c": "[Windows] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 3078 ms | BRUT: 100.0 % / 0.0 s / p95 3078 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 3082 ms | BRUT: 100.0 % / 0.0 s / p95 3082 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 38 ms | BRUT: 100.0 % / 0.0 s / p95 38 ms"
+  },
+  {
+   "c": "[Windows] LB survivant .162 en direct (lb162_web) >= 99,5 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 73 ms | BRUT: 100.0 % / 0.0 s / p95 73 ms"
+  },
+  {
+   "c": "[Windows] LB survivant .162 en direct (lb162_api) >= 99,5 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 29 ms | BRUT: 100.0 % / 0.0 s / p95 29 ms"
+  },
+  {
+   "c": "[.161 sans cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 64 ms | BRUT: 100.0 % / 0.0 s / p95 64 ms"
+  },
+  {
+   "c": "[.161 sans cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 58 ms | BRUT: 100.0 % / 0.0 s / p95 58 ms"
+  },
+  {
+   "c": "[.161 sans cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 26 ms | BRUT: 100.0 % / 0.0 s / p95 26 ms"
+  },
+  {
+   "c": "[.161 avec cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 60 ms | BRUT: 100.0 % / 0.0 s / p95 60 ms"
+  },
+  {
+   "c": "[.161 avec cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.832 % / 1.0 s / p95 64 ms | BRUT: 99.832 % / 1.0 s / p95 64 ms"
+  },
+  {
+   "c": "[.161 avec cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 99.832 % / 1.0 s / p95 17 ms | BRUT: 99.832 % / 1.0 s / p95 17 ms"
+  },
+  {
+   "c": "canari ha01-canary-w1 : 0 écriture acquittée perdue",
+   "ok": true,
+   "v": "perdues=0 acquittées=3276"
+  },
+  {
+   "c": "canari ha01-canary-w1 (survivant) : 0 échec hors gel",
+   "ok": true,
+   "v": "échecs hors gel=0 (bruts 0) trou max hors gel=0.3s"
+  },
+  {
+   "c": "canari ha01-canary-w2 : 0 écriture acquittée perdue",
+   "ok": true,
+   "v": "perdues=0 acquittées=3263"
+  },
+  {
+   "c": "canari ha01-canary-w2 (survivant) : 0 échec hors gel",
+   "ok": true,
+   "v": "échecs hors gel=0 (bruts 0) trou max hors gel=0.3s"
+  },
+  {
+   "c": "nœuds : .153 et le survivant sans aucune transition NotReady",
+   "ok": true,
+   "v": "aucune"
+  },
+  {
+   "c": "etcd : 4/4 membres sains en <= 10 s après l'arrêt",
+   "ok": true,
+   "v": "2 s"
+  },
+  {
+   "c": "etcd : <= 2 élections pendant le test (terme Raft)",
+   "ok": true,
+   "v": "terme 1801 -> 1801, leader 8816046531553481068 -> 8816046531553481068"
+  },
+  {
+   "c": "mémoire : survivants >= 300 Mo et .153 >= 500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": {
+    "153": 640,
+    "155": 1036,
+    "158": 726
+   }
+  },
+  {
+   "c": "0 OOMKilled et 0 éviction pour mémoire pendant le test",
+   "ok": true,
+   "v": "OOM=0 évictions=0"
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": "4937 Mo"
+  },
+  {
+   "c": "placement : pods Pending documentés (anti-affinité = conséquence attendue, pas une panne)",
+   "ok": true,
+   "v": {
+    "T+90s": [],
+    "T+300s": []
+   }
+  },
+  {
+   "c": "retour : SSH, etcd 5/5 et HAProxy UP en <= 300 s après la relance",
+   "ok": true,
+   "v": "ssh=55 etcd5=65 lb=65"
+  },
+  {
+   "c": "retour : DNS nominal (les 2 LB UP, publication nominale) <= 180 s après la relance",
+   "ok": true,
+   "v": "55 s"
+  },
+  {
+   "c": "retour : aucun pod non sain (Pending résorbés)",
+   "ok": true,
+   "v": "38 s"
+  },
+  {
+   "c": "stabilisation 1800 s : nœuds Ready, etcd 5/5, aucun pod non sain, sondes par nom OK",
+   "ok": true,
+   "v": "aucune anomalie"
+  },
+  {
+   "c": "pas d'abandon",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

@@ -1,0 +1,49 @@
+cnpg-system          cnpg-controller-manager-6cc9d8689f-8xnmn    1/1   Running       2 (86s ago)      13h     172.16.235.228    k8s-master    <none>   <none>
+falco                falco-falcosidekick-6c4965d6d4-t29kn        1/1   Running       0                3h19m   172.16.194.69     k8s-worker1   <none>   <none>
+falco                falco-nks4x                                 2/2   Running       2 (130m ago)     3h9m    172.16.126.40     k8s-worker2   <none>   <none>
+falco                falco-rd6vx                                 2/2   Running       0                4h48m   172.16.194.114    k8s-worker1   <none>   <none>
+falco                falco-wnhwl                                 2/2   Running       109 (24h ago)    123d    172.16.235.251    k8s-master    <none>   <none>
+ingress-nginx        ingress-nginx-controller-84977f46dc-7x9cd   1/1   Terminating   0                139m    172.16.126.60     k8s-worker2   <none>   <none>
+ingress-nginx        ingress-nginx-controller-84977f46dc-8cjxl   0/1   Pending       0                77s     <none>            <none>        <none>   <none>
+ingress-nginx        ingress-nginx-controller-84977f46dc-zz5j8   1/1   Running       0                4h58m   172.16.194.98     k8s-worker1   <none>   <none>
+kube-system          calico-kube-controllers-69fb88c699-ww994    1/1   Running       1 (126m ago)     4h58m   172.16.235.231    k8s-master    <none>   <none>
+kube-system          calico-node-96lhn                           1/1   Running       13 (25h ago)     44h     192.168.148.153   k8s-master    <none>   <none>
+kube-system          calico-node-trkbv                           1/1   Running       1 (130m ago)     44h     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          calico-node-zwbv9                           1/1   Running       0                44h     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          coredns-685fb54cd8-k5q2t                    1/1   Running       0                5h13m   172.16.235.202    k8s-master    <none>   <none>
+kube-system          coredns-685fb54cd8-zkkf5                    1/1   Running       0                3h19m   172.16.194.77     k8s-worker1   <none>   <none>
+kube-system          etcd-k8s-master                             1/1   Running       52 (26h ago)     42d     192.168.148.153   k8s-master    <none>   <none>
+kube-system          etcd-k8s-worker1                            1/1   Running       66 (2d1h ago)    42d     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          etcd-k8s-worker2                            1/1   Running       47 (130m ago)    42d     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          kube-apiserver-k8s-master                   1/1   Running       212 (126m ago)   98d     192.168.148.153   k8s-master    <none>   <none>
+kube-system          kube-apiserver-k8s-worker1                  1/1   Running       258 (2d1h ago)   98d     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          kube-apiserver-k8s-worker2                  1/1   Running       211 (130m ago)   98d     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          kube-controller-manager-k8s-master          1/1   Running       80 (44h ago)     95d     192.168.148.153   k8s-master    <none>   <none>
+kube-system          kube-controller-manager-k8s-worker1         1/1   Running       126 (2d1h ago)   95d     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          kube-controller-manager-k8s-worker2         1/1   Running       135 (130m ago)   95d     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          kube-proxy-45dw2                            1/1   Running       1 (130m ago)     46h     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          kube-proxy-cslk8                            1/1   Running       0                46h     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          kube-proxy-vws8v                            1/1   Running       69 (44h ago)     150d    192.168.148.153   k8s-master    <none>   <none>
+kube-system          kube-scheduler-k8s-master                   1/1   Running       73 (44h ago)     95d     192.168.148.153   k8s-master    <none>   <none>
+kube-system          kube-scheduler-k8s-worker1                  1/1   Running       119 (2d1h ago)   95d     192.168.148.158   k8s-worker1   <none>   <none>
+kube-system          kube-scheduler-k8s-worker2                  1/1   Running       139 (130m ago)   95d     192.168.148.155   k8s-worker2   <none>   <none>
+kube-system          metrics-server-696f6dff9c-gtxn7             1/1   Running       0                135m    172.16.126.54     k8s-worker2   <none>   <none>
+local-path-storage   local-path-provisioner-764fd965ff-tk95s     1/1   Running       0                3h19m   172.16.194.121    k8s-worker1   <none>   <none>
+metallb-system       controller-77676c78d9-m6dpw                 1/1   Running       0                3h19m   172.16.194.91     k8s-worker1   <none>   <none>
+metallb-system       speaker-9lxj7                               1/1   Running       0                4h48m   192.168.148.158   k8s-worker1   <none>   <none>
+metallb-system       speaker-stdmk                               1/1   Running       2 (129m ago)     3h9m    192.168.148.155   k8s-worker2   <none>   <none>
+metallb-system       speaker-xt99q                               1/1   Running       135 (125m ago)   95d     192.168.148.153   k8s-master    <none>   <none>
+pfe                  backend-75b8d9569b-42lkr                    1/1   Terminating   0                139m    172.16.126.45     k8s-worker2   <none>   <none>
+pfe                  backend-75b8d9569b-5f6gt                    1/1   Running       0                4h58m   172.16.194.68     k8s-worker1   <none>   <none>
+pfe                  backend-75b8d9569b-lrwwm                    0/1   Pending       0                77s     <none>            <none>        <none>   <none>
+pfe                  frontend-56b6646659-7phdd                   1/1   Running       0                4h58m   172.16.194.93     k8s-worker1   <none>   <none>
+pfe                  frontend-56b6646659-cpfc5                   0/1   Pending       0                77s     <none>            <none>        <none>   <none>
+pfe                  frontend-56b6646659-dpjnh                   1/1   Terminating   0                139m    172.16.126.6      k8s-worker2   <none>   <none>
+pfe                  ha01-canary-7458d4dc8d-ptlq9                1/1   Running       0                22h     172.16.235.212    k8s-master    <none>   <none>
+pfe                  ha01-canary-w1-d7d7b4867-mcbw9              1/1   Running       0                4h58m   172.16.194.118    k8s-worker1   <none>   <none>
+pfe                  ha01-canary-w2-59df8bdcd8-4l66z             1/1   Running       0                135m    172.16.126.50     k8s-worker2   <none>   <none>
+pfe                  postgres-5                                  1/1   Running       1 (11m ago)      12m     172.16.126.4      k8s-worker2   <none>   <none>
+pfe                  postgres-7                                  1/1   Running       0                11m     172.16.194.70     k8s-worker1   <none>   <none>
+traefik              traefik-588c59bdcb-4ff9m                    1/1   Running       0                78m     192.168.148.158   k8s-worker1   <none>   <none>
+traefik              traefik-588c59bdcb-8tqp6                    0/1   Pending       0                77s     <none>            <none>        <none>   <none>
+traefik              traefik-588c59bdcb-xt8hs                    1/1   Terminating   0                78m     192.168.148.155   k8s-worker2   <none>   <none>

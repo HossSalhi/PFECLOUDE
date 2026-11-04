@@ -1,0 +1,205 @@
+# HA-01 Phase 3 — Traefik (contrôleur maintenu) en SHADOW, à côté d'ingress-nginx (retiré par l'amont en mars 2026).
+#   - lit l'Ingress EXISTANT `pfe/helios-ingress` (IngressClass nginx) via le provider « Ingress NGINX » de Traefik
+#     (annotations proxy-buffering / proxy-read-timeout / proxy-send-timeout / ssl-redirect prises en charge) : AUCUNE modification de l'Ingress ;
+#   - NodePorts 32080 (http) / 32443 (https) : HAProxy continue d'utiliser 31756/31411 (ingress-nginx) tant que GATE-3 n'est pas franchi ;
+#   - 2 réplicas, un par worker (.155 / .158), jamais sur .153 ; PDB minAvailable 1 ;
+#   - moindre privilège : Role limité au namespace `pfe` (watchnamespace) + ClusterRole minimal pour les IngressClass ;
+#   - ne publie PAS de status sur l'Ingress (pas d'écriture pendant la cohabitation avec ingress-nginx).
+# Image épinglée et préchargée sur les 2 workers : docker.io/library/traefik:v3.7.17 (provider Ingress NGINX >= v3.6.2).
+# Retour arrière : kubectl delete ns traefik ; kubectl delete clusterrole,clusterrolebinding ha01-traefik-ingressclass ;
+#                  kubectl -n pfe delete role,rolebinding ha01-traefik-reader
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: traefik
+  labels:
+    ha01/role: ingress-candidate
+    # privileged : hostNetwork est interdit par les niveaux baseline/restricted (écart E13). Limité à ce namespace (un seul Deployment, 2 pods).
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik
+  namespace: traefik
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ha01-traefik-ingressclass
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ha01-traefik-ingressclass
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ha01-traefik-ingressclass}
+subjects:
+  - {kind: ServiceAccount, name: traefik, namespace: traefik}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ha01-traefik-reader
+  namespace: pfe
+rules:
+  - apiGroups: [""]
+    resources: ["services", "secrets", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ha01-traefik-reader
+  namespace: pfe
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ha01-traefik-reader}
+subjects:
+  - {kind: ServiceAccount, name: traefik, namespace: traefik}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traefik-dynamic
+  namespace: traefik
+data:
+  dynamic.yml: |
+    # Écart E13 : à la perte BRUTALE d'une VM, ses pods restent dans les endpoints ~45 s (délai de NotReady). Sans nouvelle tentative, Traefik
+    # envoie une requête sur deux vers le pod mort (dial TCP 30 s par défaut). Avec dialTimeout=1s (option statique) + ce middleware attaché aux
+    # entrypoints, la requête échoue vite sur le pod mort et est rejouée sur le pod vivant (uniquement en cas d'échec de connexion : jamais après envoi).
+    http:
+      middlewares:
+        ha01-retry:
+          retry:
+            attempts: 3
+            initialInterval: 100ms
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: traefik
+  labels: {app: traefik}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
+  selector:
+    matchLabels: {app: traefik}
+  template:
+    metadata:
+      labels: {app: traefik}
+    spec:
+      serviceAccountName: traefik
+      # hostNetwork (écart E13) : Traefik écoute directement sur l'IP du nœud (8000 http, 8443 https). HAProxy le joint SANS NodePort ni kube-proxy :
+      # à la perte brutale d'une VM, le contrôle de santé du nœud survivant ne traverse plus un DNAT vers le pod de la VM morte (cause des 44 s de coupure).
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: kubernetes.io/hostname, operator: In, values: [k8s-worker1, k8s-worker2]}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: {matchLabels: {app: traefik}}
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+        - {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 30}
+        - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 30}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: traefik
+          image: docker.io/library/traefik:v3.7.17
+          imagePullPolicy: IfNotPresent
+          args:
+            - --global.checknewversion=false
+            - --global.sendanonymoususage=false
+            - --log.level=INFO
+            - --entrypoints.web.address=:8000/tcp
+            - --entrypoints.websecure.address=:8443/tcp
+            - --entrypoints.websecure.http.tls=true
+            - --entrypoints.ping.address=:8082/tcp
+            - --ping=true
+            - --ping.entrypoint=ping
+            - --providers.kubernetesingressnginx=true
+            - --providers.kubernetesingressnginx.watchnamespace=pfe
+            - --providers.kubernetesingressnginx.ingressclass=nginx
+            - --providers.kubernetesingressnginx.httpentrypoint=web
+            - --providers.kubernetesingressnginx.httpsentrypoint=websecure
+            - --providers.file.filename=/etc/traefik-dynamic/dynamic.yml
+            - --providers.file.watch=false
+            - --entrypoints.web.http.middlewares=ha01-retry@file
+            - --entrypoints.websecure.http.middlewares=ha01-retry@file
+            - --serversTransport.forwardingTimeouts.dialTimeout=1s      # SANS EFFET sur les services du fournisseur Ingress NGINX (mesuré le 4 nov., écart E16) ; conservé tel que déployé
+            # E16 : ce sont les options DU FOURNISSEUR qui fixent les délais de ses services (défauts : connexion 60 s, 3 tentatives)
+            - --providers.kubernetesingressnginx.proxyconnecttimeout=1
+            - --providers.kubernetesingressnginx.proxynextupstreamtries=4
+          ports:
+            - {name: web, containerPort: 8000}
+            - {name: websecure, containerPort: 8443}
+            - {name: ping, containerPort: 8082}
+          readinessProbe:
+            httpGet: {path: /ping, port: ping}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /ping, port: ping}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 300m, memory: 192Mi}
+          volumeMounts:
+            - {name: dynamic, mountPath: /etc/traefik-dynamic, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: dynamic
+          configMap: {name: traefik-dynamic}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: traefik
+  labels: {app: traefik}
+spec:
+  type: NodePort
+  # Cluster : `Local` a été ESSAYÉ le 4 nov. (2 essais, retour arrière automatique à chaque fois) : les contrôles de santé de HAProxy sur les NodePorts
+  # restaient instables (serveurs DOWN/UP, >150 s). Le chemin HAProxy -> Traefik n'utilise plus ce Service : Traefik écoute en hostNetwork (écart E13).
+  externalTrafficPolicy: Cluster
+  selector: {app: traefik}
+  ports:
+    - {name: web, port: 80, targetPort: web, nodePort: 32080}
+    - {name: websecure, port: 443, targetPort: websecure, nodePort: 32443}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: traefik}

@@ -1,0 +1,7 @@
+VM: 160
+VM-nom: k8s-monitoring (192.168.148.160)
+Confirmé le: 2026-11-04T09:32:35Z
+Action confirmée: extinction BRUTALE (vmrun stop hard) de la VM .160, mesure de 10 min, relance puis stabilisation de 30 min.
+Conséquences annoncées à l'utilisateur avant sa réponse: supervision (Prometheus, Grafana, Loki, alertes) et détecteur HELIOS indisponibles ~10 min ; un membre etcd en moins (4/5, quorum conservé) ; HAProxy et DNS de .160 perdus mais le trafic passe par .162 (web, API, base, API Kubernetes doivent rester disponibles) ; relance automatique ; filet Windows indépendant ; agent hôte HELIOS suspendu pendant l'arrêt.
+Réponse de l'utilisateur (verbatim): "OUI, éteindre .160"
+(Une première réponse « faire le mieux » à une question plus longue n'a PAS été prise pour une confirmation.)

@@ -1,0 +1,6 @@
+{"t": 11, "cnpg": "Upgrading cluster|postgres-7|2", "pods": {"postgres-7": [3, "k8s-worker1", "primary"]}}
+{"t": 22, "cnpg": "Waiting for the instances to become active|postgres-7|1", "pods": {"postgres-5": [9, "k8s-worker2", "replica"], "postgres-7": [3, "k8s-worker1", "primary"]}}
+{"t": 33, "cnpg": "Upgrading cluster|postgres-5|1", "pods": {"postgres-5": [9, "k8s-worker2", "primary"], "postgres-7": [3, "k8s-worker1", "replica"]}}
+{"t": 44, "cnpg": "Waiting for the instances to become active|postgres-5|1", "pods": {"postgres-5": [9, "k8s-worker2", "primary"], "postgres-7": [3, "k8s-worker1", "replica"]}}
+{"t": 56, "cnpg": "Waiting for the instances to become active|postgres-5|1", "pods": {"postgres-5": [9, "k8s-worker2", "primary"], "postgres-7": [9, "k8s-worker1", "replica"]}}
+{"t": 66, "cnpg": "Cluster in healthy state|postgres-5|2", "pods": {"postgres-5": [9, "k8s-worker2", "primary"], "postgres-7": [9, "k8s-worker1", "replica"]}}

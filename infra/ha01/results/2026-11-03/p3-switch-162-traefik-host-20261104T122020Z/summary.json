@@ -1,0 +1,75 @@
+{
+ "lb": "162",
+ "to": "traefik-host",
+ "t_switch": 1793794826.6678662,
+ "abort": null,
+ "criteria": [
+  {
+   "c": "gels d'E/S de l'hôte pendant l'observation (informatif, E6)",
+   "ok": true,
+   "v": "aucun"
+  },
+  {
+   "c": "config finale de .162 = ports de traefik-host",
+   "ok": true,
+   "v": {
+    "http": 2,
+    "https": 2,
+    "check": 1
+   }
+  },
+  {
+   "c": "HAProxy .162 : tous les serveurs UP",
+   "ok": true,
+   "v": []
+  },
+  {
+   "c": "[Windows] lb162_web >= 99,9 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 79 ms | BRUT: 100.0 % / 0.0 s / p95 79 ms"
+  },
+  {
+   "c": "[Windows] lb162_api >= 99,9 % (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 34 ms | BRUT: 100.0 % / 0.0 s / p95 34 ms"
+  },
+  {
+   "c": "[Windows] web >= 99.0 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 77 ms | BRUT: 100.0 % / 0.0 s / p95 77 ms"
+  },
+  {
+   "c": "[Windows] api_app >= 99.0 % et série <= 10 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 87 ms | BRUT: 100.0 % / 0.0 s / p95 87 ms"
+  },
+  {
+   "c": "[Windows] kube_api >= 99.0 % et série <= 15 s (hors gels)",
+   "ok": true,
+   "v": "hors gel: 100.0 % / 0.0 s / p95 34 ms | BRUT: 100.0 % / 0.0 s / p95 34 ms"
+  },
+  {
+   "c": "charge 20 req/s forcée vers .162 : >= 99,9 % de succès (hors gels), p95 < 1500 ms",
+   "ok": true,
+   "v": "3701/3701 p95=76 ms"
+  },
+  {
+   "c": "mémoire : workers >= 300 Mo (minimum mesuré)",
+   "ok": true,
+   "v": {
+    "155": 1144,
+    "158": 697
+   }
+  },
+  {
+   "c": "RAM hôte >= 1500 Mo (minimum mesuré)",
+   "ok": true,
+   "v": 2986
+  },
+  {
+   "c": "pas d'abandon (sinon config d'origine restaurée)",
+   "ok": true,
+   "v": null
+  }
+ ]
+}

@@ -1,0 +1,90 @@
+[
+ {
+  "check": "3 nœuds Ready, etcd 5/5",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "CNPG sain 2/2, aucun pod non sain",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-7|2"
+ },
+ {
+  "check": "harnais actif",
+  "ok": true,
+  "detail": "1s/4s"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo",
+  "ok": true,
+  "detail": 2294
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 945
+ },
+ {
+  "check": ".158 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 695
+ },
+ {
+  "check": "LB .162 sert web + API en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .162 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "LB .160 sert web + API en direct",
+  "ok": true,
+  "detail": "web=200 api=200 "
+ },
+ {
+  "check": "HAProxy .160 : tous les serveurs UP",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "config de .162 utilise les ports de nginx (2 http, 2 https, 1 check)",
+  "ok": true,
+  "detail": {
+   "http": 2,
+   "https": 2,
+   "check": 1
+  }
+ },
+ {
+  "check": "config actuelle valide, /usr/sbin/haproxy présent, aucune minuterie ha01-* résiduelle",
+  "ok": true,
+  "detail": "Configuration file is valid | haproxy-bin-ok | 0"
+ },
+ {
+  "check": "Traefik : 2 pods Ready",
+  "ok": false,
+  "detail": ""
+ },
+ {
+  "check": "ingress-nginx : 2 pods Ready (retour arrière possible)",
+  "ok": true,
+  "detail": "ingress-nginx-controller-84977f46dc-9sk9q   1/1   Running   0     41h | ingress-nginx-controller-84977f46dc-n527v   1/1 "
+ },
+ {
+  "check": "recette du shadow PASS de moins de 24 h",
+  "ok": false,
+  "detail": "aucune recette trouvée"
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 5 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ }
+]
