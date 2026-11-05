@@ -1,0 +1,10 @@
+PHASE 1 — RÉESSAI DE LA PORTE — évaluée à 2026-11-05T07:20:17Z UTC (consigne : 07:20Z ; seuil RAM 2300 Mo inchangé)
+(1) RAM : fenêtre 10 min [07:10:24 -> 07:20:16] n=59 (couverture 98 %), min=562, médiane=2463, max=2557 Mo ; points < 2300 : 27/59 ; 3 mesures successives (t-10, t-5, t) = [2452, 909, 2496] -> REFUSÉ
+     points < 2300 : [('07:14:30', 1746), ('07:14:53', 622), ('07:14:54', 615), ('07:15:05', 905), ('07:15:15', 909), ('07:15:25', 911), ('07:15:34', 806), ('07:15:45', 671), ('07:15:54', 749), ('07:16:06', 1001), ('07:16:16', 946), ('07:16:24', 801)]
+(2) CALME : gels des 6 dernières heures : [('02:29:52', '02:30:27'), ('06:08:47', '06:09:27'), ('06:09:32', '06:10:27'), ('06:48:02', '06:48:57')] ; dernier fin 06:48:57Z -> il y a 31.3 min (>= 30 min à l'entrée) -> OK ; 60 min atteintes à 07:48:57Z
+ÉTAPE A (RAM + calme) : REFUSÉE
+(3) etcd / cluster / énergie :
+    terme/leader = 1820 / 6abe8269b59f1815 ; alarmes : aucune ; MemAvailable .153 = 683 Mo ; FAIL : aucun -> OK
+
+RÉSULTAT PHASE 1 (réessai 07:20Z) : PORTE REFUSÉE — STOP + rapport (aucune reprise automatique)
+  détail : RAM=False calme=True etcd/cluster/énergie=True

@@ -1,0 +1,9 @@
+PHASE 1 — RÉESSAI DE LA PORTE — évaluée à 2026-11-05T07:29:00Z UTC (consigne : 07:29Z ; seuil RAM 2300 Mo inchangé ; Chrome fermé)
+(1) RAM : fenêtre 10 min [07:19:06 -> 07:28:52] n=58 (couverture 97 %), min=2427, médiane=2516, max=2557 Mo ; points < 2300 : 0/58 ; 3 mesures successives (t-10, t-5, t) = [911, 2538, 2540] -> REFUSÉ
+(2) CALME : gels des 6 dernières heures : [('02:29:55', '02:30:25'), ('06:08:45', '06:09:25'), ('06:09:30', '06:10:25'), ('06:48:00', '06:48:55')] ; dernier fin 06:48:55Z -> il y a 40.1 min (>= 30 min à l'entrée) -> OK ; 60 min atteintes à 07:48:55Z
+ÉTAPE A (RAM + calme) : REFUSÉE
+(3) etcd / cluster / énergie :
+    terme/leader = 1820 / 6abe8269b59f1815 ; alarmes : aucune ; MemAvailable .153 = 675 Mo ; FAIL : aucun -> OK
+
+RÉSULTAT PHASE 1 (réessai 07:29Z) : PORTE REFUSÉE — STOP + rapport (aucune reprise automatique)
+  détail : RAM=False calme=True etcd/cluster/énergie=True

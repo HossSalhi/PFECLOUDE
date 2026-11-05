@@ -1,0 +1,61 @@
+VÉRIFICATION FINALE — 2026-11-04T22:03:12Z
+[garde-fou] vmrun list : Total running VMs: 6
+[garde-fou] CONFIRMATION-162.txt présent : False
+[garde-fou] git HEAD : 3021aa7 feat(helios): validate HA-01 single-VM failure resilience | commits depuis le début de la reprise : aucun (HEAD inchangé)
+[garde-fou] diff vs HEAD sur Incident.java / *.bpmn : ''
+[garde-fou] etcd terme/leader après : 1820 6abe8269b59f1815 (avant : 1820 / 6abe8269b59f1815) -> leader non déplacé : True
+[garde-fou] etcd sains : 5 /5 | nœuds : {'k8s-master': 'Ready', 'k8s-worker1': 'Ready', 'k8s-worker2': 'Ready'} | CNPG : Cluster in healthy state|postgres-5|2
+[harnais] processus Windows (sonde+échantillonneur) : 2 | .161 : unite=active processus=1 | âges : 0.1 s / 8.1 s
+[fichiers] créés/modifiés depuis 21:26Z dans infra/ha01 (hors dossier de preuves et dossier d'essai dry-run) :
+    infra/ha01/ops/gate4_162_report.py (23768 o, 21:30:38Z)
+    infra/ha01/ops/p5_162_preflight.py (21024 o, 21:30:42Z)
+    infra/ha01/ops/__pycache__/gate4_162_report.cpython-312.pyc (31441 o, 21:32:25Z)
+    infra/ha01/ops/__pycache__/p5_162_preflight.cpython-312.pyc (39755 o, 21:32:25Z)
+    infra/ha01/probes/__pycache__/ha01_probe.cpython-312.pyc (15720 o, 21:32:25Z)
+    infra/ha01/results/2026-11-03/GATE-4-162.md (23434 o, 22:01:43Z)
+    infra/ha01/results/2026-11-03/harness-baseline-p0.pids (26 o, 21:27:08Z)
+    infra/ha01/results/2026-11-03/p5-162-preflight-20261104T220045Z.json (11366 o, 22:00:45Z)
+    infra/ha01/results/2026-11-03/phase1-journal.md (20561 o, 22:02:06Z)
+    infra/ha01/results/2026-11-03/probe-baseline-p0.jsonl (92941541 o, 22:03:15Z)
+    infra/ha01/results/2026-11-03/samples-baseline-p0.jsonl (17129155 o, 22:03:07Z)
+    infra/ha01/results/2026-11-03/p4-vmstop162-dry-post-coupure-20261104T220108Z/preflight.json (3302 o, 22:01:18Z)
+    infra/ha01/results/2026-11-03/p4-vmstop162-dry-post-coupure-20261104T220108Z/run.log (3717 o, 22:01:18Z)
+[fichiers] mémoire modifiée depuis 21:26Z : ['project_helios_ha01_plan.md']
+[non touché ?] ops/p4_vmstop.py mtime 2026-11-04T16:52:16Z < 21:26Z : True
+[non touché ?] README-HA-01.md mtime 2026-11-04T17:00:41Z < 21:26Z : True
+[non touché ?] ops/test_p4_162.py mtime 2026-11-04T16:56:59Z < 21:26Z : True
+[non touché ?] ops/p5_move_leader.py mtime 2026-11-04T16:55:44Z < 21:26Z : True
+[non touché ?] dns/helios-dns-health.py mtime 2026-11-04T08:27:45Z < 21:26Z : True
+[git] lignes de statut nouvelles : 4 | disparues : 1
+    + M backend/backend/ai-service/app/features/metric_features.py
+    + ?? infra/ha01/results/2026-11-03/p4-vmstop162-dry-post-coupure-20261104T220108Z/
+    + ?? infra/ha01/results/2026-11-03/p5-162-preflight-20261104T220045Z.json
+    + ?? infra/ha01/results/2026-11-03/reprise-post-coupure-20261104T212635Z/
+    -  M backend/backend/ai-service/app/features/metric_features.py
+[preuves] JSON de préflight : ['p5-162-preflight-20261104T165426Z.json', 'p5-162-preflight-20261104T170523Z.json', 'p5-162-preflight-20261104T220045Z.json']
+[preuves] contenu du dossier de preuves :
+     ABANDON-selftest-abandon-20261104T214353Z.txt (420 o)
+     GATE-4-162.avant-coupure-20261104T212635Z.md (20169 o)
+     GATE-4-162.avant-regeneration-20261104T220142Z.md (20169 o)
+     INSTANTANE-avant.json (2377 o)
+     attente-stabilite.jsonl (3000 o)
+     attente-stabilite.py (6728 o)
+     diff-gate4_162_report.py-20261104T213052Z.diff (7017 o)
+     diff-p5_162_preflight.py-20261104T213052Z.diff (1857 o)
+     git-status-avant.txt (38053 o)
+     harness-baseline-p0.pids.avant-coupure-20261104T212635Z (27 o)
+     lancement-sonde-161.txt (953 o)
+     outils-avant (dossier)
+     precontrole-20261104T215819Z.txt (4495 o)
+     preflight-generique-20261104T220108Z.txt (3933 o)
+     supervision-p5-20261104T215902Z-sortie-enfant.txt (8551 o)
+     supervision-p5-20261104T215902Z.jsonl (11815 o)
+     supervision-p5.py (8830 o)
+     supervision-selftest-abandon-20261104T214353Z-sortie-enfant.txt (0 o)
+     supervision-selftest-abandon-20261104T214353Z.jsonl (1254 o)
+     supervision-selftest-ok-20261104T214344Z-sortie-enfant.txt (0 o)
+     supervision-selftest-ok-20261104T214344Z.jsonl (1437 o)
+     verif-code-20261104T213226Z.txt (3405 o)
+     verif-harnais-windows-correction-20261104T212825Z.json (1163 o)
+     verif-harnais-windows.json (12519 o)
+     verif-sonde-161.txt (1018 o)

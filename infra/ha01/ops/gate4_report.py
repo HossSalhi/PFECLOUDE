@@ -24,6 +24,8 @@ RUNS = [
     ("`.155`", "essai 2", "p4-vmstop155-retest155-20261104T123434Z"),
     ("`.155`", "essai 3", "p4-vmstop155-retest155c-20261104T142018Z"),
     ("`.158`", "essai (1re tentative abandonnée à T+14 s par un défaut d'outillage, voir GATE-4.md)", "p4-vmstop158-stop158c-20261104T151214Z"),
+    # Ajout du 5 nov. 2026 : 4e scénario (perte réelle de .162, LB actif du DNS ; Option A : DNS et .153 inchangés). Détail : GATE-4-162.md.
+    ("`.162`", "essai unique (LB actif du DNS ; Option A : DNS et `.153` inchangés, voir GATE-4-162.md)", "p4-vmstop162-stop162-20261105T075515Z"),
 ]
 
 

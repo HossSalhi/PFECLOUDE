@@ -1,0 +1,12 @@
+R2 — sessions de .153 vers 192.168.148.162:6443 AVANT l'arrêt de .162 (2026-11-05T07:55:35Z)
+--- ss -tn dst 192.168.148.162:6443
+State Recv-Q Send-Q   Local Address:Port     Peer Address:PortProcess
+ESTAB 0      0      192.168.148.153:39882 192.168.148.162:6443       
+ESTAB 0      0      192.168.148.153:39732 192.168.148.162:6443       
+--- avec processus (sudo -n ss -tnp)
+State Recv-Q Send-Q   Local Address:Port     Peer Address:PortProcess                              
+ESTAB 0      0      192.168.148.153:39882 192.168.148.162:6443 users:(("kube-proxy",pid=2635,fd=8))
+ESTAB 0      0      192.168.148.153:39732 192.168.148.162:6443 users:(("kubelet",pid=1100,fd=26))  
+--- MemAvailable/load .153
+692 Mo
+0.19 0.15 0.26

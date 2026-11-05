@@ -1,0 +1,34 @@
+--- ../results/2026-11-03/reprise-post-coupure-20261104T212635Z/outils-avant/p5_162_preflight.py.avant-20261104T212635Z	2026-11-04 17:54:50.471674100 +0100
++++ p5_162_preflight.py	2026-11-04 22:30:42.685207600 +0100
+@@ -250,6 +250,23 @@
+ 
+ 
+ @safe
++def sec_alimentation():
++    """Ajout du 4 nov. 2026 (reprise après la coupure de courant du PC, arrêt système à 17:57:51Z) : l'hôte doit être alimenté par le SECTEUR avec une réserve de batterie.
++    LECTURE SEULE (Windows.Forms SystemInformation.PowerStatus). Poste sans batterie : seul le secteur est exigé. Aucun autre contrôle n'est modifié."""
++    s = "I-alimentation"
++    nom = "PC sur secteur (PowerLineStatus=Online) et batterie >= 40 % (ou aucune batterie)"
++    out = ps("Add-Type -AssemblyName System.Windows.Forms; $p=[System.Windows.Forms.SystemInformation]::PowerStatus; "
++             "'{0}|{1}|{2}' -f $p.PowerLineStatus,[int]($p.BatteryLifePercent*100),$p.BatteryChargeStatus")
++    parts = (out.strip().splitlines()[-1] if out.strip() else "").split("|")
++    if len(parts) != 3 or not parts[1].strip().isdigit():
++        add(s, nom, False, "lecture impossible : %s" % out[:120])
++        return
++    ligne, pct, charge = parts[0].strip(), int(parts[1]), parts[2].strip()
++    sans_batterie = "NoSystemBattery" in charge
++    add(s, nom, ligne == "Online" and (sans_batterie or pct >= 40), "%s ; batterie %s ; BatteryChargeStatus=%s" % (ligne, "absente" if sans_batterie else "%d %%" % pct, charge))
++
++
++@safe
+ def sec_garde_fous():
+     s = "H-garde-fous"
+     p = os.path.join(O.RES, "CONFIRMATION-162.txt")
+@@ -286,6 +303,7 @@
+     sec_sauvegardes()
+     sec_relance(not a.no_revive_test)
+     sec_hote()
++    sec_alimentation()
+     sec_garde_fous()
+     nf = sum(1 for r in RESULTS if r["status"] == "FAIL")
+     nw = sum(1 for r in RESULTS if r["status"] == "WARN")

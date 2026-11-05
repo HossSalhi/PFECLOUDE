@@ -1,0 +1,9 @@
+PHASE 1 — PORTE D'ENTRÉE — 2026-11-05T07:08:04Z UTC (Tunis = UTC+1)
+(1) RAM : fenêtre 10 min n=56 (couverture 93 %), min=2153, médiane=2366, max=2492 Mo ; points < 2300 : 16/56 ; 3 mesures successives (t-10, t-5, t) = [2426, 2355, 2472] -> REFUSÉ
+     premiers points < 2300 : [('06:58:30', 2274), ('06:58:47', 2269), ('06:58:58', 2204), ('06:59:08', 2161), ('06:59:17', 2287), ('06:59:27', 2214)] ...
+(2) CALME : gels des 6 dernières heures : [('02:29:54', '02:30:24'), ('06:08:49', '06:10:24'), ('06:47:59', '06:48:59')] ; dernier fin 06:48:59Z -> il y a 19.1 min (exigé >= 30 min à l'entrée, >= 60 min à la phase 4) -> REFUSÉ ; 60 min atteintes à 07:48:59Z
+(3) etcd / cluster / hôte (sections de p5 en mémoire, inchangées) :
+    terme/leader = 1820 / 6abe8269b59f1815 (attendu 1820 / 6abe8269b59f1815) ; alarmes etcd : aucune ; MemAvailable .153 = 693 Mo ; contrôles FAIL : aucun -> OK
+
+RÉSULTAT PHASE 1 : PORTE REFUSÉE — STOP + rapport (aucune reprise automatique)
+  détail : RAM=False calme=False etcd/cluster=True énergie=True

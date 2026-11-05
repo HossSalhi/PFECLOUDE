@@ -1,0 +1,60 @@
+{
+ "utc": "2026-11-04T21:26:35Z",
+ "evidence_dir": "C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\results\\2026-11-03\\reprise-post-coupure-20261104T212635Z",
+ "git_head": "3021aa7 feat(helios): validate HA-01 single-VM failure resilience",
+ "git_status_lignes": 546,
+ "journaux_windows": {
+  "probe-baseline-p0.jsonl": {
+   "octets": 90945213,
+   "sha256": "1d0e6c1f3d73e45cc0e25dfe1376e616627c9924d097f7eabd691389c5d39131",
+   "mtime_utc": "2026-11-04T17:57:45Z"
+  },
+  "samples-baseline-p0.jsonl": {
+   "octets": 16760033,
+   "sha256": "e3ad73a743261fac7291a1bddfd31384c2ab95ac337ef47462d3bbf47fde21dc",
+   "mtime_utc": "2026-11-04T17:57:39Z"
+  }
+ },
+ "journal_161": {
+  "octets": 83382272,
+  "sha256": "f7b7c70a51cb18e979ef87b8fcfad4d0b47303bad8739ea1f8928ee4e133b408"
+ },
+ "copies": {
+  "pids": {
+   "fichier": "harness-baseline-p0.pids.avant-coupure-20261104T212635Z",
+   "sha256": "28e9b8a659f98e5c3a8339d169dc79e12493128ac6b930ba86a936aee6ab6998",
+   "octets": 27
+  },
+  "gate": {
+   "fichier": "GATE-4-162.avant-coupure-20261104T212635Z.md",
+   "sha256": "2f4f8eebc37b51afadb5f91ff07aec267f36dea341e29f5a6f43dba5eefe7d67",
+   "octets": 20169
+  },
+  "p5": {
+   "fichier": "outils-avant\\p5_162_preflight.py.avant-20261104T212635Z",
+   "sha256": "48b9a5754c092f8eb563c97f1844ebb1a0858440fe143a2e0eed714391bda3a5",
+   "octets": 19771
+  },
+  "rapport": {
+   "fichier": "outils-avant\\gate4_162_report.py.avant-20261104T212635Z",
+   "sha256": "42b2601fcc987dbf77d74823f8a052aec0cdc5a3fe30ce8aa483a9c945978d75",
+   "octets": 17998
+  }
+ },
+ "originaux_sha256": {
+  "harness-baseline-p0.pids": "28e9b8a659f98e5c3a8339d169dc79e12493128ac6b930ba86a936aee6ab6998",
+  "GATE-4-162.md": "2f4f8eebc37b51afadb5f91ff07aec267f36dea341e29f5a6f43dba5eefe7d67",
+  "p5_162_preflight.py": "48b9a5754c092f8eb563c97f1844ebb1a0858440fe143a2e0eed714391bda3a5",
+  "gate4_162_report.py": "42b2601fcc987dbf77d74823f8a052aec0cdc5a3fe30ce8aa483a9c945978d75"
+ },
+ "json_preflight_existants": {
+  "p5-162-preflight-20261104T165426Z.json": "6224057b2d32674f",
+  "p5-162-preflight-20261104T170523Z.json": "f8c190565a1783f8"
+ },
+ "confirmation_162_presente": false,
+ "etcd_terme_leader_avant": {
+  "terme": 1820,
+  "leader_id": "6abe8269b59f1815"
+ },
+ "anti_doublon_161": "processus_ha01_probe=0 ; unites_ha01=0 ; is_active=inactive"
+}

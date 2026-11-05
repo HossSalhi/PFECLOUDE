@@ -1,0 +1,11 @@
+DIAGNOSTIC DES CREUX DE RAM HÔTE — 5 nov. 2026, relevé à 07:2xZ (LECTURE SEULE)
+Contexte : réessai de la porte d'entrée à 07:20:17Z refusé (RAM) ; creux de RAM à ~560 Mo non causés par les outils HA-01 (aucune commande lourde entre 07:10 et 07:19Z).
+1) Journal Windows « Application » (heures locales UTC+1) : événements du fournisseur « Chrome » (chromerowser\extensions\extension_garbage_collector.cc:212 « Garbage collect… »), émis au démarrage du navigateur :
+   - 07:54:11 local = 06:54:11Z  -> creux de RAM 06:54:08 -> 06:55:39Z (minimum 536 Mo, 11 points)
+   - 08:14:50 local = 07:14:50Z  -> creux de RAM 07:14:53 -> 07:18:55Z (minimum 562 Mo, 26 points)
+   Aucun événement Windows Defender / Planificateur de tâches / Windows Update dans ces deux fenêtres.
+2) Épisodes < 1500 Mo depuis 00:00Z (échantillonneur) : 00:00:04-03:02:34 (min 938), 04:59:03-05:00:23, 05:36:20, 05:59:03-06:02:30, 06:06:38-06:31:18 (min 585, 25 min), 06:54:08-06:55:39 (min 536), 07:14:53-07:18:55 (min 562).
+   Le passage de 1,4 Go à 2,5 Go constaté à ~06:31-06:33Z correspond à la fin de l'épisode de 25 min.
+3) Pics de mémoire par processus (depuis leur démarrage) : MsMpEng (Defender) 1194 Mo, AdobeARM 634 Mo, explorer 597 Mo, claude 426 Mo ; aucun navigateur n'est ouvert à 07:2xZ.
+4) Conclusion (corrélation temporelle forte, cause à confirmer par vous) : les creux de ~1,7 Go suivent exactement des démarrages de Chrome ; sans navigateur, la RAM disponible est ≈ 2,35-2,5 Go.
+   Conséquence pour la porte : navigateur fermé et PC inactif >= 10 min avant l'évaluation ; première fenêtre propre possible à partir de 07:29Z (10 min après la fin du dernier creux, 07:18:55Z). Calme d'E/S : 30 min atteintes ; 60 min à 07:48:57Z.

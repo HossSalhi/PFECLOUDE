@@ -1,0 +1,19 @@
+commande exécutée sur .161 :
+
+n_units=$(systemctl list-units --all --no-legend 'ha01-*' | wc -l)
+n_proc=$(ps -eo args | grep -cE '^/usr/bin/python3 .*ha01_probe(_v2)?[.]py')
+echo "avant: unites_ha01=$n_units processus_probe=$n_proc"
+if [ "$n_units" = "0" ] && [ "$n_proc" = "0" ]; then
+  echo "lancement_utc=$(date -u +%FT%TZ)"
+  sudo -n systemd-run --quiet --unit=ha01-probe-161 /usr/bin/python3 /opt/helios-backups/ha01/tools/ha01_probe.py --out /opt/helios-backups/ha01/probe161-p0.jsonl --dns-servers 192.168.148.160,192.168.148.162 && echo "systemd-run rc=0"
+  sleep 4
+  echo "apres: is_active=$(systemctl is-active ha01-probe-161.service) processus_probe=$(ps -eo args | grep -cE '^/usr/bin/python3 .*ha01_probe(_v2)?[.]py')"
+else
+  echo "DOUBLON DETECTE : AUCUN LANCEMENT"
+fi
+
+--- sortie ---
+avant: unites_ha01=0 processus_probe=0
+lancement_utc=2026-11-04T21:28:42Z
+systemd-run rc=0
+apres: is_active=active processus_probe=1

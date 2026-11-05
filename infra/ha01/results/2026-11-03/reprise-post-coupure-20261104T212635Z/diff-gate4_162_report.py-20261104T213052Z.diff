@@ -1,0 +1,90 @@
+--- ../results/2026-11-03/reprise-post-coupure-20261104T212635Z/outils-avant/gate4_162_report.py.avant-20261104T212635Z	2026-11-04 17:58:56.923673400 +0100
++++ gate4_162_report.py	2026-11-04 22:30:38.974638700 +0100
+@@ -21,6 +21,8 @@
+ 
+ OUT = os.path.join(O.RES, "GATE-4-162.md")
+ VMX = r"C:\Users\houss\Documents\Virtual Machines\k8s-lb2\k8s-lb2.vmx"
++# Ajout du 4 nov. 2026 (reprise après la coupure de courant du PC) : arrêt système de l'hôte Windows. TOUT préflight antérieur est PÉRIMÉ pour toute autorisation d'arrêt.
++COUPURE_HOTE_UTC = "2026-11-04T17:57:51Z"
+ 
+ RISQUES = [
+     ("R1 — Coupure DNS côté clients (conception actif/passif : UNE adresse publiée, TTL 30 s)",
+@@ -98,6 +100,70 @@
+     return fs[-1] if fs else None
+ 
+ 
++def historique_preflights():
++    """Encart « Historique des préflights » (ajout du 4 nov. 2026, reprise après la coupure de courant du PC). LECTURE SEULE : ne modifie aucun JSON.
++    Liste TOUS les p5-162-preflight-*.json (conservés), recalcule leurs décomptes depuis les `checks` et les compare à l'en-tête, marque PÉRIMÉS pour toute
++    autorisation d'arrêt ceux qui précèdent la coupure Windows, et classe les WARN du préflight courant (liste fermée acceptée pendant la préparation)."""
++    coupure = O.epoch_of(COUPURE_HOTE_UTC)
++    files = sorted(glob.glob(os.path.join(O.RES, "p5-162-preflight-*.json")))
++    last = files[-1] if files else None
++    L = ["## 1bis. Historique des préflights et règle WARN / bloquant", ""]
++    L.append("Coupure de l'hôte Windows (arrêt système) : **%s**. **Tout préflight antérieur à cet instant est PÉRIMÉ pour toute autorisation d'arrêt de `.162`** ; les fichiers sont conservés. "
++             "Un préflight n'est utilisable que s'il est **postérieur à la coupure, sans aucun FAIL et de moins de 30 minutes** au moment du lancement (`recent_p5_preflight`, logique inchangée)." % COUPURE_HOTE_UTC)
++    L.append("")
++    L.append("| Fichier | Horodatage (UTC) | PASS / WARN / FAIL recalculés | En-tête du JSON | Statut pour une autorisation d'arrêt |")
++    L.append("|---|---|---|---|---|")
++    cur = None
++    for f in files:
++        try:
++            j = json.load(open(f, encoding="utf-8"))
++        except (OSError, ValueError):
++            L.append("| `%s` | illisible | - | - | **ILLISIBLE** |" % os.path.basename(f))
++            continue
++        cnt = {"PASS": 0, "WARN": 0, "FAIL": 0}
++        for r in j.get("checks", []):
++            cnt[r.get("status")] = cnt.get(r.get("status"), 0) + 1
++        hdr = (j.get("pass"), j.get("warn"), j.get("fail"))
++        coh = hdr == (cnt["PASS"], cnt["WARN"], cnt["FAIL"])
++        age = (time.time() - j.get("ts", 0)) / 60
++        if j.get("ts", 0) < coupure:
++            st = "**PÉRIMÉ — antérieur à la coupure Windows de %s** (conservé)" % COUPURE_HOTE_UTC
++        elif f == last:
++            st = "**COURANT** (âge %.0f min%s)" % (age, "" if age <= 30 else " : plus de 30 min, à refaire avant tout lancement")
++            cur = j
++        else:
++            st = "ancien (postérieur à la coupure, remplacé par un plus récent), conservé"
++        L.append("| `%s` | %s | %d / %d / %d | %s / %s / %s %s | %s |" % (os.path.basename(f), j.get("iso", "?"), cnt["PASS"], cnt["WARN"], cnt["FAIL"],
++                                                                    hdr[0], hdr[1], hdr[2], "✓ cohérent" if coh else "✗ INCOHÉRENT", st))
++    L.append("")
++    L.append("**Règle WARN temporairement accepté / critère bloquant** (la logique de validation n'est pas modifiée : `all_ok` = aucun FAIL ; aucun statut n'est forcé) :")
++    L.append("- **FAIL = bloquant** : ni test de charge ni autorisation d'arrêt.")
++    L.append("- **WARN accepté pendant cette préparation (liste fermée)** : uniquement « dump PostgreSQL sur `.161` <= 120 min » et « snapshot etcd sur `.161` <= 120 min », quand seul l'âge est en cause "
++             "(intégrité, rétention et espace libre en PASS). Leur renouvellement est réservé à la préparation immédiate de l'arrêt réel.")
++    L.append("- **Tout autre WARN = bloquant.**")
++    L.append("- **Obligatoire juste avant un arrêt réel** : renouveler les sauvegardes (`ssh kube@192.168.148.161 \"sudo -n systemctl start helios-offsite-backup.service\"`) puis vérifier leur intégrité "
++             "(`gzip -t` du dump, `sha256sum -c` du snapshot, journal « terminé rc=0 ») ; les deux lignes d'âge doivent alors être PASS. Aucune sauvegarde n'est supprimée (6 fichiers par type, rotation seulement au-delà de 30).")
++    if cur is not None:
++        chk = cur.get("checks", [])
++        warns = [r for r in chk if r.get("status") == "WARN"]
++        integ = [r for r in chk if r.get("check", "").startswith(("intégrité des derniers fichiers", "rétention :", "espace libre sur .161"))]
++        integ_ok = bool(integ) and all(r.get("status") == "PASS" for r in integ)
++        acc = [r for r in warns if integ_ok and r.get("check", "").startswith(("dump PostgreSQL sur .161", "snapshot etcd sur .161"))]
++        autres = [r for r in warns if r not in acc]
++        L.append("")
++        L.append("Classement des WARN du préflight courant : **%d accepté(s)** (liste fermée) · **%d non prévu(s) = bloquant(s)**." % (len(acc), len(autres)))
++        for r in acc:
++            L.append("- accepté : %s — détail : %s" % (r["check"], str(r.get("detail", "")).replace("|", "/")))
++        for r in autres:
++            L.append("- **BLOQUANT (WARN non prévu)** : %s — détail : %s" % (r["check"], str(r.get("detail", "")).replace("|", "/")))
++    L.append("")
++    L.append("Actions d'écriture de la reprise du 4 nov. (de mesure ou d'évidence uniquement ; aucune sur le cluster) : relance du harnais de mesure Windows (`start_harness.ps1 -Label baseline-p0`, journaux en append), "
++             "recréation de l'unité transitoire de mesure `ha01-probe-161` sur `.161` (journal en append), dossier de preuves `results/2026-11-03/reprise-post-coupure-*` (copies horodatées, instantanés, journaux de relevé et de supervision). "
++             "Aucun arrêt ni redémarrage de service, aucune extinction, aucun déplacement du leader etcd, aucun changement DNS/HAProxy/Kubernetes/PostgreSQL.")
++    L.append("")
++    return L
++
++
+ def main():
+     if hasattr(sys.stdout, "reconfigure"):
+         sys.stdout.reconfigure(encoding="utf-8")
+@@ -133,6 +199,7 @@
+     else:
+         L.append("_Aucun préflight enregistré : lancer `python ops/p5_162_preflight.py`._")
+     L.append("")
++    L.extend(historique_preflights())
+     L.append("## 2. Prévision du modèle DNS (hors ligne, contrôleur réel importé)")
+     c = model["constantes"]
+     L.append("Constantes lues dans `dns/helios-dns-health.py` : ordre %s, FALL=%s, période=%s s, expiration de sonde=%s s, RISE=%s, HOLD_DOWN=%s s, TTL dnsmasq=%s s." % (c["ORDER"], c["FALL"], c["PERIOD_s"], c["TIMEOUT_sonde_s"], c["RISE"], c["HOLD_DOWN_s"], c["TTL_dnsmasq_s"]))

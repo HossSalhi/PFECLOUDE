@@ -1,0 +1,29 @@
+PHASE 2 — SAUVEGARDES .161 — 2026-11-05T07:40:55Z
+avant (phase 0) : 21 fichiers hachés
+juste avant le renouvellement : 21 fichiers ; identiques à la phase 0 : True
+systemctl start (durée 5 s) :
+rc_systemctl=0
+inactive
+2026-11-05T03:01:57+00:00 k8s-aiCamunda helios-offsite-backup.sh[53101]: 2026-11-05T03:01:57Z pg_dump OK (postgres-5) 252172 o
+2026-11-05T03:01:58+00:00 k8s-aiCamunda helios-offsite-backup.sh[53101]: 2026-11-05T03:01:58Z snapshot etcd OK 23285792 o
+2026-11-05T03:02:00+00:00 k8s-aiCamunda helios-offsite-backup.sh[53101]: 2026-11-05T03:02:00Z dumps CronJob A synchronises (9 fichiers)
+2026-11-05T03:02:00+00:00 k8s-aiCamunda helios-offsite-backup.sh[53101]: 2026-11-05T03:02:00Z terminé rc=0
+2026-11-05T03:02:00+00:00 k8s-aiCamunda systemd[1]: helios-offsite-backup.service: Deactivated successfully.
+2026-11-05T03:02:00+00:00 k8s-aiCamunda systemd[1]: Finished helios-offsite-backup.service - HELIOS HA-01 - sauvegarde hors cluster (pg_dump + snapshot etcd) sur .161.
+2026-11-05T07:40:56+00:00 k8s-aiCamunda systemd[1]: Starting helios-offsite-backup.service - HELIOS HA-01 - sauvegarde hors cluster (pg_dump + snapshot etcd) sur .161...
+2026-11-05T07:40:57+00:00 k8s-aiCamunda helios-offsite-backup.sh[89811]: 2026-11-05T07:40:57Z noeud de reference: 192.168.148.158
+2026-11-05T07:40:58+00:00 k8s-aiCamunda helios-offsite-backup.sh[89811]: 2026-11-05T07:40:58Z pg_dump OK (postgres-5) 252261 o
+2026-11-05T07:40:59+00:00 k8s-aiCamunda helios-offsite-backup.sh[89811]: 2026-11-05T07:40:59Z snapshot etcd OK 23285792 o
+2026-11-05T07:41:01+00:00 k8s-aiCamunda helios-offsite-backup.sh[89811]: 2026-11-05T07:41:01Z dumps CronJob A synchronises (9 fichiers)
+2026-11-05T07:41:01+00:00 k8s-aiCamunda helios-offsite-backup.sh[89811]: 2026-11-05T07:41:01Z terminé rc=0
+2026-11-05T07:41:01+00:00 k8s-aiCamunda systemd[1]: helios-offsite-backup.service: Deactivated successfully.
+2026-11-05T07:41:01+00:00 k8s-aiCamunda systemd[1]: Finished helios-offsite-backup.service - HELIOS HA-01 - sauvegarde hors cluster (pg_dump + snapshot etcd) sur .161.
+PASS  journal « terminé rc=0 » et systemctl rc=0
+PASS  nouveau dump pg/pfe_db-20261105T074056Z.sql.gz : 252261 o, gzip -t OK, 16 tables (>= 10), > 10 Ko, âge 0.1 min (< 120)
+PASS  nouveau snapshot etcd/etcd-20261105T074056Z-158.db : 23285792 o, sha256sum -c OK, > 10 Mo, âge 0.0 min (< 120)
+PASS  anciens fichiers : 21/21 toujours présents avec le même SHA-256
+PASS  fichiers nouveaux (attendu 3 : dump, snapshot, .sha256) : ['etcd/etcd-20261105T074056Z-158.db', 'etcd/etcd-20261105T074056Z-158.db.sha256', 'pg/pfe_db-20261105T074056Z.sql.gz']
+PASS  comptes pg/etcd = ['8', '8'] (< 25, aucune rotation)
+PASS  espace libre .161 = 12 Go (>= 5)
+EVENEMENT.txt présent après l'étape : False
+RÉSULTAT PHASE 2 : OK — sauvegardes renouvelées et vérifiées

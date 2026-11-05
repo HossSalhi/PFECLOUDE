@@ -1,0 +1,46 @@
+R2 — état de .153 APRES la relance de .162 (2026-11-05T08:09:01Z)
+--- sessions vers .162:6443
+State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+--- sessions vers .160:6443
+State Recv-Q Send-Q   Local Address:Port     Peer Address:PortProcess                              
+ESTAB 0      0      192.168.148.153:40158 192.168.148.160:6443 users:(("kube-proxy",pid=2635,fd=6))
+ESTAB 0      0      192.168.148.153:38462 192.168.148.160:6443 users:(("kubelet",pid=1100,fd=27))  
+--- journal kubelet 07:55:50 -> 07:58:30Z (motifs NotReady / bail / connexion)
+2026-11-05T07:56:29+00:00 k8s-master kubelet[1100]: E1105 07:56:29.755930    1100 kubelet_node_status.go:544] "Error updating node status, will retry" err="error getting node \"k8s-master\": Get \"https://api.helios.orange.tn:6443
+2026-11-05T07:56:31+00:00 k8s-master kubelet[1100]: E1105 07:56:31.294021    1100 controller.go:195] "Failed to update lease" err="Put \"https://api.helios.orange.tn:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leas
+2026-11-05T07:56:39+00:00 k8s-master kubelet[1100]: E1105 07:56:39.758495    1100 kubelet_node_status.go:544] "Error updating node status, will retry" err="error getting node \"k8s-master\": Get \"https://api.helios.orange.tn:6443
+2026-11-05T07:56:41+00:00 k8s-master kubelet[1100]: E1105 07:56:41.294469    1100 controller.go:195] "Failed to update lease" err="Put \"https://api.helios.orange.tn:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leas
+2026-11-05T07:56:49+00:00 k8s-master kubelet[1100]: E1105 07:56:49.759671    1100 kubelet_node_status.go:544] "Error updating node status, will retry" err="error getting node \"k8s-master\": Get \"https://api.helios.orange.tn:6443
+2026-11-05T07:56:51+00:00 k8s-master kubelet[1100]: E1105 07:56:51.295326    1100 controller.go:195] "Failed to update lease" err="Put \"https://api.helios.orange.tn:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leas
+2026-11-05T07:56:59+00:00 k8s-master kubelet[1100]: E1105 07:56:59.762079    1100 kubelet_node_status.go:544] "Error updating node status, will retry" err="error getting node \"k8s-master\": Get \"https://api.helios.orange.tn:6443
+2026-11-05T07:57:01+00:00 k8s-master kubelet[1100]: E1105 07:57:01.295615    1100 controller.go:195] "Failed to update lease" err="Put \"https://api.helios.orange.tn:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leas
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.408916    1100 reflector.go:462] object-"metallb-system"/"memberlist": watch of *v1.Secret ended with: an error on the server ("unable to decode an event from the 
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.408992    1100 reflector.go:462] k8s.io/client-go@v0.0.0/tools/cache/reflector.go:229: watch of *v1.Pod ended with: an error on the server ("unable to decode an ev
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409800    1100 reflector.go:462] object-"pfe"/"kube-root-ca.crt": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the wa
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409800    1100 reflector.go:462] object-"metallb-system"/"metallb-excludel2": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409884    1100 reflector.go:462] object-"kube-system"/"coredns": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the wat
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409911    1100 reflector.go:462] object-"cnpg-system"/"kube-root-ca.crt": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event fro
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: E1105 07:57:02.409931    1100 kubelet_node_status.go:544] "Error updating node status, will retry" err="error getting node \"k8s-master\": Get \"https://api.helios.orange.tn:6443
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: E1105 07:57:02.409949    1100 kubelet_node_status.go:531] "Unable to update node status" err="update node status exceeds retry count"
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409947    1100 reflector.go:462] object-"cnpg-system"/"cnpg-webhook-cert": watch of *v1.Secret ended with: an error on the server ("unable to decode an event from 
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409972    1100 reflector.go:462] object-"kube-system"/"kube-proxy": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the 
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409994    1100 reflector.go:462] object-"falco"/"falco-falcoctl": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the wa
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.409997    1100 reflector.go:462] object-"falco"/"falco": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the watch strea
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410020    1100 reflector.go:462] k8s.io/client-go@v0.0.0/tools/cache/reflector.go:229: watch of *v1.Service ended with: an error on the server ("unable to decode a
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410259    1100 reflector.go:462] object-"metallb-system"/"kube-root-ca.crt": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event 
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410286    1100 reflector.go:462] k8s.io/client-go@v0.0.0/tools/cache/reflector.go:229: watch of *v1.RuntimeClass ended with: an error on the server ("unable to dec
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410305    1100 reflector.go:462] k8s.io/client-go@v0.0.0/tools/cache/reflector.go:229: watch of *v1.CSIDriver ended with: an error on the server ("unable to decode
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410330    1100 reflector.go:462] object-"falco"/"kube-root-ca.crt": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event from the 
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: E1105 07:57:02.410391    1100 controller.go:195] "Failed to update lease" err="Put \"https://api.helios.orange.tn:6443/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leas
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: I1105 07:57:02.410836    1100 controller.go:115] "failed to update lease using latest lease, fallback to ensure lease" err="failed 5 attempts to update lease"
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.410021    1100 reflector.go:462] k8s.io/client-go@v0.0.0/tools/cache/reflector.go:229: watch of *v1.Node ended with: an error on the server ("unable to decode an e
+2026-11-05T07:57:02+00:00 k8s-master kubelet[1100]: W1105 07:57:02.411228    1100 reflector.go:462] object-"kube-system"/"kube-root-ca.crt": watch of *v1.ConfigMap ended with: an error on the server ("unable to decode an event fro
+--- MemAvailable/load .153
+677 Mo
+0.20 0.24 0.26
+--- evenements K8s du noeud k8s-master
+default   12m   Normal   NodeNotReady              node/k8s-master   Node k8s-master status is now: NodeNotReady
+default   11m   Normal   NodeHasSufficientMemory   node/k8s-master   Node k8s-master status is now: NodeHasSufficientMemory
+default   11m   Normal   NodeHasNoDiskPressure     node/k8s-master   Node k8s-master status is now: NodeHasNoDiskPressure
+default   11m   Normal   NodeHasSufficientPID      node/k8s-master   Node k8s-master status is now: NodeHasSufficientPID
+default   11m   Normal   NodeReady                 node/k8s-master   Node k8s-master status is now: NodeReady

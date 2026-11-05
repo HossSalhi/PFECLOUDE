@@ -1,0 +1,18 @@
+taille_apres=83413793
+sha256_prefixe_83382272=f7b7c70a51cb18e979ef87b8fcfad4d0b47303bad8739ea1f8928ee4e133b408
+nouvelles_lignes=246
+premieres_lignes_nouvelles:
+{"ts": "2026-11-04T21:28:42.647Z", "probe": "_meta", "event": "start", "probes": ["web", "api_app", "kube_api", "lb160_web", "lb162_web", "lb160_api", "lb162_api"], "pid": 8992}
+{"ts": "2026-11-04T21:28:42.666Z", "probe": "lb160_api", "ok": true, "status": 200, "ms": 16, "ip": "192.168.148.160", "err": null}
+{"ts": "2026-11-04T21:28:42.666Z", "probe": "kube_api", "ok": true, "status": 200, "ms": 17, "ip": "192.168.148.162", "err": null}
+bilan_nouvelles_mesures (probe ok/ko):
+   ('api_app', True) 35
+   ('kube_api', True) 35
+   ('lb160_api', True) 35
+   ('lb160_web', True) 35
+   ('lb162_api', True) 35
+   ('lb162_web', True) 35
+   ('web', True) 35
+etat: is_active=active processus=1 date=2026-11-04T21:29:16Z
+
+PREFIXE_IDENTIQUE=True (attendu sha256 f7b7c70a51cb18e979ef87b8fcfad4d0b47303bad8739ea1f8928ee4e133b408 sur 83382272 octets)

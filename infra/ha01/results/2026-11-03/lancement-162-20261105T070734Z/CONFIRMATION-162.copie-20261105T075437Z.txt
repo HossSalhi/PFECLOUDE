@@ -1,0 +1,7 @@
+VM: 162
+Date (UTC) : 2026-11-05T07:54:37Z
+Action confirmée : extinction BRUTALE de la VM .162 (k8s-lb2) par `vmrun stop hard`, observation de 600 s, relance automatique, puis stabilisation de 1800 s (p4_vmstop.py --vm 162 --label stop162 --confirmed --observe 600 --stabilize 1800).
+Conséquences connues et acceptées : .160 devient l'unique répartiteur de charge et serveur DNS pendant ~10-11 min ; etcd à 4/5 (leader .153 inchangé, quorum tenu) ; clients DNS à cache coupés 8 à ~41 s (R1) ; sessions API de .153 vers .162:6443 gelées ~45 s, NotReady bref possible (R2) ; agent HELIOS suspendu pendant l'essai ; PostgreSQL et workers non concernés.
+Décisions de cadrage : option A (DNS actuel non modifié) ; .153 totalement inchangée, seulement surveillée ; leader etcd non déplacé ; aucune libération de RAM.
+Préflight de référence : p5-162-preflight-20261105T074636Z.json (60 PASS / 0 WARN / 0 FAIL) ; portes re-contrôlées vertes à 07:53:33Z (RAM 3 mesures [2569, 2581, 2552] Mo, calme 64,6 min, etcd 5/5 terme 1820).
+Réponse écrite de l'utilisateur (VERBATIM) : « OUI, éteindre .162 (k8s-lb2) — option A, .153 inchangée »

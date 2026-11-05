@@ -1,0 +1,4 @@
+ABANDON du superviseur (2026-11-04T21:43:55.034Z) : MemAvailable .160 = 724 Mo < 99999 Mo
+phase : avant_charge
+valeurs : {"ts": "2026-11-04T21:43:54.003Z", "phase": "avant_charge", "mem160_mo": 724, "ram_hote_mo": 2211, "sondes_win_lues": 7, "sondes_win_echecs": [], "sondes_161_lues": 7, "sondes_161_echecs": [], "etcd_non_sains": [], "ABANDON": "MemAvailable .160 = 724 Mo < 99999 Mo"}
+Aucune relance automatique.

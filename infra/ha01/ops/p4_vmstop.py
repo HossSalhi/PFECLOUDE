@@ -42,7 +42,11 @@ REVIVE = os.path.join(O.HERE, "vm_revive.ps1")
 PAUSE = os.path.join(O.HERE, "helios-pause.ps1")
 VANTAGES = ("Windows", ".161 sans cache", ".161 avec cache")
 VMS = {
-    "160": {"folder": "k8s-monitoring", "node": None, "kind": "lb", "web_min": 99.0,
+    "160": {"folder": "k8s-monitoring", "node": None, "kind": "lb", "web_min": 99.0, "survivor_lb": "162",
+            "alive_canaries": ["ha01-canary-w1", "ha01-canary-w2"], "dead_canaries": []},
+    # 4e scénario (perte de .162 = LB ACTIF du DNS). `dnswatch` active : sondes de bascule DNS (Windows + dnsmasq direct + nœud), abandons spécifiques (LB survivant .160,
+    # sondes « hosts » web/api_app), mémoire de .160 surveillée, préflight spécifique p5_162_preflight.py exigé. Les autres scénarios n'utilisent RIEN de cela.
+    "162": {"folder": "k8s-lb2", "node": None, "kind": "lb", "web_min": 99.0, "survivor_lb": "160", "dnswatch": True,
             "alive_canaries": ["ha01-canary-w1", "ha01-canary-w2"], "dead_canaries": []},
     "155": {"folder": "k8s-worker2", "node": "k8s-worker2", "kind": "worker", "web_min": 98.0,
             "alive_canaries": ["ha01-canary-w1"], "dead_canaries": ["ha01-canary-w2"]},
@@ -142,6 +146,111 @@ class LogStream:
         return open(self.path, encoding="utf-8", errors="replace").read()
 
 
+def recent_p5_preflight(vm, max_age_min=30):
+    """(ok, détail) : le dernier results/.../p5-<vm>-preflight-*.json existe, date de moins de `max_age_min` min et ne contient AUCUN FAIL."""
+    import glob
+    files = sorted(glob.glob(os.path.join(O.RES, "p5-%s-preflight-*.json" % vm)))
+    if not files:
+        return False, "aucun p5-%s-preflight-*.json : lancer ops/p5_%s_preflight.py" % (vm, vm)
+    try:
+        j = json.load(open(files[-1], encoding="utf-8"))
+    except (OSError, ValueError):
+        return False, "fichier illisible: %s" % files[-1]
+    age = (time.time() - j.get("ts", 0)) / 60
+    return (age <= max_age_min and bool(j.get("all_ok"))), "%s (%.0f min, %d PASS / %d WARN / %d FAIL)" % (os.path.basename(files[-1]), age, j.get("pass", 0), j.get("warn", 0), j.get("fail", 0))
+
+
+def start_dnswatch(run, a, say):
+    """4e scénario (perte de .162) : lance les sondes de BASCULE DNS pour `observe + 960` s (observation, relance, retour du DNS nominal).
+    - Windows : résolveur système (cache DNS Windows + NRPT) puis connexion TCP vers la 1re adresse, 2 Hz ;
+    - dnsmasq .160 et .162 en direct, 5 Hz, un fil par serveur ;
+    - nœud .158 : glibc (/etc/resolv.conf : .160 puis .162, sans cache système), unité systemd transitoire bornée (RuntimeMaxSec).
+    Ne modifie rien (requêtes DNS + connexions TCP sans données)."""
+    dur = a.observe + 960
+    script = os.path.join(O.PROBES, "ha01_dnswatch.py")
+    st = {"files": {}, "procs": [], "node": None}
+    cmds = {"windows": [sys.executable, script, "--mode", "os", "--name", "api.helios.orange.tn", "--port", "6443", "--period", "0.5", "--duration", str(dur)],
+            "direct": [sys.executable, script, "--mode", "direct", "--servers", "160,162", "--period", "0.2", "--duration", str(dur)]}
+    for k, cmd in cmds.items():
+        f = os.path.join(run.dir, "dnswatch-%s.jsonl" % k)
+        st["files"][k] = f
+        try:
+            st["procs"].append(subprocess.Popen(cmd + ["--out", f], creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))   # CREATE_NO_WINDOW
+        except OSError as e:
+            say("ATTENTION: sonde DNS %s non démarrée (%s)" % (k, e))
+    src = open(script, encoding="utf-8").read()
+    rc, out = O.ssh("158", "cat > /tmp/ha01_dnswatch.py && echo ok", timeout=40, stdin=src)
+    unit, nfile = "ha01-dnswatch-node-%s" % a.label, "/tmp/ha01-dnswatch-node-%s.jsonl" % a.label
+    if out.endswith("ok"):
+        rc, out = O.ssh("158", "sudo -n systemd-run --quiet --unit=%s --property=RuntimeMaxSec=%d /usr/bin/python3 /tmp/ha01_dnswatch.py --mode os --name api.helios.orange.tn "
+                               "--port 6443 --period 0.5 --duration %d --out %s; sleep 2; systemctl is-active %s.service" % (unit, dur + 120, dur, nfile, unit), timeout=40)
+        if out.strip().endswith("active"):
+            st["node"] = nfile
+    say("sondes de bascule DNS : Windows %s, dnsmasq direct %s, nœud .158 %s" % (
+        "OK" if len(st["procs"]) >= 1 else "NON", "OK" if len(st["procs"]) >= 2 else "NON", "OK" if st["node"] else "NON"))
+    return st
+
+
+def collect_dnswatch(run, st):
+    """Rapatrie le fichier du nœud .158 dans le dossier d'essai (les fichiers Windows y sont déjà)."""
+    if st and st.get("node"):
+        rc, out = O.ssh("158", "cat %s" % st["node"], timeout=120)
+        run.save("dnswatch-node.jsonl", out + "\n")
+
+
+def _jl(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    for r in out:
+        r["t"] = O.epoch_of(r["ts"])
+    return out
+
+
+def analyse_dnswatch(run_dir, t_stop, t_vm_start, dead, surv):
+    """Mesures BRUTES de la bascule DNS (secondes relatives à l'arrêt `t_stop`, ou à la relance `t_vm_start` pour le fail-back). Pur : testable avec des fichiers fabriqués."""
+    res = {}
+    ip_dead, ip_surv = O.NET + dead, O.NET + surv
+    d = _jl(os.path.join(run_dir, "dnswatch-direct.jsonl"))
+    api = "api.helios.orange.tn"
+    flips = [r["t"] for r in d if r.get("server") == surv and r.get("name") == api and r["t"] >= t_stop and r.get("ips") is not None and dead not in r["ips"]]
+    res["flip_server_s"] = round(flips[0] - t_stop, 1) if flips else None
+    dead_ans = [r["t"] for r in d if r.get("server") == dead and r["t"] >= t_stop and r.get("ips") is not None]
+    res["dead_last_answer_s"] = round(dead_ans[-1] - t_stop, 1) if dead_ans else None
+    fb = [r["t"] for r in d if t_vm_start and r.get("server") == surv and r.get("name") == api and r["t"] >= t_vm_start and r.get("ips") and dead in r["ips"]]
+    res["failback_server_s"] = round(fb[0] - t_vm_start, 1) if fb else None
+    for key, fname in (("windows", "dnswatch-windows.jsonl"), ("node", "dnswatch-node.jsonl")):
+        rs = _jl(os.path.join(run_dir, fname))
+        after = [r for r in rs if r["t"] >= t_stop]
+        if not after:
+            res[key] = {}
+            continue
+        fails = [r for r in after if not r.get("tcp_ok")]
+        first_fail = fails[0]["t"] if fails else None
+        recover = None
+        if first_fail is not None:
+            seq = [r for r in after if r["t"] >= first_fail]
+            for i, r in enumerate(seq):
+                if r.get("tcp_ok") and r.get("target") == ip_surv and all(x.get("tcp_ok") for x in seq[i:i + 3]):
+                    recover = r["t"]
+                    break
+        stale = sum(1 for r in after if r.get("target") == ip_dead and (recover is None or r["t"] < recover))
+        back = [r["t"] for r in rs if t_vm_start and r["t"] >= t_vm_start and r.get("target") == ip_dead and r.get("tcp_ok")]
+        res[key] = {"n_echantillons": len(rs), "first_fail_s": None if first_fail is None else round(first_fail - t_stop, 1),
+                    "recover_s": None if recover is None else round(recover - t_stop, 1),
+                    "outage_s": None if (recover is None or first_fail is None) else round(recover - first_fail, 1),
+                    "stale_answers": stale, "failback_s": round(back[0] - t_vm_start, 1) if back else None,
+                    "max_resolve_ms": max((r.get("resolve_ms") or 0) for r in rs)}
+    return res
+
+
 def preflight(a, vm, say, dry):
     cfg = VMS[vm]
     chk = []
@@ -152,6 +261,10 @@ def preflight(a, vm, say, dry):
     ok, d = confirmation(vm)
     add("confirmation explicite de l'utilisateur pour la VM .%s (< 6 h)" % vm, ok or dry, d if not dry else "(dry-run) " + d)
     add("drapeau --confirmed", a.confirmed or dry, a.confirmed)
+    if cfg.get("dnswatch"):
+        # 4e scénario : le préflight SPÉCIFIQUE (ops/p5_162_preflight.py) doit avoir été exécuté TOUT VERT il y a moins de 30 min (même en lecture seule, il prouve la préparation)
+        ok_p5, d_p5 = recent_p5_preflight(vm)
+        add("préflight spécifique .%s (p5_162_preflight.py) tout PASS et de moins de 30 min" % vm, ok_p5 or dry, ("(dry-run) " if dry and not ok_p5 else "") + d_p5)
     ns = O.nodes_state()
     add("3 nœuds Ready", len(ns) == 3 and all(v == "Ready" for v in ns.values()), ns)
     add("etcd 5/5 sain", O.etcd_healthy() == 5, O.etcd_healthy())
@@ -231,9 +344,10 @@ def evaluate(c):
                          bool(v) and v["availability_pct"] >= minp and v["longest_failure_s"] <= maxl,
                          "hors gel: %s | BRUT: %s" % (O.fmt_probe(h, probe), O.fmt_probe(r, probe))))
         if vname == "Windows" and cfg["kind"] == "lb":
-            for p in ("lb162_web", "lb162_api"):
+            slb = cfg.get("survivor_lb", "162")
+            for p in ("lb%s_web" % slb, "lb%s_api" % slb):
                 v = h.get(p)
-                rows.append(("[Windows] LB survivant .162 en direct (%s) >= 99,5 %% (hors gels)" % p, bool(v) and v["availability_pct"] >= 99.5,
+                rows.append(("[Windows] LB survivant .%s en direct (%s) >= 99,5 %% (hors gels)" % (slb, p), bool(v) and v["availability_pct"] >= 99.5,
                              "hors gel: %s | BRUT: %s" % (O.fmt_probe(h, p), O.fmt_probe(r, p))))
     for dep, ca in c["canaries"].items():
         alive = dep in cfg["alive_canaries"]
@@ -256,7 +370,7 @@ def evaluate(c):
     rows.append(("etcd : 4/4 membres sains en <= 10 s après l'arrêt", c["etcd_ok_after_s"] is not None and c["etcd_ok_after_s"] <= 10, "%s s" % c["etcd_ok_after_s"]))
     rows.append(("etcd : <= 2 élections pendant le test (terme Raft)", c["term_after"] is not None and c["term_before"] is not None and c["term_after"] - c["term_before"] <= 2,
                  "terme %s -> %s, leader %s -> %s" % (c["term_before"], c["term_after"], c["leader_before"], c["leader_after"])))
-    surv = [s for s in ("155", "158") if s != vm]
+    surv = [s for s in ("155", "158") if s != vm] + (["160"] if cfg.get("dnswatch") else [])      # .162 : le LB survivant .160 est aussi surveillé
     rows.append(("mémoire : survivants >= 300 Mo et .153 >= 500 Mo (minimum mesuré)", all(c["mem_min"].get(s, 9999) >= 300 for s in surv) and c["mem_min"].get("153", 9999) >= 500, c["mem_min"]))
     rows.append(("0 OOMKilled et 0 éviction pour mémoire pendant le test", c["oom"] == 0 and not c["mem_evictions"], "OOM=%s évictions=%s" % (c["oom"], len(c["mem_evictions"]))))
     rows.append(("RAM hôte >= 1500 Mo (minimum mesuré)", c["host_min"] >= 1500, "%s Mo" % c["host_min"]))
@@ -279,6 +393,19 @@ def evaluate(c):
     md.append("## Bascule DNS (interrogation directe de dnsmasq toutes les secondes)")
     md.append("- mode du contrôleur : **%s** ; sortie du LB .160 des réponses de dnsmasq .162 : **%s**" % (c["dns_mode"], "—" if c["dns_switch_s"] is None else "%.0f s" % c["dns_switch_s"]))
     md.append("")
+    if cfg.get("dnswatch"):
+        # 4e scénario : critère de bascule du contrôleur + mesures BRUTES de la bascule vue par chaque type de client (hors critères du plan, publiées telles quelles)
+        w = c.get("dnsw") or {}
+        fl = w.get("flip_server_s")
+        rows.append(("bascule DNS : le contrôleur survivant (.%s) cesse de publier .%s en <= 15 s après l'arrêt" % (cfg["survivor_lb"], vm), fl is not None and fl <= 15,
+                     "bascule à %s s (modèle hors ligne : 8,1 à 11,1 s)" % ("—" if fl is None else "%.1f" % fl)))
+        md.append("## Bascule DNS vue par chaque client (mesures brutes, `probes/ha01_dnswatch.py`)")
+        for k, lab in (("windows", "Windows — résolveur système + cache DNS Windows + NRPT (`api.helios.orange.tn`)"), ("node", "Nœud .158 — glibc, /etc/resolv.conf (.160 puis .162), sans cache système")):
+            x = w.get(k) or {}
+            md.append("- **%s** : première erreur à T+%s s ; première connexion réussie vers le LB survivant à T+%s s ; coupure de **%s s** ; réponses périmées (.%s) : %s ; retour de .%s dans la réponse (fail-back) : T+%s s après la relance"
+                      % (lab, x.get("first_fail_s", "—"), x.get("recover_s", "—"), x.get("outage_s", "—"), vm, x.get("stale_answers", "—"), vm, x.get("failback_s", "—")))
+        md.append("- **dnsmasq survivant (.%s, 5 Hz)** : cesse de publier .%s à T+%s s ; dnsmasq .%s (mort) : dernière réponse à T+%s s" % (cfg["survivor_lb"], vm, "—" if fl is None else "%.1f" % fl, vm, w.get("dead_last_answer_s", "—")))
+        md.append("")
     md.append("## Points de vue (hors gel | brut)")
     for vname in VANTAGES:
         if vname in per and per[vname]["raw"]:
@@ -319,7 +446,7 @@ def main():
         say("dry-run: préconditions OK (confirmation non exigée en dry-run) — aucune VM éteinte, aucune pause HELIOS, aucun filet armé.")
         return 0
 
-    dns_mode = O.dns_state("162").get("mode")
+    dns_mode = O.dns_state(cfg.get("survivor_lb", "162")).get("mode")         # contrôleur du LB SURVIVANT (.162 pour l'arrêt de .160 : inchangé ; .160 pour l'arrêt de .162)
     alive_eps = tuple(s for s in O.ETCD_ALL if s != vm)
     stopfile = os.path.join(run.dir, "REVIVE-DISARM.txt")
     revive_log = os.path.join(run.dir, "revive.log")
@@ -348,6 +475,7 @@ def main():
     det.start()
     dns = O.DnsPoller()
     dns.start()
+    dw_state = start_dnswatch(run, a, say) if cfg.get("dnswatch") else None          # 4e scénario : sondes de bascule DNS (Windows, dnsmasq en direct, nœud .158)
     # Seul le canari du worker qui va être ÉTEINT est capté en direct (son journal disparaît avec son pod) ; les canaris survivants sont
     # lus en entier après coup (un flux passant par .153 pourrait casser pendant l'arrêt de .160).
     for dep in cfg["dead_canaries"]:
@@ -403,7 +531,7 @@ def main():
             host_min = min(host_min, hm)
             rec["host_mb"] = hm
             if k % 3 == 0:
-                for s in ("153", "155", "158"):
+                for s in ("153", "155", "158") + (("160",) if cfg.get("dnswatch") else ()):
                     if s != vm:
                         m = O.mem_avail(s)
                         if m is not None:
@@ -449,6 +577,13 @@ def main():
                 why = "RAM hôte %s Mo < 600" % hm
             elif max(runs.values()) > 60:
                 why = "sonde par nom en échec depuis %ss (vue Windows)" % max(runs.values())
+            elif cfg.get("dnswatch") and max(runs["web"], runs["api_app"]) > 25:
+                # .162 : `web` et `api_app` passent par le fichier hosts de Windows (.160 d'abord) : ils NE DOIVENT PAS être touchés. > 25 s = le LB survivant a un problème.
+                why = "sonde web/api_app (fichier hosts, .160 d'abord) en échec depuis %ss : le LB survivant .%s ne sert pas" % (max(runs["web"], runs["api_app"]), cfg["survivor_lb"])
+            elif cfg.get("dnswatch") and max(O.tail_fail_run(O.PROBE_WIN, "lb%s_web" % cfg["survivor_lb"]), O.tail_fail_run(O.PROBE_WIN, "lb%s_api" % cfg["survivor_lb"])) > 25:
+                why = "LB survivant .%s en direct (web/API) en échec depuis plus de 25 s" % cfg["survivor_lb"]
+            elif cfg.get("dnswatch") and mem_min.get(cfg["survivor_lb"], 9999) < 250:
+                why = "MemAvailable du LB survivant .%s < 250 Mo" % cfg["survivor_lb"]
             else:
                 for n, (t_first, t_last) in notready_unexpected.items():
                     if ns.get(n) != "Ready" and O.epoch_of(t_last) - O.epoch_of(t_first) > 120:
@@ -488,8 +623,8 @@ def main():
                 st = O.cnpg_state()
                 conds["cnpg"] = st.startswith("Cluster in healthy state") and st.endswith("|2")
             else:
-                ok_l, _ = O.lb_direct_ok("160")
-                up_l, _ = O.haproxy_all_up("160")
+                ok_l, _ = O.lb_direct_ok(vm)                 # le LB qui REVIENT (.160 pour l'arrêt de .160 : inchangé ; .162 pour l'arrêt de .162)
+                up_l, _ = O.haproxy_all_up(vm)
                 conds["lb"] = ok_l and up_l
                 sts = {x: O.dns_state(x) for x in ("160", "162")}
                 nominal = all({k2: v.get("status") for k2, v in (s.get("lbs") or {}).items()} == {"160": "UP", "162": "UP"} for s in sts.values())
@@ -581,8 +716,13 @@ def main():
         n_oom = -1
     rc, ev = O.kubectl("get events -A --field-selector reason=Evicted --no-headers")
     mem_ev = [l for l in ev.splitlines() if "memory" in l.lower()]
-    dns_switch = dns.first_without("162", "160", t_stop) if cfg["kind"] == "lb" else None
-    ctx = {"vm": vm, "stalls": stalls, "vantages": vant, "canaries": canaries, "stopped_ok": stopped_ok, "stop_detail": stop_detail,
+    dns_switch = dns.first_without("162", "160", t_stop) if (cfg["kind"] == "lb" and not cfg.get("dnswatch")) else None
+    dnsw = None
+    if dw_state:
+        collect_dnswatch(run, dw_state)
+        dnsw = analyse_dnswatch(run.dir, t_stop, t_vm_start, vm, cfg["survivor_lb"])
+        run.save("dnswatch-analysis.json", dnsw)
+    ctx = {"dnsw": dnsw, "vm": vm, "stalls": stalls, "vantages": vant, "canaries": canaries, "stopped_ok": stopped_ok, "stop_detail": stop_detail,
            "notready_unexpected": notready_unexpected, "dead_notready_after_s": dead_notready_after_s, "etcd_ok_after_s": etcd_ok_after_s,
            "term_before": term_before, "term_after": term_after, "leader_before": leader_before, "leader_after": leader_after,
            "mem_min": mem_min, "oom": n_oom, "mem_evictions": mem_ev, "host_min": host_min, "return": ret, "stabilize_s": a.stabilize,

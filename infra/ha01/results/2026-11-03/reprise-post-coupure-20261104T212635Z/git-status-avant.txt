@@ -1,0 +1,546 @@
+ M backend/backend/ai-service/app/features/metric_features.py
+ M backend/backend/ai-service/app/models/inference.py
+ M backend/backend/ai-service/app/models/loader.py
+ M backend/backend/ai-service/app/services/auto_trainer.py
+ M backend/backend/ai-service/app/services/predictor.py
+ M backend/backend/infra/k8s/backend-rbac.yaml
+ M backend/backend/pom.xml
+ M backend/backend/src/main/java/com/orange/pfe/backend/config/JwtAuthFilter.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/config/RemediationProperties.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/config/SecurityConfig.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/config/SecurityStartupValidator.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/exception/GlobalExceptionHandler.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/model/action/ActionType.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/model/action/RemediationTargetKind.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/model/learning/IncidentLearning.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/model/user/AppUser.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/model/workflow/WorkflowLog.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/repository/IncidentRepository.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/AIOpsOrchestrationService.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/InfrastructureHealthScheduler.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/InfrastructureHealthService.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/OrchestrationService.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/WorkflowService.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/KubernetesRemediationExecutor.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RemediationExecutor.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RemediationPlan.java
+ M backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RemediationPolicyService.java
+ M backend/backend/src/main/resources/application.properties
+ M backend/backend/src/test/java/com/orange/pfe/backend/controller/AIOpsControllerTest.java
+ M backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/RemediationPolicyServiceTest.java
+ M backend/backend/src/test/resources/application.properties
+ M camunda-direct/bridge/bridge.py
+ M camunda-direct/detecteur/collecteur_ml_host.py
+ M frontend/angular.json
+ M frontend/src/app/app.component.html
+ M frontend/src/app/app.component.ts
+ M frontend/src/app/core/services/api.service.spec.ts
+ M frontend/src/app/core/services/api.service.ts
+ M frontend/src/app/features/activate/activate.component.html
+ M frontend/src/app/features/ai-decisions/ai-decisions.component.html
+ M frontend/src/app/features/ai-decisions/ai-decisions.component.ts
+ M frontend/src/app/features/applications/applications.component.html
+ M frontend/src/app/features/dashboard/dashboard.component.html
+ M frontend/src/app/features/fine-tuning/fine-tuning.component.html
+ M frontend/src/app/features/fine-tuning/fine-tuning.component.ts
+ M frontend/src/app/features/forgot-password/forgot-password.component.html
+ M frontend/src/app/features/incidents/incident-detail/incident-detail.component.html
+ M frontend/src/app/features/incidents/incident-detail/incident-detail.component.ts
+ M frontend/src/app/features/infrastructure/infrastructure.component.ts
+ M frontend/src/app/features/login/login.component.html
+ M frontend/src/app/features/register/register.component.html
+ M frontend/src/app/features/remediation/remediation.component.html
+ M frontend/src/app/features/reset-password/reset-password.component.html
+ M frontend/src/app/shared/not-found/not-found.component.html
+ M frontend/src/environments/environment.ts
+ M frontend/src/index.html
+ M frontend/src/styles.scss
+ M infra/ha01/README-HA-01.md
+ M infra/ha01/ops/p4_vmstop.py
+ M infra/ha01/results/2026-11-03/phase1-journal.md
+ M infra/haproxy-apps-lb.cfg
+ M infra/helm/helios/values.yaml
+ M infra/metallb-pool.yaml
+ M infra/security.md
+ M scripts/_deploy_ai_and_probe.py
+ M scripts/helios-ops/helios-node-autoheal.py
+?? ") {"
+?? "= @("
+?? AUDIT-CLUSTER-K8S.md
+?? AUDIT-VIDEOS-NANA-vs-HELIOS.docx
+?? HANDOFF-CHATGPT-SESSION-2026-08-04.md
+?? PROMPT-CHATGPT-CORPUS-2026-08-05.md
+?? PROMPT-CHATGPT-ETAPE-C.md
+?? PROMPT-CHATGPT-HELIOS.md
+?? backend/backend/ai-service/app/features/helios_features.py
+?? backend/backend/ai-service/datasets/PROTOCOLE-INTERLEAVED.md
+?? backend/backend/ai-service/datasets/deploy_collector1/
+?? backend/backend/ai-service/datasets/helios_mvp25_ml2_metrics_v1.json
+?? backend/backend/ai-service/datasets/helios_mvp25_ml4_metrics_v1.json
+?? backend/backend/ai-service/datasets/helios_mvp25_oof_predictions_v1.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_oof_predictions_v3.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_supervised_v1.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_supervised_v2.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_supervised_v3.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_tracabilite_v2.csv
+?? backend/backend/ai-service/datasets/helios_mvp25_tracabilite_v3.csv
+?? backend/backend/ai-service/datasets/ml3_analyse/
+?? backend/backend/ai-service/datasets/ml5_campagne/
+?? backend/backend/ai-service/scripts/build_mvp25_supervised.py
+?? backend/backend/ai-service/scripts/build_mvp25_supervised_v2.py
+?? backend/backend/ai-service/scripts/build_mvp25_supervised_v3.py
+?? backend/backend/ai-service/scripts/ml2_baseline_cv.py
+?? backend/backend/ai-service/scripts/ml3_analyse_erreurs.py
+?? backend/backend/ai-service/scripts/ml4_evaluation_v3.py
+?? backend/backend/ai-service/scripts/ml5_plan_campagne.py
+?? backend/backend/ai-service/scripts/validate_mvp25_supervised.py
+?? backend/backend/ai-service/tests/test_chaos_tooling1.py
+?? backend/backend/ai-service/tests/test_collector1_ancrage.py
+?? backend/backend/ai-service/tests/test_collector2_pod_pending.py
+?? backend/backend/ai-service/tests/test_dataset1_supervised.py
+?? backend/backend/ai-service/tests/test_dataset2_rebuild.py
+?? backend/backend/ai-service/tests/test_deploy_collector1.py
+?? backend/backend/ai-service/tests/test_fix2_network_partition.py
+?? backend/backend/ai-service/tests/test_lot1_auto_trainer.py
+?? backend/backend/ai-service/tests/test_lot1b_risk_leakage.py
+?? backend/backend/ai-service/tests/test_lot1c_nan_zero.py
+?? backend/backend/ai-service/tests/test_lot1d_labels.py
+?? backend/backend/ai-service/tests/test_lot1e_injection_tracking.py
+?? backend/backend/ai-service/tests/test_lot1f_train_inference_contract.py
+?? backend/backend/ai-service/tests/test_lot1g_group_cv.py
+?? backend/backend/ai-service/tests/test_lot1h_xgboost_contract.py
+?? backend/backend/ai-service/tests/test_lot1i_bundle_loader_inference.py
+?? backend/backend/ai-service/tests/test_lot2_nan_inference.py
+?? backend/backend/ai-service/tests/test_lot3_metric_features.py
+?? backend/backend/ai-service/tests/test_lot4_collecteur.py
+?? backend/backend/ai-service/tests/test_lot5_parity.py
+?? backend/backend/ai-service/tests/test_lot6_catalogue.py
+?? backend/backend/ai-service/tests/test_lot7_campagne.py
+?? backend/backend/ai-service/tests/test_ml2_baseline.py
+?? backend/backend/ai-service/tests/test_ml3_analyse.py
+?? backend/backend/ai-service/tests/test_ml4_dataset3.py
+?? backend/backend/ai-service/tests/test_ml5_plan_campagne.py
+?? backend/backend/backend-0.0.1-SNAPSHOT-before-rebuild-20261019-182121.jar.bak
+?? backend/backend/backend-before-namespace-fix-20261019-183953.jar.bak
+?? backend/backend/incident-learning-bytecode-check.txt
+?? backend/backend/pom.xml.before-camunda-8.9-20261031-222529.bak
+?? backend/backend/sonar-project.properties
+?? backend/backend/src/main/java/com/orange/pfe/backend/config/BridgeClientConfiguration.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/config/BridgeClientConfiguration.java.bak-20261018-230253
+?? backend/backend/src/main/java/com/orange/pfe/backend/config/BridgeClientConfiguration.java.bak-20261018-230432
+?? backend/backend/src/main/java/com/orange/pfe/backend/config/BridgeClientConfiguration.java.bak-dedup-20261018-230513
+?? backend/backend/src/main/java/com/orange/pfe/backend/controller/HostIncidentIngestionController.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/controller/IncidentCardController.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/ExecutionEventRequest.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/HostIncidentIngestionRequest.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/HostIncidentIngestionResponse.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/IncidentCardResponse.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/IncidentVerificationRequest.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/IncidentVerificationResponse.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/TerminalCommandOutput.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/TerminalEvidenceCollectRequest.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/TerminalEvidenceRequest.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/dto/TerminalEvidenceResponse.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/core/IncidentTerminalEvidence.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/core/IncidentVerification.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/enums/EvidenceProvenance.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/enums/ExecutionStage.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/enums/TerminalEvidencePhase.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/learning/IncidentLearning.java.before-success-nullability-20261019-181126.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/user/AppUser.java.before-namespace-nullability-20261019-183817.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/model/workflow/WorkflowLog.java.bak_20261019_190731
+?? backend/backend/src/main/java/com/orange/pfe/backend/repository/IncidentTerminalEvidenceRepository.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/repository/IncidentVerificationRepository.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaLaunchOutcome.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java.before-business-id-20261031-223641.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java.before-chain-order-fix-20261031-223808.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java.before-managed-logs-20261018-193546.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java.before-manual-followup-20261018-201424.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaWorkflowService.java.before-safe-camunda-fallback-20261018-195852.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/DiagnosticProfileCatalog.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostCpuIncidentRemediationOrchestrator.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostCpuIncidentRemediationOrchestrator.java.before-requires-new.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostDiskIncidentRemediationOrchestrator.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostIncidentIngestionService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostIncidentPrometheusPoller.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/HostMemoryIncidentRemediationOrchestrator.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/IncidentCardService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/RemediationLaunchFailureService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/TerminalEvidenceCollectorService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/WorkflowService.java.before-managed-workflow-20261018-190834.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/BridgeClient.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/HostCpuVerificationService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/HostDiskVerificationService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/HostMemoryVerificationService.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/NodeReadinessObservation.java
+?? "backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/Nouveau Document texte.txt"
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RestTemplateBridgeClient.java
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RestTemplateBridgeClient.java.before-catch-fix-20261018-193927.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RestTemplateBridgeClient.java.before-catch-replacement-20261018-194110.bak
+?? backend/backend/src/main/java/com/orange/pfe/backend/service/remediation/RestTemplateBridgeClient.java.before-diagnostics-20261018-193546.bak
+?? backend/backend/src/main/resources/application.properties.bak-20261023-113306
+?? backend/backend/src/main/resources/application.properties.bak-before-grpc-20261023-113448
+?? backend/backend/src/main/resources/application.properties.before-cpu-allowed-action-20261019-170755.bak
+?? backend/backend/src/main/resources/db/migration/V19__incident_identity_card.sql
+?? backend/backend/src/main/resources/db/migration/V20__allow_host_cpu_quota_action.sql
+?? backend/backend/src/main/resources/db/migration/V21__align_open_incident_dedup_active_statuses.sql
+?? backend/backend/src/main/resources/db/migration/V22__require_workflow_log_parent.sql
+?? backend/backend/src/main/resources/db/migration/V23__allow_host_memory_limit_action.sql
+?? backend/backend/src/test/java/com/orange/pfe/backend/config/
+?? backend/backend/src/test/java/com/orange/pfe/backend/controller/HostIncidentIngestionControllerTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/controller/IncidentCardHttpControllerTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/repository/
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaJobWorkerDiskVerificationTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaJobWorkerVmDownVerificationTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaJobWorkerVmDownVerificationTest.java.before-inorder.bak
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaWorkflowServiceNoDuplicateRemediationTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaWorkflowServiceNoDuplicateRemediationTest.java.before-business-id-mock-fix-20261031-224030.bak
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaWorkflowServiceNoDuplicateRemediationTest.java.before-manual-followup-20261018-201424.bak
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/DiagnosticProfileCatalogTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostCpuIncidentRemediationOrchestratorTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostCpuIncidentRemediationOrchestratorTest.java.bak
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostDiskIncidentRemediationOrchestratorTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostIncidentDispatchRoutingTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostIncidentIngestionServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostIncidentPrometheusPollerTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/HostMemoryIncidentRemediationOrchestratorTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/IncidentCardServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/IncidentCardServiceVmDownEvidenceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/InfrastructureHealthSchedulerDeterministicTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/RemediationLaunchFailureServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/TerminalEvidenceCollectorServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/WorkflowServicePersistenceRegressionTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostCpuQuotaPolicyTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostCpuQuotaPolicyTest.java.bak-20261022-170420
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostCpuVerificationServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostDiskReclaimCommandSafetyTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostDiskVerificationServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/HostMemoryVerificationServiceTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/KubernetesRemediationExecutorBridgeTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/KubernetesRemediationExecutorMasterRecoveryTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/KubernetesRemediationExecutorRecoveryTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/PolicyExecutionPathTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/RemediationHostScopeTest.java
+?? backend/backend/src/test/java/com/orange/pfe/backend/service/remediation/RestTemplateBridgeClientTest.java
+?? camunda-direct/bridge/helios_action_catalog.py
+?? camunda-direct/bridge/helios_incident_card_client.py
+?? camunda-direct/campagne/
+?? camunda-direct/detecteur/chaos/
+?? frontend/angular.json.before-local-proxy.bak
+?? frontend/proxy.conf.json
+?? frontend/proxy.conf.json.before-origin-fix.bak
+?? frontend/src/app/core/config/
+?? frontend/src/app/features/ai-decisions/ai-decisions.component.spec.ts
+?? frontend/src/app/features/fine-tuning/fine-tuning.component.spec.ts
+?? frontend/src/app/features/incidents/incident-detail/incident-detail.component.spec.ts
+?? frontend/src/environments/environment.ts.before-local-proxy.bak
+?? helios-post-recovery-check.sh
+?? helios-validation-features-mvp.sh
+?? infra/08-metallb-ingress-pro.sh
+?? infra/09-fix-monitoring-vm.sh
+?? infra/10-local-apiserver-lb.OBSOLETE.md
+?? infra/10-local-apiserver-lb.sh
+?? infra/11-install-monitoring-6vms.sh
+?? infra/ha-control-plane/
+?? infra/ha-upgrade/
+?? infra/ha01/ops/dns_flip_model.py
+?? infra/ha01/ops/gate4_162_report.py
+?? infra/ha01/ops/p5_162_preflight.py
+?? infra/ha01/ops/p5_move_leader.py
+?? infra/ha01/ops/test_p4_162.py
+?? infra/ha01/probes/ha01_dnswatch.py
+?? infra/ha01/results/2026-11-03/GATE-4-162.md
+?? infra/ha01/results/2026-11-03/chgB.err
+?? infra/ha01/results/2026-11-03/chgB.out
+?? infra/ha01/results/2026-11-03/chgB.pid
+?? infra/ha01/results/2026-11-03/chgB2.err
+?? infra/ha01/results/2026-11-03/chgB2.out
+?? infra/ha01/results/2026-11-03/chgB2.pid
+?? infra/ha01/results/2026-11-03/chgC.err
+?? infra/ha01/results/2026-11-03/chgC.out
+?? infra/ha01/results/2026-11-03/chgC.pid
+?? infra/ha01/results/2026-11-03/chgC2.err
+?? infra/ha01/results/2026-11-03/chgC2.out
+?? infra/ha01/results/2026-11-03/chgC2.pid
+?? infra/ha01/results/2026-11-03/chgC3.err
+?? infra/ha01/results/2026-11-03/chgC3.out
+?? infra/ha01/results/2026-11-03/chgC3.pid
+?? infra/ha01/results/2026-11-03/cnpgl.err
+?? infra/ha01/results/2026-11-03/cnpgl.out
+?? infra/ha01/results/2026-11-03/cnpgl.pid
+?? infra/ha01/results/2026-11-03/dry-detached.err
+?? infra/ha01/results/2026-11-03/dry-detached.out
+?? infra/ha01/results/2026-11-03/dry-detached.pid
+?? infra/ha01/results/2026-11-03/enf160.err
+?? infra/ha01/results/2026-11-03/enf160.out
+?? infra/ha01/results/2026-11-03/enf160.pid
+?? infra/ha01/results/2026-11-03/enf162.err
+?? infra/ha01/results/2026-11-03/enf162.out
+?? infra/ha01/results/2026-11-03/enf162.pid
+?? infra/ha01/results/2026-11-03/enf162b.err
+?? infra/ha01/results/2026-11-03/enf162b.out
+?? infra/ha01/results/2026-11-03/enf162b.pid
+?? infra/ha01/results/2026-11-03/harden.err
+?? infra/ha01/results/2026-11-03/harden.out
+?? infra/ha01/results/2026-11-03/harden.pid
+?? infra/ha01/results/2026-11-03/harden2.err
+?? infra/ha01/results/2026-11-03/harden2.out
+?? infra/ha01/results/2026-11-03/harden2.pid
+?? infra/ha01/results/2026-11-03/harden3.err
+?? infra/ha01/results/2026-11-03/harden3.out
+?? infra/ha01/results/2026-11-03/harden3.pid
+?? infra/ha01/results/2026-11-03/harness-baseline-p0.pids
+?? infra/ha01/results/2026-11-03/i160.err
+?? infra/ha01/results/2026-11-03/i160.out
+?? infra/ha01/results/2026-11-03/i160.pid
+?? infra/ha01/results/2026-11-03/i160b.err
+?? infra/ha01/results/2026-11-03/i160b.out
+?? infra/ha01/results/2026-11-03/i160b.pid
+?? infra/ha01/results/2026-11-03/ids.txt
+?? infra/ha01/results/2026-11-03/lbcfg160.err
+?? infra/ha01/results/2026-11-03/lbcfg160.out
+?? infra/ha01/results/2026-11-03/lbcfg160.pid
+?? infra/ha01/results/2026-11-03/lbcfg162.err
+?? infra/ha01/results/2026-11-03/lbcfg162.out
+?? infra/ha01/results/2026-11-03/lbcfg162.pid
+?? infra/ha01/results/2026-11-03/p2a-dry-launcher.err
+?? infra/ha01/results/2026-11-03/p2a-dry-launcher.out
+?? infra/ha01/results/2026-11-03/p2a-dry-launcher.pid
+?? infra/ha01/results/2026-11-03/p2a-p3w2-20261104T091727Z/ids.txt
+?? infra/ha01/results/2026-11-03/p2a-p3w2-20261104T091727Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p2a-p3w2-20261104T091727Z/pods-after-untaint.txt
+?? infra/ha01/results/2026-11-03/p2a-p3w2-20261104T091727Z/pods-before.txt
+?? infra/ha01/results/2026-11-03/p2a-p3w2.err
+?? infra/ha01/results/2026-11-03/p2a-p3w2.out
+?? infra/ha01/results/2026-11-03/p2a-p3w2.pid
+?? infra/ha01/results/2026-11-03/p2a-w1.err
+?? infra/ha01/results/2026-11-03/p2a-w1.out
+?? infra/ha01/results/2026-11-03/p2a-w1.pid
+?? infra/ha01/results/2026-11-03/p2a-w1b-20261104T073803Z/ids.txt
+?? infra/ha01/results/2026-11-03/p2a-w1b-20261104T073803Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p2a-w1b-20261104T073803Z/pods-after-untaint.txt
+?? infra/ha01/results/2026-11-03/p2a-w1b-20261104T073803Z/pods-before.txt
+?? infra/ha01/results/2026-11-03/p2a-w1b.err
+?? infra/ha01/results/2026-11-03/p2a-w1b.out
+?? infra/ha01/results/2026-11-03/p2a-w1b.pid
+?? infra/ha01/results/2026-11-03/p2a-w2-20261104T072357Z/ids.txt
+?? infra/ha01/results/2026-11-03/p2a-w2-20261104T072357Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p2a-w2-20261104T072357Z/pods-after-untaint.txt
+?? infra/ha01/results/2026-11-03/p2a-w2-20261104T072357Z/pods-before.txt
+?? infra/ha01/results/2026-11-03/p2a-w2.err
+?? infra/ha01/results/2026-11-03/p2a-w2.out
+?? infra/ha01/results/2026-11-03/p2a-w2.pid
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/kubelet-153.txt
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-isolate160-i160b-20261104T084154Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160-20261104T080838Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop160-s160b-20261104T083211Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p2b-stop162-s162-20261104T080113Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p3-accept-20261104T085357Z.md
+?? infra/ha01/results/2026-11-03/p3-accept-20261104T085800Z.md
+?? infra/ha01/results/2026-11-03/p3-accept-20261104T112257Z.md
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T110839Z/apply.txt
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T110839Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T111402Z/apply.txt
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T111402Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T111927Z/apply.txt
+?? infra/ha01/results/2026-11-03/p3-harden-20261104T111927Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p3-shadow-apply-20261104T085125Z/apply.txt
+?? infra/ha01/results/2026-11-03/p3-shadow-apply-20261104T085125Z/pods.txt
+?? infra/ha01/results/2026-11-03/p3-switch-160-traefik-20261104T090138Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p3-switch-160-traefik-host-20261104T112630Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p3-switch-162-traefik-20261104T091130Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p3-switch-162-traefik-host-20261104T122020Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p3accept.err
+?? infra/ha01/results/2026-11-03/p3accept.out
+?? infra/ha01/results/2026-11-03/p3accept.pid
+?? infra/ha01/results/2026-11-03/p3accept2.err
+?? infra/ha01/results/2026-11-03/p3accept2.out
+?? infra/ha01/results/2026-11-03/p3accept2.pid
+?? infra/ha01/results/2026-11-03/p3apply.err
+?? infra/ha01/results/2026-11-03/p3apply.out
+?? infra/ha01/results/2026-11-03/p3apply.pid
+?? infra/ha01/results/2026-11-03/p4-lbcfg-160-20261104T133349Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p4-lbcfg-162-20261104T133619Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p4-pbh-loadAB-20261104T140044Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p4-pbh-loadABC-20261104T140553Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p4-pbh-loadV2-20261104T141113Z/load.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-dryreg155-20261104T165724Z/
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155-20261104T123434Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-retest155c-20261104T142018Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop155-stop155-20261104T101559Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop158-dryreg158-20261104T165733Z/
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158b-20261104T150652Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop158-stop158c-20261104T151214Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop160-dryreg160-20261104T165715Z/
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/REVIVE-DISARM.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/bridge-journal.txt
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/dns.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/livedetector.json
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/probes-161_avec_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/probes-161_sans_cache.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop160-stop160-20261104T093239Z/probes-Windows.jsonl
+?? infra/ha01/results/2026-11-03/p4-vmstop162-dryreg162-20261104T165742Z/
+?? infra/ha01/results/2026-11-03/p4-webchange-frontend-nginx-20261104T134323Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-frontend-nginx-20261104T140241Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-frontend-nginx-20261104T140336Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-frontend-nginx-v2-20261104T140918Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-frontend-nginx-v2-20261104T140938Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-traefik-idle-20261104T134317Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-traefik-idle-20261104T134352Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-traefik-provider-20261104T135313Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p4-webchange-traefik-provider-20261104T135326Z/sauvegarde-avant.yaml
+?? infra/ha01/results/2026-11-03/p5-162-preflight-20261104T165426Z.json
+?? infra/ha01/results/2026-11-03/p5-162-preflight-20261104T170523Z.json
+?? infra/ha01/results/2026-11-03/pbhbase.err
+?? infra/ha01/results/2026-11-03/pbhbase.out
+?? infra/ha01/results/2026-11-03/pbhbase.pid
+?? infra/ha01/results/2026-11-03/pbhfixA.err
+?? infra/ha01/results/2026-11-03/pbhfixA.out
+?? infra/ha01/results/2026-11-03/pbhfixA.pid
+?? infra/ha01/results/2026-11-03/pbhfixAB.err
+?? infra/ha01/results/2026-11-03/pbhfixAB.out
+?? infra/ha01/results/2026-11-03/pbhfixAB.pid
+?? infra/ha01/results/2026-11-03/pbhloadAB.err
+?? infra/ha01/results/2026-11-03/pbhloadAB.out
+?? infra/ha01/results/2026-11-03/pbhloadAB.pid
+?? infra/ha01/results/2026-11-03/pbhloadABC.err
+?? infra/ha01/results/2026-11-03/pbhloadABC.out
+?? infra/ha01/results/2026-11-03/pbhloadABC.pid
+?? infra/ha01/results/2026-11-03/pbhloadV2.err
+?? infra/ha01/results/2026-11-03/pbhloadV2.out
+?? infra/ha01/results/2026-11-03/pbhloadV2.pid
+?? infra/ha01/results/2026-11-03/pre/k8s-objets-avant-ha01.yaml
+?? infra/ha01/results/2026-11-03/prim162.err
+?? infra/ha01/results/2026-11-03/prim162.out
+?? infra/ha01/results/2026-11-03/prim162.pid
+?? infra/ha01/results/2026-11-03/probe-baseline-p0.jsonl
+?? infra/ha01/results/2026-11-03/probe161-live.jsonl
+?? infra/ha01/results/2026-11-03/probe161-p0.jsonl
+?? infra/ha01/results/2026-11-03/restore-test-cronjobB.txt
+?? infra/ha01/results/2026-11-03/restore-test-offsite.txt
+?? infra/ha01/results/2026-11-03/retest155.err
+?? infra/ha01/results/2026-11-03/retest155.out
+?? infra/ha01/results/2026-11-03/retest155.pid
+?? infra/ha01/results/2026-11-03/retest155c.err
+?? infra/ha01/results/2026-11-03/retest155c.out
+?? infra/ha01/results/2026-11-03/retest155c.pid
+?? infra/ha01/results/2026-11-03/s160.err
+?? infra/ha01/results/2026-11-03/s160.out
+?? infra/ha01/results/2026-11-03/s160.pid
+?? infra/ha01/results/2026-11-03/s160b.err
+?? infra/ha01/results/2026-11-03/s160b.out
+?? infra/ha01/results/2026-11-03/s160b.pid
+?? infra/ha01/results/2026-11-03/s162.err
+?? infra/ha01/results/2026-11-03/s162.out
+?? infra/ha01/results/2026-11-03/s162.pid
+?? infra/ha01/results/2026-11-03/samples-baseline-p0.jsonl
+?? infra/ha01/results/2026-11-03/state-GATE-0.txt
+?? infra/ha01/results/2026-11-03/state-phase1-end.txt
+?? infra/ha01/results/2026-11-03/stop155.err
+?? infra/ha01/results/2026-11-03/stop155.out
+?? infra/ha01/results/2026-11-03/stop155.pid
+?? infra/ha01/results/2026-11-03/stop158.err
+?? infra/ha01/results/2026-11-03/stop158.out
+?? infra/ha01/results/2026-11-03/stop158.pid
+?? infra/ha01/results/2026-11-03/stop158b.err
+?? infra/ha01/results/2026-11-03/stop158b.out
+?? infra/ha01/results/2026-11-03/stop158b.pid
+?? infra/ha01/results/2026-11-03/stop158c.err
+?? infra/ha01/results/2026-11-03/stop158c.out
+?? infra/ha01/results/2026-11-03/stop158c.pid
+?? infra/ha01/results/2026-11-03/stop160.err
+?? infra/ha01/results/2026-11-03/stop160.out
+?? infra/ha01/results/2026-11-03/stop160.pid
+?? infra/ha01/results/2026-11-03/sw160.err
+?? infra/ha01/results/2026-11-03/sw160.out
+?? infra/ha01/results/2026-11-03/sw160.pid
+?? infra/ha01/results/2026-11-03/sw162.err
+?? infra/ha01/results/2026-11-03/sw162.out
+?? infra/ha01/results/2026-11-03/sw162.pid
+?? infra/ha01/results/2026-11-03/sw162b.err
+?? infra/ha01/results/2026-11-03/sw162b.out
+?? infra/ha01/results/2026-11-03/sw162b.pid
+?? infra/ha01/results/2026-11-03/swh160.err
+?? infra/ha01/results/2026-11-03/swh160.out
+?? infra/ha01/results/2026-11-03/swh160.pid
+?? infra/ha01/results/2026-11-03/swh162.err
+?? infra/ha01/results/2026-11-03/swh162.out
+?? infra/ha01/results/2026-11-03/swh162.pid
+?? infra/ha01/results/2026-11-03/swh162b.err
+?? infra/ha01/results/2026-11-03/swh162b.out
+?? infra/ha01/results/2026-11-03/swh162b.pid
+?? infra/haproxy-controlplane-only.cfg
+?? infra/monitoring/
+?? infra/remediation-action-catalog.yaml
+?? scripts/helios-ops/helios-node-autoheal.candidate.py
+?? scripts/helios-ops/helios_credstore.py
+?? scripts/helios-ops/helios_diag_profiles.py
+?? scripts/helios-ops/helios_diag_ssh.py
+?? scripts/helios-ops/helios_host_exec.py
+?? scripts/helios-ops/helios_host_exec_candidate.py
+?? scripts/helios-ops/helios_host_ops_helper.candidate.py
+?? scripts/helios-ops/provision_helios_credentials.py
+?? scripts/helios-ops/sudoers-helios-host-ops.NOT_APPLIED
+?? scripts/helios-ops/test_candidate_reconciliation.py
+?? scripts/helios-ops/test_credential_provider.py
+?? scripts/helios-ops/test_helios_diag_profiles.py
+?? scripts/helios-ops/test_helios_diag_ssh_route.py
+?? scripts/helios-ops/test_host_exec_candidate.py
+?? scripts/helios-ops/test_host_exec_sudo_channel.py
+?? scripts/helios-ops/test_host_ops_helper.py
+?? scripts/helios-ops/test_predeploy_gate.py
+?? scripts/helios-ops/test_provisioning_tool.py
+?? scripts/helios_dataset_audit.py
+?? scripts/llm-finetune/combine_and_split_132.py
+?? scripts/llm-finetune/deploy_helios_host_pro.py
+?? scripts/llm-finetune/gen_dpo_host_dataset.py
+?? scripts/llm-finetune/gen_host_finetune_dataset.py
+?? scripts/llm-finetune/gen_host_finetune_dataset_groq.py
+?? scripts/llm-finetune/train_helios_host_pro.py
+?? "t\357\201\274summary\357\201\274status\357\200\242"

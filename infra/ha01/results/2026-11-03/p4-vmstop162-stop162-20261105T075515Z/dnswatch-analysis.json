@@ -1,0 +1,23 @@
+{
+ "flip_server_s": 11.2,
+ "dead_last_answer_s": 1516.9,
+ "failback_server_s": 40.0,
+ "windows": {
+  "n_echantillons": 3100,
+  "first_fail_s": 0.5,
+  "recover_s": 16.7,
+  "outage_s": 16.1,
+  "stale_answers": 17,
+  "failback_s": 41.4,
+  "max_resolve_ms": 10
+ },
+ "node": {
+  "n_echantillons": 3109,
+  "first_fail_s": 0.7,
+  "recover_s": 11.7,
+  "outage_s": 11.0,
+  "stale_answers": 12,
+  "failback_s": 40.3,
+  "max_resolve_ms": 11
+ }
+}

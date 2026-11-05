@@ -1,0 +1,32 @@
+VÉRIFICATION DU CODE (étape 3) — 2026-11-04T21:32:25Z
+$ C:\Users\houss\AppData\Local\Programs\Python\Python312\python.exe -m py_compile p5_162_preflight.py gate4_162_report.py ..\probes\ha01_probe.py
+(rc=0)
+
+$ C:\Users\houss\AppData\Local\Programs\Python\Python312\python.exe test_p4_162.py
+(rc=0)
+OK  VMS['162'] : dnswatch + survivor_lb=160 + kind lb + deux canaris survivants                          
+OK  .160/.155/.158 n'ont PAS dnswatch (comportement inchangé)                                            
+OK  VMS['160'].survivor_lb == '162' (inchangé)                                                           
+OK  vmx de .162                                                                                          C:\Users\houss\Documents\Virtual Machines\k8s-lb2\k8s-lb2.vmx
+OK  bascule du dnsmasq survivant vers .160 mesurée (9,4 s attendues)                                     9.4
+OK  fail-back du dnsmasq (retour de .162 dans la réponse) mesuré (70 s après la relance)                 70.0
+OK  Windows (cache) : première erreur ~0 s, récupération 27,3 s, coupure ~27 s                           {'n_echantillons': 1840, 'first_fail_s': 0.0, 'recover_s': 27.5, 'outage_s': 27.5, 'stale_answers': 55, 'failback_s': 90.0, 'max_resolve_ms': 0}
+OK  nœud : récupération 10,2 s                                                                           {'n_echantillons': 1840, 'first_fail_s': 0.0, 'recover_s': 10.5, 'outage_s': 10.5, 'stale_answers': 21, 'failback_s': 75.0, 'max_resolve_ms': 1}
+OK  Windows : fail-back vers .162 mesuré après la relance                                                90.0
+OK  réponses périmées comptées                                                                           55
+OK  evaluate(.162) : ligne « LB survivant .160 en direct (lb160_web) »                                   
+OK  evaluate(.162) : critère de bascule DNS <= 15 s présent et PASS                                      
+OK  evaluate(.162) : section « Bascule DNS vue par chaque client » dans le markdown                      
+OK  evaluate(.162) : la série kube_api (.161 sans cache, 15 s) est bien jugée ❌ (seuil 15 s : 15,0 limite) ou ✅ selon le calcul — pas d'exception 
+OK  evaluate(.160) : libellé historique « LB survivant .162 en direct (lb162_web) » INCHANGÉ             
+OK  evaluate(.160) : AUCUNE ligne de bascule DNS spécifique                                              
+OK  evaluate(.160) : même nombre de critères qu'avant (hors .162)                                        27 vs 28
+OK  evaluate(.155) s'exécute sans exception (25 critères)                                                
+OK  evaluate(.158) s'exécute sans exception (25 critères)                                                
+OK  recent_p5_preflight() lit le dernier p5-162-preflight-*.json                                         p5-162-preflight-20261104T170523Z.json (267 min, 59 PASS / 0 WARN / 0 FAIL)
+OK  confirmation(.162) : REFUSÉE tant que CONFIRMATION-162.txt n'existe pas                              fichier absent: C:\Users\houss\IdeaProjects\PFE-Orange\infra\ha01\results\2026-11-03\CONFIRMATION-162.txt
+
+RÉSULTAT : TOUS LES TESTS OK
+
+diff-gate4_162_report.py-20261104T213052Z.diff : 67 lignes ajoutées, 0 lignes retirées
+diff-p5_162_preflight.py-20261104T213052Z.diff : 18 lignes ajoutées, 0 lignes retirées

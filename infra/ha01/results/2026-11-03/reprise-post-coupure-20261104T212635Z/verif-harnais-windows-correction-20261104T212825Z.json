@@ -1,0 +1,11 @@
+﻿{
+    "utc":  "2026-11-04T21:28:25.2258989Z",
+    "note":  "CORRECTION du fichier verif-harnais-windows.json (conserve, non modifie) : ses champs n_sonde=4 et n_echantillonneur=4 comptaient aussi 3 processus bash.exe de la commande de verification (leur texte contenait les noms ha01_probe.py / ha01_sampler.py). Decompte reel ci-dessous, limite aux processus python.exe du dossier probes.",
+    "n_sonde_reel":  1,
+    "n_echantillonneur_reel":  1,
+    "pids":  [
+                 "12500|\"C:\\Users\\houss\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" \"C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\probes\\ha01_probe.py\" --out \"C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\results\\2026-11-03\\probe-baseline-p0.jsonl\" ",
+                 "9364|\"C:\\Users\\houss\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" \"C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\probes\\ha01_sampler.py\" --out \"C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\results\\2026-11-03\\samples-baseline-p0.jsonl\" --interval 10 "
+             ],
+    "pids_fichier":  "12500 probe ; 9364 sampler"
+}

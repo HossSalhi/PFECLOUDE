@@ -9,6 +9,7 @@ Chaque ligne = un `vmrun stop hard` réel d'UNE VM, 10 min d'observation, relanc
 | `.155` | essai 2 | 12:35:33 | **20/27** ❌ | 96.416 % / 11.0 s | 96.398 % / 32.0 s | 100.0 % / 0.0 s | 0/0 | 0.3 s | 2 s | ssh=62 ready=62 etcd5=62 ; CNPG 111 s | aucun |
 | `.155` | essai 3 | 14:21:18 | **27/27** ✅ | 99.829 % / 1.0 s | 100.0 % / 0.0 s | 100.0 % / 0.0 s | 0/0 | 0.3 s | 1 s | ssh=53 ready=53 etcd5=39 ; CNPG 96 s | aucun |
 | `.158` | essai (1re tentative abandonnée à T+14 s par un défaut d'outillage, voir GATE-4.md) | 15:13:13 | **26/27** ❌ | 99.657 % / 6.0 s | 99.83 % / 1.0 s | 100.0 % / 0.0 s | 0/0 | 54.0 s | 1 s | ssh=59 ready=49 etcd5=59 ; CNPG 276 s | 11-04 15:24:39 -> 15:25:24 UTC |
+| `.162` | essai unique (LB actif du DNS ; Option A : DNS et `.153` inchangés, voir GATE-4-162.md) | 07:56:18 | **26/30** ❌ | 100.0 % / 0.0 s | 100.0 % / 0.0 s | 98.094 % / 31.1 s | 0/0 | 0.3 s | 1 s | ssh=43 etcd5=43 lb=43 ; CNPG — | aucun |
 
 
 ## `.160` — essai unique (`p4-vmstop160-stop160-20261104T093239Z`)
@@ -172,3 +173,38 @@ Chaque ligne = un `vmrun stop hard` réel d'UNE VM, 10 min d'observation, relanc
 | retour : aucun pod non sain (Pending résorbés) | ✅ | 93 s |
 | stabilisation 1800 s : nœuds Ready, etcd 5/5, aucun pod non sain, sondes par nom OK (creux etcd isolés expliqués par une rafale CPU de .153 listés à part, E17) | ❌ | ["T+39s pods non sains: ['cnpg-system          cnpg-controller-manager-6cc9d8689f-8xnmn    0/1   Error     3 (2m53s ago)     16h']"] / expliquées (E17): ['T+6s etcd < 5 (KO: .153) — SSH de .153 expiré à 15:28:26 (rafale CPU)'] |
 | pas d'abandon | ✅ | None |
+
+## `.162` — essai unique (LB actif du DNS ; Option A : DNS et `.153` inchangés, voir GATE-4-162.md) (`p4-vmstop162-stop162-20261105T075515Z`)
+
+| Critère | Résultat | Mesure |
+|---|---|---|
+| gels d'E/S de l'hôte pendant le test (informatif ; mesures concernées classées hors gel, E6) | ✅ | aucun |
+| la VM .162 est bien arrêtée pendant la mesure (contrôle de l'injection) | ✅ | vmrun rc=0  ; VM absente de `vmrun list`: True |
+| [Windows] web >= 99.0 % et série d'échecs <= 10 s (hors gels) | ✅ | hors gel: 100.0 % / 0.0 s / p95 3077 ms / BRUT: 100.0 % / 0.0 s / p95 3077 ms |
+| [Windows] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels) | ✅ | hors gel: 100.0 % / 0.0 s / p95 3080 ms / BRUT: 100.0 % / 0.0 s / p95 3080 ms |
+| [Windows] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels) | ❌ | hors gel: 98.094 % / 31.1 s / p95 27 ms / BRUT: 98.094 % / 31.1 s / p95 27 ms |
+| [Windows] LB survivant .160 en direct (lb160_web) >= 99,5 % (hors gels) | ✅ | hors gel: 100.0 % / 0.0 s / p95 67 ms / BRUT: 100.0 % / 0.0 s / p95 67 ms |
+| [Windows] LB survivant .160 en direct (lb160_api) >= 99,5 % (hors gels) | ✅ | hors gel: 100.0 % / 0.0 s / p95 26 ms / BRUT: 100.0 % / 0.0 s / p95 26 ms |
+| [.161 sans cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels) | ✅ | hors gel: 99.493 % / 7.0 s / p95 63 ms / BRUT: 99.493 % / 7.0 s / p95 63 ms |
+| [.161 sans cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels) | ✅ | hors gel: 99.323 % / 10.0 s / p95 67 ms / BRUT: 99.323 % / 10.0 s / p95 67 ms |
+| [.161 sans cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels) | ✅ | hors gel: 99.323 % / 10.0 s / p95 19 ms / BRUT: 99.323 % / 10.0 s / p95 19 ms |
+| [.161 avec cache] web >= 99.0 % et série d'échecs <= 10 s (hors gels) | ❌ | hors gel: 99.153 % / 13.0 s / p95 55 ms / BRUT: 99.153 % / 13.0 s / p95 55 ms |
+| [.161 avec cache] api_app >= 99.0 % et série d'échecs <= 10 s (hors gels) | ❌ | hors gel: 99.153 % / 13.0 s / p95 58 ms / BRUT: 99.153 % / 13.0 s / p95 58 ms |
+| [.161 avec cache] kube_api >= 99.0 % et série d'échecs <= 15 s (hors gels) | ✅ | hors gel: 99.153 % / 13.0 s / p95 13 ms / BRUT: 99.153 % / 13.0 s / p95 13 ms |
+| canari ha01-canary-w1 : 0 écriture acquittée perdue | ✅ | perdues=0 acquittées=3280 |
+| canari ha01-canary-w1 (survivant) : 0 échec hors gel | ✅ | échecs hors gel=0 (bruts 0) trou max hors gel=0.3s |
+| canari ha01-canary-w2 : 0 écriture acquittée perdue | ✅ | perdues=0 acquittées=3268 |
+| canari ha01-canary-w2 (survivant) : 0 échec hors gel | ✅ | échecs hors gel=0 (bruts 0) trou max hors gel=0.3s |
+| nœuds : .153 et le survivant sans aucune transition NotReady | ❌ | {'k8s-master': ['2026-11-05T07:57:00Z', '2026-11-05T07:57:10Z']} |
+| etcd : 4/4 membres sains en <= 10 s après l'arrêt | ✅ | 1 s |
+| etcd : <= 2 élections pendant le test (terme Raft) | ✅ | terme 1820 -> 1820, leader 7691728604125665301 -> 7691728604125665301 |
+| mémoire : survivants >= 300 Mo et .153 >= 500 Mo (minimum mesuré) | ✅ | {'153': 649, '155': 833, '158': 940, '160': 612} |
+| 0 OOMKilled et 0 éviction pour mémoire pendant le test | ✅ | OOM=0 évictions=0 |
+| RAM hôte >= 1500 Mo (minimum mesuré) | ✅ | 3876 Mo |
+| placement : pods Pending documentés (anti-affinité = conséquence attendue, pas une panne) | ✅ | {'T+90s': [], 'T+300s': []} |
+| retour : SSH, etcd 5/5 et HAProxy UP en <= 300 s après la relance | ✅ | ssh=43 etcd5=43 lb=43 |
+| retour : DNS nominal (les 2 LB UP, publication nominale) <= 180 s après la relance | ✅ | 53 s |
+| retour : aucun pod non sain (Pending résorbés) | ✅ | 33 s |
+| stabilisation 1800 s : nœuds Ready, etcd 5/5, aucun pod non sain, sondes par nom OK (creux etcd isolés expliqués par une rafale CPU de .153 listés à part, E17) | ✅ | aucune anomalie inexpliquée |
+| pas d'abandon | ✅ | None |
+| bascule DNS : le contrôleur survivant (.160) cesse de publier .162 en <= 15 s après l'arrêt | ✅ | bascule à 11.2 s (modèle hors ligne : 8,1 à 11,1 s) |

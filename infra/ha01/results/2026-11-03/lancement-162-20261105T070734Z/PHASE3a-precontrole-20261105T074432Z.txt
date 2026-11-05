@@ -1,0 +1,8 @@
+PHASE 3a — PRÉ-CONTRÔLE EN MÉMOIRE — 2026-11-05T07:44:05Z UTC
+(1) RAM : fenêtre 10 min [07:34:15 -> 07:44:02] n=57, min=2354, médiane=2504, max=2569 Mo ; points < 2300 : 0 ; 3 mesures successives = [2551, 2490, 2569] -> OK
+(2) CALME : dernier gel fin 06:48:55Z -> il y a 55.2 min (>= 30 à l'entrée ; 60 min atteintes à 07:48:55Z) -> OK
+(3) etcd / cluster / énergie :
+    terme/leader = 1820 / 6abe8269b59f1815 ; alarmes : aucune ; MemAvailable .153 = 692 Mo ; FAIL : aucun -> OK
+(4) VEILLEUSE : 12 relevés, dernier il y a -6 s, ram_min des relevés depuis l'armement = 2354, EVENEMENT.txt = False -> OK
+
+RÉSULTAT PRÉ-CONTRÔLE : OUVERT — on peut lancer le préflight chargé sous supervision

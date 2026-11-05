@@ -1,0 +1,77 @@
+{
+ "utc": "2026-11-05T07:07:34Z",
+ "evidence_dir": "C:\\Users\\houss\\IdeaProjects\\PFE-Orange\\infra\\ha01\\results\\2026-11-03\\lancement-162-20261105T070734Z",
+ "git_head": "3021aa7 feat(helios): validate HA-01 single-VM failure resilience",
+ "git_status_lignes": 549,
+ "vmrun_list": "Total running VMs: 6",
+ "etcd_terme_leader_avant": {
+  "terme": 1820,
+  "leader_id": "6abe8269b59f1815"
+ },
+ "confirmation_162_presente": false,
+ "sauvegardes_161_avant": {
+  "fichiers_sha256": 21,
+  "extrait_fin": [
+   "",
+   "2026-11-05T07:07:37Z",
+   "  12G"
+  ]
+ },
+ "copies": {
+  "GATE": {
+   "fichier": "GATE-4-162.avant-lancement-20261105T070734Z.md",
+   "sha256": "35338b30c14e42462776e67f964c05f92f169fdbcaab880d44027130b3638f39",
+   "original_sha256": "35338b30c14e42462776e67f964c05f92f169fdbcaab880d44027130b3638f39"
+  },
+  "supervision-p5.py": {
+   "sha256": "82b4ea2493c433e734e7eb3f9d36c96781fa04afa3c11fcbeb206f6f5db0d199",
+   "source_sha256": "82b4ea2493c433e734e7eb3f9d36c96781fa04afa3c11fcbeb206f6f5db0d199",
+   "identique": true
+  }
+ },
+ "horloges": {
+  "windows_utc": "2026-11-05T07:07:37.503Z",
+  "externes": {
+   "https://www.google.com": 0.65,
+   "https://www.microsoft.com": -0.02
+  },
+  "vms": {
+   "153": 0.21,
+   "155": 0.22,
+   "158": 0.24,
+   "160": 0.16,
+   "161": 0.16,
+   "162": 0.13
+  },
+  "ecart_max_s": 0.65,
+  "hors_tolerance_2s": []
+ },
+ "applications_>=150Mo": {
+  "toutes": [
+   "claude|342",
+   "claude|157",
+   "explorer|247",
+   "MsMpEng|298",
+   "SearchHost|161",
+   "TextInputHost|156",
+   "vmware-vmx|3441",
+   "vmware-vmx|2328",
+   "vmware-vmx|5684",
+   "vmware-vmx|2937",
+   "vmware-vmx|2759",
+   "vmware-vmx|2181"
+  ],
+  "hors_liste_autorisee": []
+ },
+ "energie": {
+  "secteur": true,
+  "batterie_pct": 59,
+  "ok": true
+ },
+ "verdict_phase0": {
+  "horloges": true,
+  "applications": true,
+  "energie": true,
+  "outils_hors_confirmation": true
+ }
+}

@@ -1,0 +1,11 @@
+PHASE 5.1 — RE-CONTRÔLE DES PORTES — 2026-11-05T07:53:33Z UTC (confirmation écrite reçue ; JSON valide jusqu'à 08:16:36Z, réponse attendue avant 08:12:36Z)
+(1) RAM : fenêtre 10 min [07:43:43 -> 07:53:28] n=59, min=2369, médiane=2540, max=2581 ; points < 2300 : 0 ; 3 mesures = [(2569, '07:43:33'), (2581, '07:48:38'), (2552, '07:53:28')] -> OK
+(2) CALME (fenêtre glissante) : dernière fin de gel 06:48:58Z -> il y a 64.6 min (>= 60) -> OK
+(3) etcd / cluster / énergie :
+    terme/leader = 1820 / 6abe8269b59f1815 ; alarmes : aucune ; MemAvailable .153 = 686 Mo ; FAIL : aucun -> OK
+(4) VEILLEUSE : 30 relevés, dernier il y a -7 s, RAM min vue = 2354 Mo, EVENEMENT.txt = False -> OK
+(5) JSON p5-162-preflight-20261105T074636Z.json : 60/0/0, âge 7.0 min (< 26 pour garder 4 min de marge avant l'échéance de 30) -> OK
+(6) CONFIRMATION-162.txt déjà présent : False (attendu : non, elle sera écrite ensuite)
+
+RÉSULTAT PHASE 5.1 : TOUTES LES PORTES SONT VERTES — lancement autorisé
+  détail : RAM=True calme60=True etcd/cluster/énergie=True veilleuse=True json=True

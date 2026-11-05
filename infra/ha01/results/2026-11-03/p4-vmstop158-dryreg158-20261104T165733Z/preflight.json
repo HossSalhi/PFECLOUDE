@@ -1,0 +1,124 @@
+[
+ {
+  "check": "confirmation explicite de l'utilisateur pour la VM .158 (< 6 h)",
+  "ok": true,
+  "detail": "(dry-run) CONFIRMATION-158.txt (6.5 h, 998 octets)"
+ },
+ {
+  "check": "drapeau --confirmed",
+  "ok": true,
+  "detail": false
+ },
+ {
+  "check": "3 nœuds Ready",
+  "ok": true,
+  "detail": {
+   "k8s-master": "Ready",
+   "k8s-worker1": "Ready",
+   "k8s-worker2": "Ready"
+  }
+ },
+ {
+  "check": "etcd 5/5 sain",
+  "ok": true,
+  "detail": 5
+ },
+ {
+  "check": "CNPG sain 2/2",
+  "ok": true,
+  "detail": "Cluster in healthy state|postgres-5|2"
+ },
+ {
+  "check": "aucun pod non sain",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "check": "aucun taint de répétition résiduel",
+  "ok": true,
+  "detail": "k8s-master node-role.kubernetes.io/control-plane | k8s-worker1  | k8s-worker2"
+ },
+ {
+  "check": "canari ha01-canary-w1 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.1
+ },
+ {
+  "check": "canari ha01-canary-w2 écrit depuis < 30 s",
+  "ok": true,
+  "detail": 0.0
+ },
+ {
+  "check": "harnais actif (sondes Windows < 15 s, échantillonneur < 60 s)",
+  "ok": true,
+  "detail": "0s/1s"
+ },
+ {
+  "check": "sonde .161 (ha01-probe-161) active",
+  "ok": true,
+  "detail": "active"
+ },
+ {
+  "check": "RAM hôte >= 2000 Mo maintenant ET à ~5 min et ~10 min (3 mesures, comme le plan)",
+  "ok": false,
+  "detail": "maintenant 2675 Mo, min des 3 points 1803 Mo (n=3)"
+ },
+ {
+  "check": ".153 MemAvailable >= 500 Mo",
+  "ok": true,
+  "detail": 660
+ },
+ {
+  "check": ".155 MemAvailable >= 600 Mo",
+  "ok": true,
+  "detail": 921
+ },
+ {
+  "check": "aucun gel d'E/S de l'hôte dans les 10 dernières minutes",
+  "ok": true,
+  "detail": "aucun"
+ },
+ {
+  "check": "LB .160 sert en direct et tous ses serveurs sont UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "LB .162 sert en direct et tous ses serveurs sont UP",
+  "ok": true,
+  "detail": "web=200 api=200  []"
+ },
+ {
+  "check": "mode DNS des 2 LB consigné (identique)",
+  "ok": true,
+  "detail": {
+   "160": "enforce",
+   "162": "enforce"
+  }
+ },
+ {
+  "check": "vmrun présent",
+  "ok": true,
+  "detail": "C:\\Program Files (x86)\\VMware\\VMware Workstation\\vmrun.exe"
+ },
+ {
+  "check": "fichier .vmx de la VM présent et VM en marche",
+  "ok": true,
+  "detail": "C:\\Users\\houss\\Documents\\Virtual Machines\\k8s-worker1\\k8s-worker1.vmx"
+ },
+ {
+  "check": "VM .158 identifiée par SSH (hostname -I contient 192.168.148.158)",
+  "ok": true,
+  "detail": "192.168.148.158 172.16.194.64"
+ },
+ {
+  "check": "kubectl utilisable depuis .153 (flux des journaux de canaris)",
+  "ok": true,
+  "detail": "ok"
+ },
+ {
+  "check": "agent hôte HELIOS :9999 (état avant pause consigné)",
+  "ok": true,
+  "detail": "port 9999 (agent vmpower) : REPOND | port 9099 (watchdog HTTP) : ne repond pas | processus agent : pid 13448 | \"C:\\Users\\houss\\AppData\\Local\\Programs\\"
+ }
+]

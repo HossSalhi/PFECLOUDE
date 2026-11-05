@@ -1,0 +1,14 @@
+PHASE 4 — CONDITIONS DE LA PROPOSITION — 2026-11-05T07:49:10Z UTC
+(1) RAM : fenêtre 10 min [07:39:13 -> 07:49:08] n=59, min=2354, médiane=2509, max=2581 ; points < 2300 : 0 ; 3 mesures successives (t-10, t-5, t) = [(2354, '07:39:13'), (2537, '07:44:12'), (2544, '07:49:08')] -> OK
+(2) CALME : 3 fenêtre(s) de gel sur 4 h, dernière fin 06:48:55Z -> il y a 60.2 min (>= 60 exigées) -> OK
+    supervision, phase avant_charge  :  17 relevés, RAM hôte min=2478 Mo, MemAvailable .160 min=565 Mo, de 07:44:51 à 07:45:23
+    supervision, phase charge        :  15 relevés, RAM hôte min=2503 Mo, MemAvailable .160 min=523 Mo, de 07:45:25 à 07:45:53
+    supervision, phase apres_charge  :  21 relevés, RAM hôte min=2368 Mo, MemAvailable .160 min=548 Mo, de 07:45:55 à 07:46:35
+    fenêtre de charge réelle : 07:45:25 -> 07:45:55 (+60 s) ; relevés hors règle (2000 dans la fenêtre, 2300 hors) : aucun ; échecs de sonde pendant p5 : Windows 0 + .161 0 ; plancher global p5 = 2368 Mo
+(3) etcd / cluster / énergie :
+    terme/leader = 1820 / 6abe8269b59f1815 ; alarmes : aucune ; MemAvailable .153 = 687 Mo ; FAIL : aucun -> OK
+(4) VEILLEUSE : 21 relevés depuis l'armement (07:39:11Z), dernier il y a -1 s, RAM min vue = 2354 Mo, gels vus = aucun, membres etcd non sains vus = aucun, EVENEMENT.txt = False -> OK
+(5) JSON p5-162-preflight-20261105T074636Z.json : 60 PASS / 0 WARN / 0 FAIL, âge 2.6 min ; validité jusqu'à 08:16:36Z ; heure limite de réponse 08:12:36Z -> OK
+
+RÉSULTAT PHASE 4 : TOUTES LES CONDITIONS SONT REMPLIES — proposition d'autorisation possible
+  détail : RAM=True calme60=True plancher_charge=True etcd/cluster/énergie=True veilleuse=True json=True

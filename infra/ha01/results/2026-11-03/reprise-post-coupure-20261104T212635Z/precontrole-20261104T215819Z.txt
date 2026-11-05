@@ -1,0 +1,39 @@
+PRÉ-CONTRÔLE (en mémoire) — 2026-11-04T21:58:19Z UTC — attendu : tout vert avant tout test de charge
+HISTORIQUE RÉEL : compteur=8 ; données Prometheus 20:54:04 -> 21:58:19 ; derniers changements (UTC) : ['20:56:19']
+  dernier changement il y a 62.0 min (le seuil exige > 60 min sans dépasser 2 changements)
+TERME RAFT : 1820 (attendu 1820) ; leader id 6abe8269b59f1815
+RAM HÔTE : maintenant 2174 Mo ; 3 points (≈10 min, ≈5 min, maintenant) : min=2201 Mo, points=3
+GELS D'E/S sur 10 min : aucun
+PASS  [A-etat] 6 VM en marche (vmrun list), dont k8s-lb2                                            Total running VMs: 6
+PASS  [A-etat] SSH répond sur les 6 VM                                                              6/6
+PASS  [A-etat] 3 nœuds Kubernetes Ready                                                             {'k8s-master': 'Ready', 'k8s-worker1': 'Ready', 'k8s-worker2': 'Ready'}
+PASS  [A-etat] aucun pod non sain                                                                   []
+PASS  [A-etat] PostgreSQL (CNPG) sain 2/2                                                           Cluster in healthy state|postgres-5|2
+PASS  [A-etat] canari ha01-canary-w1 écrit depuis < 30 s                                            -0.2
+PASS  [A-etat] canari ha01-canary-w2 écrit depuis < 30 s                                            -0.1
+PASS  [A-etat] Traefik : 2 pods Ready (.155 et .158)                                                traefik-5747ccdb79-47fgk   1/1   Running   1 (90m ago)   7h35m | traefik-5747ccdb79-ptg77   1/1   Ru
+PASS  [A-etat] HAProxy .160 : tous les serveurs UP, web+API directs 200                             [] web=200 api=200 
+PASS  [A-etat] Traefik /ping .155 joignable depuis le LB .160                                       200
+PASS  [A-etat] Traefik /ping .158 joignable depuis le LB .160                                       200
+PASS  [A-etat] HAProxy .162 : tous les serveurs UP, web+API directs 200                             [] web=200 api=200 
+PASS  [A-etat] Traefik /ping .155 joignable depuis le LB .162                                       200
+PASS  [A-etat] Traefik /ping .158 joignable depuis le LB .162                                       200
+PASS  [B-etcd] 5 membres votants (aucun learner), dont .162                                         ['153', '155', '158', '160', '162']
+PASS  [B-etcd] 5/5 sains et synchronisés (écart d'index appliqué <= 5)                              écart=0, essais=1
+PASS  [B-etcd] leader actuel (information)                                                          .153 ; terme 1820
+PASS  [B-etcd] version etcd >= 3.4 (move-leader disponible)                                         3.5.16
+PASS  [B-etcd] fsync WAL p99 : .162 < 50 ms (leader possible), .153 < 500 ms (nœud fragile), les au {'153': '4 ms', '155': '6 ms', '158': '2 ms', '160': '3 ms', '162': '4 ms'}
+PASS  [B-etcd] transfert du leader vers .162 SÛR (membre votant, synchrone, rapide)                 commande préparée : etcdctl --endpoints=<leader> move-leader 24c7bfc179503c82 (NON exécutée)
+PASS  [B-etcd] changements de leader etcd sur 1 h <= 2 (règle ETCD_LEADER_FLAPPING > 5 non déclench 0.0
+PASS  [G-hote] RAM hôte >= 2000 Mo MAINTENANT                                                       2169 Mo (récupérable : ops\trim_host_ram.ps1, non destructif)
+PASS  [G-hote] RAM hôte >= 2000 Mo aux 3 points de contrôle (~10 min, ~5 min, maintenant) — exigenc min=2168 Mo, points=3
+PASS  [G-hote] disque C: libre >= 20 Go (redémarrage de .162 : ~1,5 Go d'écriture)                  33.6 Go (C: à 93 % — risque de gel d'E/S connu)
+PASS  [G-hote] aucun gel d'E/S de l'hôte dans les 10 dernières minutes                              aucun
+PASS  [G-hote] historique des gels d'E/S (information) : 7 en ~30 h, 2 relances sur 5 suivies d'un  voir GATE-4.md R4
+PASS  [G-hote] harnais actif (sondes Windows < 15 s, échantillonneur < 60 s)                        0s/9s
+PASS  [G-hote] sonde .161 (ha01-probe-161) active                                                   active
+PASS  [G-hote] .162 : MemAvailable >= 500 Mo (avant arrêt)                                          871
+PASS  [I-alimentation] PC sur secteur (PowerLineStatus=Online) et batterie >= 40 % (ou aucune batterie)     Online ; batterie 60 % ; BatteryChargeStatus=0
+
+RÉSUMÉ PRÉ-CONTRÔLE : 30 PASS · 0 WARN · 0 FAIL
+DÉCISION : VERT — on peut lancer le préflight complet sous supervision

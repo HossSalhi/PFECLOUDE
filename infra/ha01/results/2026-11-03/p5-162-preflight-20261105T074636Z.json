@@ -1,0 +1,370 @@
+{
+ "ts": 1793864796.6436074,
+ "iso": "2026-11-05T07:46:36Z",
+ "all_ok": true,
+ "pass": 60,
+ "warn": 0,
+ "fail": 0,
+ "checks": [
+  {
+   "section": "A-etat",
+   "check": "6 VM en marche (vmrun list), dont k8s-lb2",
+   "status": "PASS",
+   "detail": "Total running VMs: 6"
+  },
+  {
+   "section": "A-etat",
+   "check": "SSH répond sur les 6 VM",
+   "status": "PASS",
+   "detail": "6/6"
+  },
+  {
+   "section": "A-etat",
+   "check": "3 nœuds Kubernetes Ready",
+   "status": "PASS",
+   "detail": "{'k8s-master': 'Ready', 'k8s-worker1': 'Ready', 'k8s-worker2': 'Ready'}"
+  },
+  {
+   "section": "A-etat",
+   "check": "aucun pod non sain",
+   "status": "PASS",
+   "detail": "[]"
+  },
+  {
+   "section": "A-etat",
+   "check": "PostgreSQL (CNPG) sain 2/2",
+   "status": "PASS",
+   "detail": "Cluster in healthy state|postgres-5|2"
+  },
+  {
+   "section": "A-etat",
+   "check": "canari ha01-canary-w1 écrit depuis < 30 s",
+   "status": "PASS",
+   "detail": "0.1"
+  },
+  {
+   "section": "A-etat",
+   "check": "canari ha01-canary-w2 écrit depuis < 30 s",
+   "status": "PASS",
+   "detail": "0.1"
+  },
+  {
+   "section": "A-etat",
+   "check": "Traefik : 2 pods Ready (.155 et .158)",
+   "status": "PASS",
+   "detail": "traefik-5747ccdb79-47fgk   1/1   Running   1 (11h ago)   17h | traefik-5747ccdb79-ptg77   1/1   Runn"
+  },
+  {
+   "section": "A-etat",
+   "check": "HAProxy .160 : tous les serveurs UP, web+API directs 200",
+   "status": "PASS",
+   "detail": "[] web=200 api=200 "
+  },
+  {
+   "section": "A-etat",
+   "check": "Traefik /ping .155 joignable depuis le LB .160",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "section": "A-etat",
+   "check": "Traefik /ping .158 joignable depuis le LB .160",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "section": "A-etat",
+   "check": "HAProxy .162 : tous les serveurs UP, web+API directs 200",
+   "status": "PASS",
+   "detail": "[] web=200 api=200 "
+  },
+  {
+   "section": "A-etat",
+   "check": "Traefik /ping .155 joignable depuis le LB .162",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "section": "A-etat",
+   "check": "Traefik /ping .158 joignable depuis le LB .162",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "section": "B-etcd",
+   "check": "5 membres votants (aucun learner), dont .162",
+   "status": "PASS",
+   "detail": "['153', '155', '158', '160', '162']"
+  },
+  {
+   "section": "B-etcd",
+   "check": "5/5 sains et synchronisés (écart d'index appliqué <= 5)",
+   "status": "PASS",
+   "detail": "écart=0, essais=1"
+  },
+  {
+   "section": "B-etcd",
+   "check": "leader actuel (information)",
+   "status": "PASS",
+   "detail": ".153 ; terme 1820"
+  },
+  {
+   "section": "B-etcd",
+   "check": "version etcd >= 3.4 (move-leader disponible)",
+   "status": "PASS",
+   "detail": "3.5.16"
+  },
+  {
+   "section": "B-etcd",
+   "check": "fsync WAL p99 : .162 < 50 ms (leader possible), .153 < 500 ms (nœud fragile), les autres < 100 ms",
+   "status": "PASS",
+   "detail": "{'153': '6 ms', '155': '4 ms', '158': '6 ms', '160': '3 ms', '162': '6 ms'}"
+  },
+  {
+   "section": "B-etcd",
+   "check": "transfert du leader vers .162 SÛR (membre votant, synchrone, rapide)",
+   "status": "PASS",
+   "detail": "commande préparée : etcdctl --endpoints=<leader> move-leader 24c7bfc179503c82 (NON exécutée)"
+  },
+  {
+   "section": "B-etcd",
+   "check": "changements de leader etcd sur 1 h <= 2 (règle ETCD_LEADER_FLAPPING > 5 non déclenchable par l'essai)",
+   "status": "PASS",
+   "detail": "0.0"
+  },
+  {
+   "section": "C-dns",
+   "check": "2 contrôleurs en mode enforce",
+   "status": "PASS",
+   "detail": "{'160': 'enforce', '162': 'enforce'}"
+  },
+  {
+   "section": "C-dns",
+   "check": "les 2 contrôleurs voient .160 et .162 UP",
+   "status": "PASS",
+   "detail": "{'160': {'162': 'UP', '160': 'UP'}, '162': {'162': 'UP', '160': 'UP'}}"
+  },
+  {
+   "section": "C-dns",
+   "check": "publication nominale = [.162] seul sur les 2 contrôleurs (LB actif .162)",
+   "status": "PASS",
+   "detail": "{'160': ['192.168.148.162'], '162': ['192.168.148.162']}"
+  },
+  {
+   "section": "C-dns",
+   "check": "dnsmasq .160 et .162 : même réponse (.162, TTL 30) pour helios et api.helios",
+   "status": "PASS",
+   "detail": "{'helios.orange.tn': (['192.168.148.162'], 30), 'api.helios.orange.tn': (['192.168.148.162'], 30)}"
+  },
+  {
+   "section": "C-dns",
+   "check": "contrôleurs déployés == dépôt et ordre 162,160",
+   "status": "PASS",
+   "detail": "{'160': '3d92abc16e18f5e2 HELIOS_DNS_ORDER=160,162 HELIOS_DNS_ORDER=162,160', '162': '3d92abc16e18f5e2 HELIOS_DNS_ORDER=160,162 HELIOS_DNS_ORDER=162,160'}"
+  },
+  {
+   "section": "C-dns",
+   "check": "Windows : hosts liste .160 AVANT .162 (web et api_app immunisés contre la perte de .162)",
+   "status": "PASS",
+   "detail": "['192.168.148.160', '192.168.148.162']"
+  },
+  {
+   "section": "C-dns",
+   "check": "Windows : NRPT .helios.orange.tn -> .160,.162",
+   "status": "PASS",
+   "detail": "192.168.148.160,192.168.148.162"
+  },
+  {
+   "section": "C-dns",
+   "check": "nœud .155 : /etc/resolv.conf = .160 puis .162 (sans cache système)",
+   "status": "PASS",
+   "detail": "nameserver 192.168.148.160 nameserver 192.168.148.162"
+  },
+  {
+   "section": "C-dns",
+   "check": "nœud .158 : /etc/resolv.conf = .160 puis .162 (sans cache système)",
+   "status": "PASS",
+   "detail": "nameserver 192.168.148.160 nameserver 192.168.148.162"
+  },
+  {
+   "section": "C-dns",
+   "check": ".160 : dnsmasq, contrôleur DNS et HAProxy actifs (survivant)",
+   "status": "PASS",
+   "detail": "active active active"
+  },
+  {
+   "section": "D-capacite",
+   "check": ".160 : load1 < 2 et MemAvailable >= 500 Mo avant essai",
+   "status": "PASS",
+   "detail": "load1=0.30 mem=566 Mo"
+  },
+  {
+   "section": "D-capacite",
+   "check": "API Kubernetes AUTHENTIFIÉE via .160 seul : 20/20",
+   "status": "PASS",
+   "detail": "ok=20 ko=0"
+  },
+  {
+   "section": "D-capacite",
+   "check": "charge 20 req/s dirigée vers .160 SEUL pendant 30 s : 100 % et p95 < 1500 ms",
+   "status": "PASS",
+   "detail": "{'requests': 601, 'ok': 601, 'ok_pct': 100.0, 'p50_ms': 60, 'p95_ms': 76, 'p99_ms': 81, 'max_ms': 131, 'target_ip': '192.168.148.160'}"
+  },
+  {
+   "section": "D-capacite",
+   "check": ".160 après la charge : MemAvailable >= 500 Mo",
+   "status": "PASS",
+   "detail": "0.67 561"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "dump PostgreSQL sur .161 (hors VM) : <= 120 min, gzip -t OK, > 10 Ko, >= 10 tables",
+   "status": "PASS",
+   "detail": "['4', '252261', 'ok', '16']"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "snapshot etcd sur .161 (hors VM) : <= 120 min, sha256 OK, > 10 Mo",
+   "status": "PASS",
+   "detail": "['4', '23285792', 'ok']"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "intégrité des derniers fichiers (gzip -t / sha256) sans condition d'âge",
+   "status": "PASS",
+   "detail": "pg=['ok'] etcd=['ok']"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "rétention : < 25 fichiers par type (le script n'en supprime qu'au-delà de 30)",
+   "status": "PASS",
+   "detail": "['8', '8']"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "espace libre sur .161 >= 5 Go",
+   "status": "PASS",
+   "detail": "['12']"
+  },
+  {
+   "section": "E-sauvegardes",
+   "check": "sauvegarde FRAÎCHE juste avant l'arrêt (étape du lancement : helios-offsite-backup.service)",
+   "status": "PASS",
+   "detail": "planifiée dans les commandes du lancement"
+  },
+  {
+   "section": "F-relance",
+   "check": "vmrun présent et .vmx de k8s-lb2 présent",
+   "status": "PASS",
+   "detail": "C:\\Users\\houss\\Documents\\Virtual Machines\\k8s-lb2\\k8s-lb2.vmx"
+  },
+  {
+   "section": "F-relance",
+   "check": "p4_vmstop : relance après 600 s d'observation ; filet Windows indépendant à observe+900 s ; abandon -> relance immédiate ; `finally` -> relance d'urgence",
+   "status": "PASS",
+   "detail": "vm_revive.ps1 + vmrun start nogui (voir p4_vmstop.py)"
+  },
+  {
+   "section": "F-relance",
+   "check": "test du filet n°1 : échéance atteinte, VM EN MARCHE -> « tourne déjà », aucune action",
+   "status": "PASS",
+   "detail": "026-11-05T07:46:05.2366228Z ÉCHÉANCE : la VM tourne déjà, rien à faire"
+  },
+  {
+   "section": "F-relance",
+   "check": "test du filet n°2 : désarmement par fichier-témoin avant l'échéance -> fin sans action",
+   "status": "PASS",
+   "detail": "5T07:46:10.5738620Z désarmé (fichier-témoin présent) : fin sans action"
+  },
+  {
+   "section": "F-relance",
+   "check": "k8s-lb2 toujours en marche après les tests du filet",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "section": "G-hote",
+   "check": "RAM hôte >= 2000 Mo MAINTENANT",
+   "status": "PASS",
+   "detail": "2507 Mo (récupérable : ops\\trim_host_ram.ps1, non destructif)"
+  },
+  {
+   "section": "G-hote",
+   "check": "RAM hôte >= 2000 Mo aux 3 points de contrôle (~10 min, ~5 min, maintenant) — exigence du plan",
+   "status": "PASS",
+   "detail": "min=2443 Mo, points=3"
+  },
+  {
+   "section": "G-hote",
+   "check": "disque C: libre >= 20 Go (redémarrage de .162 : ~1,5 Go d'écriture)",
+   "status": "PASS",
+   "detail": "34.2 Go (C: à 93 % — risque de gel d'E/S connu)"
+  },
+  {
+   "section": "G-hote",
+   "check": "aucun gel d'E/S de l'hôte dans les 10 dernières minutes",
+   "status": "PASS",
+   "detail": "aucun"
+  },
+  {
+   "section": "G-hote",
+   "check": "historique des gels d'E/S (information) : 7 en ~30 h, 2 relances sur 5 suivies d'un gel",
+   "status": "PASS",
+   "detail": "voir GATE-4.md R4"
+  },
+  {
+   "section": "G-hote",
+   "check": "harnais actif (sondes Windows < 15 s, échantillonneur < 60 s)",
+   "status": "PASS",
+   "detail": "0s/8s"
+  },
+  {
+   "section": "G-hote",
+   "check": "sonde .161 (ha01-probe-161) active",
+   "status": "PASS",
+   "detail": "active"
+  },
+  {
+   "section": "G-hote",
+   "check": ".162 : MemAvailable >= 500 Mo (avant arrêt)",
+   "status": "PASS",
+   "detail": "859"
+  },
+  {
+   "section": "I-alimentation",
+   "check": "PC sur secteur (PowerLineStatus=Online) et batterie >= 40 % (ou aucune batterie)",
+   "status": "PASS",
+   "detail": "Online ; batterie 59 % ; BatteryChargeStatus=0"
+  },
+  {
+   "section": "H-garde-fous",
+   "check": "AUCUNE confirmation valide pour .162 : p4_vmstop.py REFUSE d'éteindre (garde-fou armé)",
+   "status": "PASS",
+   "detail": "CONFIRMATION-162.txt absent"
+  },
+  {
+   "section": "H-garde-fous",
+   "check": "aucune règle iptables ha01-* ni minuterie ha01-p* résiduelle sur les 6 VM",
+   "status": "PASS",
+   "detail": "6/6 propres"
+  },
+  {
+   "section": "H-garde-fous",
+   "check": "agent hôte HELIOS :9999 répond (p4_vmstop le mettra en pause puis le rétablira)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "section": "H-garde-fous",
+   "check": ".153 (non touchée) : Ready et MemAvailable >= 500 Mo",
+   "status": "PASS",
+   "detail": "688"
+  },
+  {
+   "section": "H-garde-fous",
+   "check": "préflight générique de p4_vmstop.py --vm 162 (dry-run) : tous OK",
+   "status": "PASS",
+   "detail": "25 contrôles OK"
+  }
+ ]
+}

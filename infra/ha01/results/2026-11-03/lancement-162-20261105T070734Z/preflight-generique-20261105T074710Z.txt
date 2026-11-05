@@ -1,0 +1,29 @@
+2026-11-05T07:47:11Z PREFLIGHT confirmation explicite de l'utilisateur pour la VM .162 (< 6 h)          OK   (dry-run) fichier absent: C:\Users\houss\IdeaProjects\PFE-Orange\infra\ha01\results\2026-11-03\CONFIRMATI
+2026-11-05T07:47:11Z PREFLIGHT drapeau --confirmed                                                      OK   False
+2026-11-05T07:47:11Z PREFLIGHT préflight spécifique .162 (p5_162_preflight.py) tout PASS et de moins de OK   p5-162-preflight-20261105T074636Z.json (1 min, 60 PASS / 0 WARN / 0 FAIL)
+2026-11-05T07:47:11Z PREFLIGHT 3 nœuds Ready                                                            OK   {'k8s-master': 'Ready', 'k8s-worker1': 'Ready', 'k8s-worker2': 'Ready'}
+2026-11-05T07:47:12Z PREFLIGHT etcd 5/5 sain                                                            OK   5
+2026-11-05T07:47:13Z PREFLIGHT CNPG sain 2/2                                                            OK   Cluster in healthy state|postgres-5|2
+2026-11-05T07:47:13Z PREFLIGHT aucun pod non sain                                                       OK   []
+2026-11-05T07:47:13Z PREFLIGHT aucun taint de répétition résiduel                                       OK   k8s-master node-role.kubernetes.io/control-plane | k8s-worker1  | k8s-worker2
+2026-11-05T07:47:14Z PREFLIGHT canari ha01-canary-w1 écrit depuis < 30 s                                OK   0.0
+2026-11-05T07:47:14Z PREFLIGHT canari ha01-canary-w2 écrit depuis < 30 s                                OK   0.1
+2026-11-05T07:47:14Z PREFLIGHT harnais actif (sondes Windows < 15 s, échantillonneur < 60 s)            OK   0s/6s
+2026-11-05T07:47:15Z PREFLIGHT sonde .161 (ha01-probe-161) active                                       OK   active
+2026-11-05T07:47:15Z PREFLIGHT RAM hôte >= 2000 Mo maintenant ET à ~5 min et ~10 min (3 mesures, comme  OK   maintenant 2499 Mo, min des 3 points 2490 Mo (n=3)
+2026-11-05T07:47:15Z PREFLIGHT .153 MemAvailable >= 500 Mo                                              OK   700
+2026-11-05T07:47:16Z PREFLIGHT .155 MemAvailable >= 600 Mo                                              OK   868
+2026-11-05T07:47:16Z PREFLIGHT .158 MemAvailable >= 600 Mo                                              OK   1009
+2026-11-05T07:47:16Z PREFLIGHT aucun gel d'E/S de l'hôte dans les 10 dernières minutes                  OK   aucun
+2026-11-05T07:47:16Z PREFLIGHT LB .160 sert en direct et tous ses serveurs sont UP                      OK   web=200 api=200  []
+2026-11-05T07:47:16Z PREFLIGHT LB .162 sert en direct et tous ses serveurs sont UP                      OK   web=200 api=200  []
+2026-11-05T07:47:17Z PREFLIGHT mode DNS des 2 LB consigné (identique)                                   OK   {'160': 'enforce', '162': 'enforce'}
+2026-11-05T07:47:17Z PREFLIGHT vmrun présent                                                            OK   C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe
+2026-11-05T07:47:17Z PREFLIGHT fichier .vmx de la VM présent et VM en marche                            OK   C:\Users\houss\Documents\Virtual Machines\k8s-lb2\k8s-lb2.vmx
+2026-11-05T07:47:18Z PREFLIGHT VM .162 identifiée par SSH (hostname -I contient 192.168.148.162)        OK   192.168.148.162
+2026-11-05T07:47:18Z PREFLIGHT kubectl utilisable depuis .153 (flux des journaux de canaris)            OK   ok
+2026-11-05T07:47:20Z PREFLIGHT agent hôte HELIOS :9999 (état avant pause consigné)                      OK   port 9999 (agent vmpower) : REPOND | port 9099 (watchdog HTTP) : ne repond pas | processus agent : pid 18
+2026-11-05T07:47:20Z dry-run: préconditions OK (confirmation non exigée en dry-run) — aucune VM éteinte, aucune pause HELIOS, aucun filet armé.
+code retour p4 dry-run=0
+--- recent_p5_preflight('162') appelé TEL QUEL (sans contournement dry-run) :
+recent_p5_preflight('162') -> True | p5-162-preflight-20261105T074636Z.json (1 min, 60 PASS / 0 WARN / 0 FAIL)
