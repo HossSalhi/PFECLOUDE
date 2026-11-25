@@ -17,6 +17,11 @@ import com.orange.pfe.backend.service.JwtService;
 import com.orange.pfe.backend.service.TotpService;
 import com.orange.pfe.backend.service.UserAuthEmailService;
 import com.orange.pfe.backend.service.UserService;
+import com.orange.pfe.backend.model.audit.AuditAction;
+import com.orange.pfe.backend.model.audit.AuditModule;
+import com.orange.pfe.backend.model.audit.AuditResult;
+import com.orange.pfe.backend.service.audit.AuditEvent;
+import com.orange.pfe.backend.service.audit.AuditTrailService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -52,6 +57,7 @@ public class AuthController {
     private final AppSecurityProperties securityProps;
     private final PasswordEncoder passwordEncoder;
     private final UserAuthEmailService userAuthEmailService;
+    private final AuditTrailService auditTrailService;
 
     public AuthController(AuthenticationManager authManager,
                           JwtService jwtService,
@@ -60,7 +66,8 @@ public class AuthController {
                           AppUserRepository userRepository,
                           AppSecurityProperties securityProps,
                           PasswordEncoder passwordEncoder,
-                          UserAuthEmailService userAuthEmailService) {
+                          UserAuthEmailService userAuthEmailService,
+                          AuditTrailService auditTrailService) {
         this.authManager = authManager;
         this.jwtService = jwtService;
         this.totpService = totpService;
@@ -69,6 +76,23 @@ public class AuthController {
         this.securityProps = securityProps;
         this.passwordEncoder = passwordEncoder;
         this.userAuthEmailService = userAuthEmailService;
+        this.auditTrailService = auditTrailService;
+    }
+
+    /** Trace (sans jamais échouer) une tentative de connexion refusée. Aucun mot de passe n'est enregistré. */
+    private void auditLoginFailure(String attemptedUsername, String reason) {
+        auditTrailService.recordQuietly(AuditEvent.of(AuditModule.AUTH, AuditAction.LOGIN_FAILED)
+                .actorUsername(attemptedUsername)
+                .summary(reason)
+                .result(AuditResult.FAILURE));
+    }
+
+    private void auditAuth(AuditAction action, AppUser user, String summary, AuditResult result) {
+        auditTrailService.recordQuietly(AuditEvent.of(AuditModule.AUTH, action)
+                .actor(user)
+                .object("AppUser", user == null ? null : user.getId())
+                .summary(summary)
+                .result(result));
     }
 
     /**
@@ -83,9 +107,11 @@ public class AuthController {
             authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.username(), request.password()));
         } catch (DisabledException e) {
+            auditLoginFailure(request.username(), "Connexion refusée : compte désactivé");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Account is disabled"));
         } catch (LockedException e) {
+            auditLoginFailure(request.username(), "Connexion refusée : compte verrouillé");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Account is locked"));
         } catch (BadCredentialsException e) {
@@ -100,6 +126,7 @@ public class AuthController {
                     log.warn("User {} locked after {} failed attempts", u.getUsername(), attempts);
                 }
             });
+            auditLoginFailure(request.username(), "Connexion refusée : identifiants invalides");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid username or password"));
         }
@@ -126,6 +153,7 @@ public class AuthController {
             log.debug("2FA skipped for user {} — last verified within 14 days", user.getUsername());
         }
 
+        auditAuth(AuditAction.LOGIN, user, "Connexion de " + user.getUsername(), AuditResult.SUCCESS);
         return ResponseEntity.ok(LoginResponse.authenticated(
                 jwtService.generateAccessToken(user),
                 jwtService.generateRefreshToken(user),
@@ -161,6 +189,8 @@ public class AuthController {
         }
 
         if (!totpService.verifyCode(user.getTwoFactorSecret(), request.code())) {
+            // Le code saisi n'est jamais enregistré.
+            auditAuth(AuditAction.LOGIN_FAILED, user, "Connexion refusée : code 2FA invalide", AuditResult.FAILURE);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid TOTP code"));
         }
@@ -173,6 +203,7 @@ public class AuthController {
         user.setForce2faOnNextLogin(false);
         userRepository.save(user);
 
+        auditAuth(AuditAction.LOGIN_2FA, user, "Connexion de " + user.getUsername() + " (2FA validée)", AuditResult.SUCCESS);
         return ResponseEntity.ok(LoginResponse.authenticated(
                 jwtService.generateAccessToken(user),
                 jwtService.generateRefreshToken(user),
@@ -206,6 +237,7 @@ public class AuthController {
             String who = user != null ? user.getUsername() : "unknown";
             jwtService.revokeToken(token, who);
             log.info("User {} logged out", who);
+            auditAuth(AuditAction.LOGOUT, user, "Déconnexion de " + who, AuditResult.SUCCESS);
         }
         return ResponseEntity.noContent().build();
     }
@@ -221,8 +253,11 @@ public class AuthController {
         }
         try {
             userService.changePassword(user, request.currentPassword(), request.newPassword());
+            // Aucun mot de passe (ancien ou nouveau) n'est enregistré : seul l'événement l'est.
+            auditAuth(AuditAction.PASSWORD_CHANGE, user, "Changement de son mot de passe", AuditResult.SUCCESS);
             return ResponseEntity.ok(Map.of("message", "Mot de passe modifié avec succès."));
         } catch (IllegalArgumentException e) {
+            auditAuth(AuditAction.PASSWORD_CHANGE, user, "Échec du changement de mot de passe", AuditResult.FAILURE);
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -234,9 +269,17 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         try {
+            String oldEmail = user.getEmail();
             userService.changeEmail(user, request.currentPassword(), request.newEmail());
+            auditTrailService.recordQuietly(AuditEvent.of(AuditModule.AUTH, AuditAction.EMAIL_CHANGE)
+                    .actor(user)
+                    .object("AppUser", user.getId())
+                    .summary("Changement de son adresse e-mail")
+                    .oldValues(Map.of("email", oldEmail == null ? "" : oldEmail))
+                    .newValues(Map.of("email", request.newEmail())));
             return ResponseEntity.ok(Map.of("message", "Email modifié avec succès.", "newEmail", request.newEmail()));
         } catch (IllegalArgumentException e) {
+            auditAuth(AuditAction.EMAIL_CHANGE, user, "Échec du changement d'adresse e-mail", AuditResult.FAILURE);
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

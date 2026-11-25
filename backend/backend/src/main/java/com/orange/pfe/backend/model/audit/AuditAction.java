@@ -1,0 +1,35 @@
+package com.orange.pfe.backend.model.audit;
+
+/** Type d'opération tracée dans le journal d'audit. */
+public enum AuditAction {
+    LOGIN,
+    LOGIN_2FA,
+    LOGIN_FAILED,
+    LOGOUT,
+    PASSWORD_CHANGE,
+    EMAIL_CHANGE,
+    CREATE,
+    UPDATE,
+    DELETE,
+    ENABLE,
+    DISABLE,
+    ROLE_CHANGE,
+    PASSWORD_RESET,
+    BLOCK,
+    UNBLOCK,
+    TWO_FACTOR_CHANGE,
+    MEMBER_ADD,
+    MEMBER_REMOVE,
+    LEAD_CHANGE,
+    ASSIGN,
+    STATUS_CHANGE,
+    START,
+    COMPLETE,
+    CANCEL,
+    ACTIVATE,
+    DEACTIVATE,
+    GENERATE,
+    EXPORT,
+    SCHEDULE,
+    ACCESS_DENIED
+}
