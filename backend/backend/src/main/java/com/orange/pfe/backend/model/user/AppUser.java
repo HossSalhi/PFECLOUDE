@@ -77,7 +77,7 @@ public class AppUser implements UserDetails {
             name = "user_allowed_namespace",
             joinColumns = @JoinColumn(name = "user_id")
     )
-    @Column(name = "namespace", length = 63)
+    @Column(name = "namespace", length = 63, nullable = false)
     private Set<String> allowedNamespaces = new HashSet<>();
 
     @Column(name = "activation_token", length = 64)

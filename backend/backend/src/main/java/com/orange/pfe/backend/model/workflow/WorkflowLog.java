@@ -16,7 +16,7 @@ public class WorkflowLog {
     private LocalDateTime createdAt = LocalDateTime.now();
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "workflow_id")
+    @JoinColumn(name = "workflow_id", nullable = false)
     private WorkflowInstance workflow;
 
     public WorkflowLog() {}
