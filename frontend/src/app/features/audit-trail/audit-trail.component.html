@@ -1,0 +1,129 @@
+<div class="org-scope">
+<div class="org-page">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title"><i class="fas fa-clipboard-check"></i> Audit et activités</h1>
+      <p class="page-subtitle">Qui a fait quoi, quand, sur quel objet et avec quel résultat. Journal en lecture seule : aucune entrée ne peut être modifiée ni supprimée.</p>
+    </div>
+    <div class="header-actions">
+      <button *ngIf="canExport" class="btn-primary" (click)="exportCsv()" [disabled]="exporting">
+        <span *ngIf="exporting" class="btn-spinner"></span>
+        <i *ngIf="!exporting" class="fas fa-file-csv"></i> Exporter en CSV
+      </button>
+    </div>
+  </div>
+
+  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+  <div *ngIf="error" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+  <div *ngIf="!canViewAll" class="alert-info"><i class="fas fa-circle-info"></i> Vous consultez votre propre activité uniquement.</div>
+
+  <div class="filters-bar">
+    <div class="search-wrap">
+      <i class="fas fa-search"></i>
+      <input type="text" placeholder="Rechercher dans le résumé ou l'objet…" [(ngModel)]="filters.q" (keyup.enter)="load(true)">
+    </div>
+    <input *ngIf="canViewAll" class="filter-input" type="text" placeholder="Utilisateur" style="width:150px"
+           [(ngModel)]="filters.username" (keyup.enter)="load(true)">
+    <select class="filter-select" [(ngModel)]="filters.module" (ngModelChange)="load(true)">
+      <option value="">Tous les modules</option>
+      <option *ngFor="let m of meta.modules" [value]="m">{{ moduleLabel(m) }}</option>
+    </select>
+    <select class="filter-select" [(ngModel)]="filters.action" (ngModelChange)="load(true)">
+      <option value="">Toutes les actions</option>
+      <option *ngFor="let a of meta.actions" [value]="a">{{ actionLabel(a) }}</option>
+    </select>
+    <select class="filter-select" [(ngModel)]="filters.result" (ngModelChange)="load(true)">
+      <option value="">Tous les résultats</option>
+      <option *ngFor="let r of meta.results" [value]="r">{{ resultLabel(r) }}</option>
+    </select>
+    <label class="filter-check">Du
+      <input class="filter-input" type="datetime-local" [(ngModel)]="filters.from" (ngModelChange)="load(true)">
+    </label>
+    <label class="filter-check">au
+      <input class="filter-input" type="datetime-local" [(ngModel)]="filters.to" (ngModelChange)="load(true)">
+    </label>
+    <button class="btn-secondary" (click)="load(true)"><i class="fas fa-magnifying-glass"></i> Rechercher</button>
+    <button class="btn-secondary" (click)="resetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
+    <span class="results-count">{{ total }} activité(s)</span>
+  </div>
+
+  <div class="table-card">
+    <div *ngIf="loading" class="table-loading"><div class="spinner"></div> Chargement…</div>
+    <table *ngIf="!loading" class="org-table">
+      <thead>
+        <tr><th>Date et heure</th><th>Utilisateur</th><th>Module</th><th>Action</th><th>Objet</th><th>Résumé</th><th>Résultat</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let e of items" class="clickable" (click)="openDetail(e)">
+          <td style="white-space:nowrap">{{ fmt(e.occurredAt) }}</td>
+          <td><span class="text-strong">{{ e.actorUsername || 'système' }}</span><div class="text-muted text-small">{{ e.actorRole }}</div></td>
+          <td>{{ moduleLabel(e.module) }}</td>
+          <td>{{ actionLabel(e.action) }}</td>
+          <td>{{ e.objectType || '—' }}<span *ngIf="e.objectId" class="text-muted"> #{{ e.objectId }}</span></td>
+          <td>{{ e.summary }}</td>
+          <td><span class="badge" [ngClass]="'st-' + e.result.toLowerCase()">{{ resultLabel(e.result) }}</span></td>
+          <td class="actions-cell" (click)="$event.stopPropagation()">
+            <button class="btn-icon btn-view" title="Détail" (click)="openDetail(e)"><i class="fas fa-eye"></i></button>
+          </td>
+        </tr>
+        <tr *ngIf="items.length === 0">
+          <td colspan="8" class="org-empty"><i class="fas fa-clipboard-list"></i><p>Aucune activité ne correspond aux critères.</p></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="pager" *ngIf="!loading && total > 0">
+      <span>Page {{ page + 1 }} / {{ totalPages }}</span>
+      <div class="pager-btns">
+        <button (click)="goTo(0)" [disabled]="page === 0">«</button>
+        <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
+        <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
+        <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" *ngIf="selected" (click)="closeDetail()">
+  <div class="modal modal-lg" (click)="$event.stopPropagation()">
+    <div class="modal-header">
+      <h3><i class="fas fa-clipboard-check"></i> Détail de l'activité #{{ selected.id }}</h3>
+      <button class="modal-close" (click)="closeDetail()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <dl class="detail-grid">
+        <dt>Date et heure</dt><dd>{{ fmt(selected.occurredAt) }}</dd>
+        <dt>Utilisateur</dt><dd>{{ selected.actorUsername || 'système' }} <span class="text-muted">({{ selected.actorRole || '—' }})</span></dd>
+        <dt>Module</dt><dd>{{ moduleLabel(selected.module) }}</dd>
+        <dt>Action</dt><dd>{{ actionLabel(selected.action) }}</dd>
+        <dt>Objet</dt><dd>{{ selected.objectType || '—' }}<span *ngIf="selected.objectId"> #{{ selected.objectId }}</span></dd>
+        <dt>Résumé</dt><dd>{{ selected.summary || '—' }}</dd>
+        <dt>Résultat</dt><dd><span class="badge" [ngClass]="'st-' + selected.result.toLowerCase()">{{ resultLabel(selected.result) }}</span></dd>
+        <dt>Adresse IP</dt><dd>{{ selected.clientIp || '—' }}</dd>
+        <dt>Identifiant de requête</dt><dd>{{ selected.requestId || '—' }}</dd>
+      </dl>
+
+      <div class="section-title">Valeurs avant / après</div>
+      <div *ngIf="detailLoading" class="text-muted">Chargement…</div>
+      <ng-container *ngIf="!detailLoading">
+        <table class="org-table" *ngIf="diff.length > 0">
+          <thead><tr><th>Champ</th><th>Avant</th><th>Après</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let d of diff">
+              <td class="text-strong">{{ d.field }}</td>
+              <td [class.text-muted]="!d.changed">{{ d.before }}</td>
+              <td [class.text-strong]="d.changed">{{ d.after }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p *ngIf="diff.length === 0" class="text-muted">Aucune valeur modifiée n'est associée à cette activité.</p>
+      </ng-container>
+      <p class="hint">Les mots de passe, codes et jetons ne sont jamais enregistrés dans le journal.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" (click)="closeDetail()">Fermer</button>
+    </div>
+  </div>
+</div>
+</div>

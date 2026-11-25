@@ -1,0 +1,48 @@
+<div *ngIf="content as c">
+  <p class="text-muted text-small" style="margin:0 0 14px">
+    Période : du {{ day(c.periodFrom) }} au {{ lastDay(c.periodTo) }}
+    <ng-container *ngIf="c.previousFrom && c.previousTo">
+      — comparée à la période précédente ({{ day(c.previousFrom) }} → {{ lastDay(c.previousTo) }})
+    </ng-container>
+    · généré le {{ day(c.generatedAt) }} par {{ c.generatedBy }}
+  </p>
+
+  <!-- Indicateurs -->
+  <div class="stat-grid" *ngIf="c.summary && c.summary.length > 0">
+    <div class="stat-tile" *ngFor="let m of c.summary; trackBy: trackByIndex">
+      <div class="stat-label">{{ m.label }}</div>
+      <div class="stat-value">{{ num(m.value) }}<span class="stat-unit" *ngIf="m.unit">{{ m.unit }}</span></div>
+      <div class="stat-delta delta-flat" *ngIf="hasComparison(m)">
+        {{ deltaText(m) }} <span class="text-muted">· avant : {{ num(m.previous) }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Graphiques -->
+  <div class="chart-grid" *ngIf="charts.length > 0">
+    <div class="chart-card" *ngFor="let ch of charts; trackBy: trackByIndex">
+      <h4>{{ ch.title }}</h4>
+      <div class="chart-box">
+        <canvas baseChart [data]="$any(ch.data)" [options]="$any(ch.options)" [type]="ch.type"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tableaux -->
+  <div class="card" *ngFor="let s of c.sections; trackBy: trackByIndex">
+    <div class="card-pad">
+      <div class="card-title"><i class="fas fa-table"></i> {{ s.title }}</div>
+      <div *ngIf="s.rows.length === 0" class="text-muted">Aucune donnée sur la période.</div>
+      <div style="overflow-x:auto" *ngIf="s.rows.length > 0">
+        <table class="org-table">
+          <thead><tr><th *ngFor="let col of s.columns">{{ col }}</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let row of s.rows">
+              <td *ngFor="let cell of row">{{ cell ?? '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

@@ -82,6 +82,38 @@
         </a>
       </ng-container>
 
+      <!-- Organisation : maintenance, équipes, tâches, audit, rapports (visibilité selon les permissions du Backend) -->
+      <ng-container *ngIf="perms.canAny('MAINTENANCE_VIEW', 'TEAMS_VIEW', 'TASKS_VIEW', 'AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL', 'REPORTS_VIEW')">
+        <div class="nav-divider"></div>
+        <div class="nav-section-label">Organisation</div>
+
+        <a *ngIf="perms.can('MAINTENANCE_VIEW')" routerLink="/maintenance" class="nav-item" [class.active]="isActive('/maintenance')">
+          <i class="fas fa-screwdriver-wrench nav-icon"></i>
+          <span class="nav-label">Maintenance</span>
+        </a>
+
+        <a *ngIf="perms.can('TEAMS_VIEW')" routerLink="/teams" class="nav-item" [class.active]="isActive('/teams')">
+          <i class="fas fa-people-group nav-icon"></i>
+          <span class="nav-label">Équipes</span>
+        </a>
+
+        <a *ngIf="perms.can('TASKS_VIEW')" routerLink="/team-tasks" class="nav-item"
+           [class.active]="isActive('/team-tasks') || router.url.startsWith('/team-tasks?')">
+          <i class="fas fa-list-check nav-icon"></i>
+          <span class="nav-label">Tâches d'équipe</span>
+        </a>
+
+        <a *ngIf="perms.canAny('AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL')" routerLink="/audit-trail" class="nav-item" [class.active]="isActive('/audit-trail')">
+          <i class="fas fa-clipboard-check nav-icon"></i>
+          <span class="nav-label">Audit et activités</span>
+        </a>
+
+        <a *ngIf="perms.can('REPORTS_VIEW')" routerLink="/reports" class="nav-item" [class.active]="isActive('/reports')">
+          <i class="fas fa-file-lines nav-icon"></i>
+          <span class="nav-label">Rapports</span>
+        </a>
+      </ng-container>
+
     </nav>
 
     <div class="sidebar-footer">

@@ -19,6 +19,12 @@ import { ForgotPasswordComponent } from './features/forgot-password/forgot-passw
 import { ResetPasswordComponent } from './features/reset-password/reset-password.component';
 import { ActivateComponent } from './features/activate/activate.component';
 import { UsersComponent } from './features/users/users.component';
+import { PermissionGuard } from './core/guards/permission.guard';
+import { MaintenanceComponent } from './features/maintenance/maintenance.component';
+import { TeamsComponent } from './features/teams/teams.component';
+import { TeamTasksComponent } from './features/team-tasks/team-tasks.component';
+import { AuditTrailComponent } from './features/audit-trail/audit-trail.component';
+import { ReportsComponent } from './features/reports/reports.component';
 
 const ADMIN_ROLES  = ['ADMIN', 'SUPER_ADMIN'];
 const SUPER_ONLY   = ['SUPER_ADMIN'];
@@ -45,6 +51,14 @@ const routes: Routes = [
   { path: 'remediation',  component: RemediationComponent,  canActivate: [AuthGuard, RoleGuard], data: { roles: ADMIN_ROLES } },
   { path: 'tasks',        component: HumanTasksComponent,   canActivate: [AuthGuard, RoleGuard], data: { roles: ADMIN_ROLES } },
   { path: 'users',        component: UsersComponent,        canActivate: [AuthGuard, RoleGuard], data: { roles: ADMIN_ROLES } },
+
+  // Modules « organisation » : l'accès suit les permissions calculées par le Backend (matrice par rôle existant).
+  // Ce garde n'affiche que ce qui est utile : chaque appel d'API est de toute façon contrôlé côté Backend.
+  { path: 'maintenance', component: MaintenanceComponent, canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['MAINTENANCE_VIEW'] } },
+  { path: 'teams',       component: TeamsComponent,       canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TEAMS_VIEW'] } },
+  { path: 'team-tasks',  component: TeamTasksComponent,   canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TASKS_VIEW'] } },
+  { path: 'audit-trail', component: AuditTrailComponent,  canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL'] } },
+  { path: 'reports',     component: ReportsComponent,     canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['REPORTS_VIEW'] } },
 
   // SUPER_ADMIN only
   { path: 'fine-tuning', component: FineTuningComponent, canActivate: [AuthGuard, RoleGuard], data: { roles: SUPER_ONLY } },

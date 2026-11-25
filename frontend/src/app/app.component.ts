@@ -5,6 +5,7 @@ import { filter } from 'rxjs/operators';
 import { SseService } from './core/services/sse.service';
 import { AuthService } from './core/services/auth.service';
 import { ApiService } from './core/services/api.service';
+import { OrgPermissionsService } from './core/services/org-permissions.service';
 
 export interface NavItem {
   label: string;
@@ -84,11 +85,14 @@ export class AppComponent implements OnInit, OnDestroy {
     public router: Router,
     private sseService: SseService,
     public authService: AuthService,
-    private apiService: ApiService
+    private apiService: ApiService,
+    public perms: OrgPermissionsService
   ) {}
 
   ngOnInit(): void {
     this.loadUserInfo();
+    // Permissions des modules « organisation » (maintenance, équipes, tâches, audit, rapports) : menu adapté au rôle
+    this.perms.ensureLoaded().subscribe();
     this.isDark = localStorage.getItem('helios_theme') === 'dark';
     this.applyTheme();
     this.refreshUserFromServer();
@@ -100,8 +104,10 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe(() => {
       if (this.authService.isLoggedIn()) {
         this.refreshUserFromServer();
+        this.perms.ensureLoaded().subscribe();
       } else {
         this.loadUserInfo();
+        this.perms.clear();
       }
     });
     this.subs.push(navSub);

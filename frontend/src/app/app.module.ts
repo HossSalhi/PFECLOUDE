@@ -25,6 +25,12 @@ import { ForgotPasswordComponent } from './features/forgot-password/forgot-passw
 import { ResetPasswordComponent } from './features/reset-password/reset-password.component';
 import { ActivateComponent } from './features/activate/activate.component';
 import { UsersComponent } from './features/users/users.component';
+import { MaintenanceComponent } from './features/maintenance/maintenance.component';
+import { TeamsComponent } from './features/teams/teams.component';
+import { TeamTasksComponent } from './features/team-tasks/team-tasks.component';
+import { AuditTrailComponent } from './features/audit-trail/audit-trail.component';
+import { ReportsComponent } from './features/reports/reports.component';
+import { ReportViewComponent } from './features/reports/report-view.component';
 
 @NgModule({
   declarations: [
@@ -45,7 +51,13 @@ import { UsersComponent } from './features/users/users.component';
     ActivateComponent,
     NotFoundComponent,
     UsersComponent,
-    OrangeLogoComponent
+    OrangeLogoComponent,
+    MaintenanceComponent,
+    TeamsComponent,
+    TeamTasksComponent,
+    AuditTrailComponent,
+    ReportsComponent,
+    ReportViewComponent
   ],
   imports: [
     BrowserModule,
