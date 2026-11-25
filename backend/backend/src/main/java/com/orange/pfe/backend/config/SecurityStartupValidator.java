@@ -36,6 +36,12 @@ public class SecurityStartupValidator {
     @Value("${app.security.api-password:}")
     private String operatorPassword;
 
+    @Value("${helios.bridge.api-key:}")
+    private String bridgeApiKey;
+
+    @Value("${helios.bridge.auth-required:false}")
+    private boolean bridgeAuthRequired;
+
     /**
      * When true, any detected insecure default causes an immediate startup failure.
      * Set SECURITY_STRICT_MODE=true in production K8s secrets.
@@ -56,6 +62,12 @@ public class SecurityStartupValidator {
         }
         if (DEFAULT_OPERATOR_PASSWORD.equals(operatorPassword)) {
             violations.add("BACKEND_API_PASSWORD is 'operator-change-me' — set it in the K8s secret");
+        }
+
+        if (bridgeAuthRequired
+                && (bridgeApiKey == null || bridgeApiKey.isBlank())) {
+            violations.add(
+                    "HELIOS_BRIDGE_API_KEY est requis lorsque HELIOS_BRIDGE_AUTH_REQUIRED=true");
         }
 
         if (violations.isEmpty()) {

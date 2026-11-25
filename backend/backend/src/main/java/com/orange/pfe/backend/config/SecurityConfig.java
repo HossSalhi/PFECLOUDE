@@ -161,11 +161,18 @@ public class SecurityConfig {
                         "/api/feedback/**"
                 ).hasAnyRole("USER", "ADMIN", "SUPER_ADMIN");
 
+                // Routes d'?criture limit?es au service Bridge HELIOS.
+                auth.requestMatchers(HttpMethod.POST,
+                        "/api/incidents/ingest/host",
+                        "/api/incidents/*/execution-event",
+                        "/api/incidents/*/evidence/collect",
+                        "/api/incidents/*/verification"
+                ).hasAnyRole("ADMIN", "SUPER_ADMIN", "HELIOS_BRIDGE");
+
                 auth.requestMatchers(HttpMethod.POST,
                         "/api/incidents",
                         "/api/actions",
-                        "/api/workflows/**",
-                        "/api/ai/**"
+                        "/api/workflows/**"
                 ).hasAnyRole("ADMIN", "SUPER_ADMIN");
 
                 auth.requestMatchers(HttpMethod.PUT,
@@ -182,8 +189,6 @@ public class SecurityConfig {
                 ).hasAnyRole("ADMIN", "SUPER_ADMIN");
 
                 auth.requestMatchers(
-                        "/api/finetuning/**",
-                        "/api/mlops/**",
                         "/api/audit/**"
                 ).hasAnyRole("ADMIN", "SUPER_ADMIN");
 
