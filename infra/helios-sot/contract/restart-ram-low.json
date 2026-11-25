@@ -1,0 +1,26 @@
+{
+  "case": "restart-ram-low",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "133"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "RAM de l'hote insuffisante : aucun demarrage",
+      "host_ram_mb": "<int>",
+      "incident": 133,
+      "min_free_ram_mb": 1500,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "retry_after_s": "<int>",
+      "started": false,
+      "status": "HOST_RAM_LOW",
+      "vm": "k8s-worker1"
+    },
+    "status": 503
+  }
+}

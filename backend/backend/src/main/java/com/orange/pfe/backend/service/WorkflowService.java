@@ -53,7 +53,8 @@ public class WorkflowService {
         WorkflowInstance saved = repo.save(workflow);
         saved.setCorrelationKey(String.valueOf(saved.getId()));
         saved.addLog("Correlation key assigned: " + saved.getCorrelationKey());
-        return repo.save(saved);
+        // saved est gere par la transaction : le dirty checking persiste les changements.
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -92,13 +93,14 @@ public class WorkflowService {
 
     @Transactional
     public WorkflowInstance nextStep(WorkflowInstance workflow) {
-        if (workflow.getStatus() == WorkflowStatus.COMPLETED) {
+        WorkflowInstance managed = requireManagedWorkflow(workflow);
+        if (managed.getStatus() == WorkflowStatus.COMPLETED) {
             throw new InvalidWorkflowStateException("Cannot advance a completed workflow");
         }
 
-        workflow.advanceStep();
-        workflow.addLog("Advanced to step " + workflow.getCurrentStep() + " at " + LocalDateTime.now());
-        return repo.save(workflow);
+        managed.advanceStep();
+        managed.addLog("Advanced to step " + managed.getCurrentStep() + " at " + LocalDateTime.now());
+        return managed;
     }
 
     @Transactional
@@ -117,14 +119,18 @@ public class WorkflowService {
             IncidentStatus incidentStatus,
             String logMessage
     ) {
-        workflow.setOrchestrationState(state);
+        WorkflowInstance managed = requireManagedWorkflow(workflow);
+        managed.setOrchestrationState(state);
+
         if (incidentStatus != null) {
-            workflow.getIncident().setStatus(incidentStatus);
+            managed.getIncident().setStatus(incidentStatus);
         }
         if (logMessage != null && !logMessage.isBlank()) {
-            workflow.addLog(logMessage);
+            managed.addLog(logMessage);
         }
-        return repo.save(workflow);
+
+        // Ne pas fusionner une seconde fois le graphe workflow/logs.
+        return managed;
     }
 
     @Transactional
@@ -133,10 +139,11 @@ public class WorkflowService {
             String processDefinitionId,
             String processInstanceKey
     ) {
-        workflow.setCamundaProcessDefinitionId(processDefinitionId);
-        workflow.setCamundaProcessInstanceKey(processInstanceKey);
-        workflow.addLog("Camunda process attached: " + processInstanceKey);
-        return repo.save(workflow);
+        WorkflowInstance managed = requireManagedWorkflow(workflow);
+        managed.setCamundaProcessDefinitionId(processDefinitionId);
+        managed.setCamundaProcessInstanceKey(processInstanceKey);
+        managed.addLog("Camunda process attached: " + processInstanceKey);
+        return managed;
     }
 
     @Transactional
@@ -158,28 +165,24 @@ public class WorkflowService {
             IncidentStatus incidentStatus,
             String logMessage
     ) {
-        if (workflow == null) {
-            throw new InvalidWorkflowStateException("Workflow is required");
-        }
+        WorkflowInstance managed = requireManagedWorkflow(workflow);
+        managed.setOrchestrationState(orchestrationState);
 
-        workflow.setOrchestrationState(orchestrationState);
         if (incidentStatus != null) {
-            workflow.getIncident().setStatus(incidentStatus);
-            incidentRepo.save(workflow.getIncident());
+            // L'incident charge appartient au contexte transactionnel courant.
+            managed.getIncident().setStatus(incidentStatus);
         }
         if (logMessage != null && !logMessage.isBlank()) {
-            workflow.addLog(logMessage);
+            managed.addLog(logMessage);
         }
-        workflow.endWorkflow(workflowStatus);
-        return repo.save(workflow);
+
+        managed.endWorkflow(workflowStatus);
+        return managed;
     }
 
     @Transactional
     public void addWorkflowLog(Long workflowId, String message) {
-        repo.findByIdWithLogs(workflowId).ifPresent(wf -> {
-            wf.addLog(message);
-            repo.save(wf);
-        });
+        repo.findByIdWithLogs(workflowId).ifPresent(wf -> wf.addLog(message));
     }
 
     @Transactional(readOnly = true)
@@ -191,6 +194,15 @@ public class WorkflowService {
                 .collect(Collectors.toList());
     }
 
+    private WorkflowInstance requireManagedWorkflow(WorkflowInstance workflow) {
+        if (workflow == null || workflow.getId() == null) {
+            throw new InvalidWorkflowStateException("A persisted workflow is required");
+        }
+
+        Long workflowId = workflow.getId();
+        return repo.findByIdWithLogs(workflowId)
+                .orElseThrow(() -> new WorkflowNotFoundException(workflowId));
+    }
     private WorkflowInstanceDTO mapToDTO(WorkflowInstance workflow) {
         List<WorkflowLogDTO> logs = workflow.getLogs().stream()
                 .map(log -> new WorkflowLogDTO(log.getId(), log.getMessage(), log.getCreatedAt()))

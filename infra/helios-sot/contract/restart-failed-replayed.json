@@ -1,0 +1,26 @@
+{
+  "case": "restart-failed-replayed",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "142"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "detail": "VMRUN_RC_1: Error: The operation was canceled",
+      "error": "echec precedent de cet incident, non rejoue",
+      "incident": 142,
+      "node": "k8s-worker1",
+      "previous_status": "FAILED",
+      "replayed": true,
+      "request_id": "<id>",
+      "started": false,
+      "status": "FAILED",
+      "vm": "k8s-worker1"
+    },
+    "status": 500
+  }
+}

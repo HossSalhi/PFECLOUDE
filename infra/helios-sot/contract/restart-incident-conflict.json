@@ -1,0 +1,23 @@
+{
+  "case": "restart-incident-conflict",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "115"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker2"
+  },
+  "response": {
+    "body": {
+      "error": "incident deja associe a une autre VM",
+      "incident": 115,
+      "node": "k8s-worker2",
+      "request_id": "<id>",
+      "started": false,
+      "status": "INCIDENT_CONFLICT",
+      "vm": "k8s-worker2"
+    },
+    "status": 409
+  }
+}

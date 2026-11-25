@@ -1,0 +1,91 @@
+# =============================================================================
+# HELIOS - politique de mise sous tension des VM (scenario VM_DOWN)
+# SOURCE DE VERITE de la table des cibles. Adoptee le 2026-11-05 (plan "3 + 1").
+# =============================================================================
+#
+# Table FERMEE : seul un nom EXACT liste ci-dessous est connu de la politique.
+# Pas d'alias ("lb2", "monitoring"), pas d'adresse IP, pas de variation de casse
+# ni d'espaces : tout le reste est refuse (mode DENY), y compris k8s-aiCamunda
+# (.161), volontairement ABSENTE de cette table.
+#
+# Copies de cette table (la parite est verifiee par les tests, un ecart = test rouge) :
+#   - backend  : backend/backend/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerPolicy.java
+#                (test : VmPowerPolicyParityTest)
+#   - watchdog : infra/helios-sot/watchdog/helios-vm-watchdog.py, bloc VM_POLICY
+#                (test : scripts/helios-ops/test_watchdog_vm_policy.py)
+#
+# CONSIGNE FINALE DE L'UTILISATEUR 2026-11-06 (apres-midi, apres l'essai reel de .155) : l'auto-rallumage ne concerne que
+# TROIS VM : .155 (k8s-worker2), .158 (k8s-worker1) et .162 (k8s-lb2). k8s-monitoring (.160) n'est PAS rallumee
+# automatiquement : c'est la VM de supervision (Prometheus, detecteur, Grafana, Loki) ; sans elle il n'y a pas de cycle de
+# remediation, donc pas d'auto-rallumage. Elle reste en DETECT_ONLY (detection + historique + interface, ZERO e-mail, ZERO
+# Camunda, ZERO redemarrage) ; son rallumage est fait par l'administrateur. k8s-master (.153) etait DENY_RESTART a cette
+# date (inversee le 2026-11-17 : voir la consigne datee plus bas).
+# Cette consigne ANNULE celle de ~11:20 (« les quatre VM »), qui avait elle-meme annule celle de ~09:50 (« pas .160 »).
+# Historique conserve : .160 est passee de DETECT_ONLY a AUTO (route directe du backend) le 2026-11-06 matin, a ete rallumee
+# avec succes par un arret REEL a 13:28 (essai N3, incident #4895), puis a ete ramenee en DETECT_ONLY par la presente
+# revision. La route BACKEND_DIRECT (rallumage decide ET execute par le backend, sans Camunda) est CONSERVEE dans le code,
+# DORMANTE : aucune ligne de cette table ne l'utilise ; la reactiver demande une decision explicite (une ligne ici, dans
+# VmPowerPolicy.java et dans le bloc VM_POLICY du watchdog, puis l'armement de la VM).
+# CONSIGNE DE L'UTILISATEUR 2026-11-17 (apres les scenarios DISK et CPU) : « quand j'arrete le master 153 HELIOS reste
+# disponible (HA) et faire auto-rallumage ». k8s-master (.153) PASSE de DENY_RESTART a AUTO (route CAMUNDA, notifications
+# EMAIL_AND_UI), comme .155/.158. Cette consigne INVERSE « .153 jamais cible » (6 nov.) a TOUTES les couches (ce fichier,
+# VmPowerPolicy.java, watchdog, outils, tests) ; k8s-monitoring (.160) RESTE en DETECT_ONLY. Aucune VM n'est plus
+# DENY_RESTART : le mode est CONSERVE et honore (refus NOT_AUTHORIZED). Etat PRODUCTION inchange jusqu'au deploiement
+# (watchdog hote, image backend) ET a l'armement (HELIOS_VMPOWER_ACTIVE_VMS) : AUTO ici ne veut jamais dire « arme ».
+# Les outils (pre-vol, script d'activation) doivent rester EGAUX aux VM `mode: AUTO` d'ici :
+# scripts/helios-ops/test_n3_preflight.py (classe CoherenceTest) echoue sinon.
+#
+# Modes :
+#   AUTO          detection + validation de la cible + redemarrage automatique.
+#                 UN SEUL acteur declenche le redemarrage : le backend, via le watchdog hote.
+#   DETECT_ONLY   detection et journalisation UNIQUEMENT : aucune action, aucun e-mail,
+#                 aucune escalade Camunda, aucun appel de redemarrage (a toutes les couches).
+#                 Seule k8s-monitoring (.160) est DETECT_ONLY depuis la revision de l'apres-midi du 2026-11-06.
+#   DENY_RESTART  jamais redemarree automatiquement (la detection existante est conservee). Mode CONSERVE et honore, mais
+#                 plus utilise par aucune VM depuis le 2026-11-17.
+#   (DENY)        mode implicite de toute cible absente de la table.
+#
+# Champs complementaires de chaque VM (verifies contre le Java par VmPowerPolicyParityTest) :
+#   restart_route   CAMUNDA         redemarrage par la chaine Camunda existante
+#                                   (incident-remediation -> execute-remediation -> watchdog hote)
+#                   BACKEND_DIRECT  redemarrage decide ET execute par le backend (VmPowerWatch -> watchdog hote),
+#                                   SANS workflow Camunda, donc sans escalade Camunda
+#                   NONE            aucune route de redemarrage (DENY_RESTART / DENY)
+#   notifications   EMAIL_AND_UI    notifications habituelles (interface + e-mail selon la severite)
+#                   UI_ONLY         interface (SSE) UNIQUEMENT : aucun e-mail, aucun webhook
+# Invariants testes : mode AUTO <=> route CAMUNDA ou BACKEND_DIRECT ; mode non AUTO <=> route NONE.
+#
+# Les champs incident_* decrivent l'incident qui peut justifier un redemarrage :
+# namespace, application (= nom de la VM) et type EXACTS. Un autre triplet est refuse.
+#
+version: 1
+adopted: 2026-11-05
+default_mode: DENY
+
+# Seuils partages par le backend (verifies par VmPowerPolicyParityTest).
+thresholds:
+  evidence_max_age_ms: 15000          # une preuve d'etat (vmrun list) plus vieille est refusee
+  confirmation_min_observations: 2    # observations POWERED_OFF consecutives requises
+  confirmation_min_span_ms: 30000     # ecart minimal entre la premiere et la derniere observation
+  # 2026-11-18 : 30 -> 5 min sur demande de l'utilisateur (« go cooldown 5 min »), apres 4 arrets consecutifs de .153 dont 2 differes de 15-23 min.
+  # DOIT rester >= au cooldown du watchdog (HELIOS_COOLDOWN_S = 240 s) : verifie par scripts/helios-ops/test_cooldown_coherence.py.
+  # Contrepartie : une VM qui retombe juste apres son demarrage peut etre relancee toutes les 5 min (une seule action par incident reste exigee).
+  restart_cooldown_minutes: 5         # une VM n'est pas redemarree deux fois en 5 min, meme apres un echec
+
+vms:
+  # .155 - worker. Primaire PostgreSQL (CNPG) possible, membre etcd, pod backend leader possible :
+  # AUCUN switchover PostgreSQL ni transfert de leadership n'est declenche par cette politique.
+  - {name: k8s-worker2,    ip: 192.168.148.155, mode: AUTO,         vm_class: K8S_WORKER,       incident_namespace: k8s-nodes, incident_app: k8s-worker2,    incident_type: NODE_NOT_READY, restart_route: CAMUNDA,        notifications: EMAIL_AND_UI}
+  # .158 - worker (replique PostgreSQL, non-leader : meilleur premier essai reel).
+  - {name: k8s-worker1,    ip: 192.168.148.158, mode: AUTO,         vm_class: K8S_WORKER,       incident_namespace: k8s-nodes, incident_app: k8s-worker1,    incident_type: NODE_NOT_READY, restart_route: CAMUNDA,        notifications: EMAIL_AND_UI}
+  # .162 - load balancer HAProxy + DNS actif + membre etcd. Ni un noeud Kubernetes, ni NODE_NOT_READY :
+  # incident VM_DOWN dans le namespace "infra", detecte SANS dependre de .160 (sondes backend + etat vmrun).
+  - {name: k8s-lb2,        ip: 192.168.148.162, mode: AUTO,         vm_class: INFRA_LB,         incident_namespace: infra,     incident_app: k8s-lb2,        incident_type: VM_DOWN,        restart_route: CAMUNDA,        notifications: EMAIL_AND_UI}
+  # .160 - monitoring (Prometheus, detecteur, Grafana/Loki, HAProxy LB1, DNS, membre etcd) :
+  # DETECTION SEULE (consigne finale de l'apres-midi du 2026-11-06) : incident VM_DOWN + historique + interface, AUCUN
+  # e-mail, AUCUNE escalade Camunda, AUCUN redemarrage (a aucune couche). Rallumage = administrateur.
+  - {name: k8s-monitoring, ip: 192.168.148.160, mode: DETECT_ONLY,  vm_class: INFRA_MONITORING, incident_namespace: infra,     incident_app: k8s-monitoring, incident_type: VM_DOWN,        restart_route: NONE,           notifications: UI_ONLY}
+  # .153 - control-plane (etcd, apiserver, controller-manager, scheduler ; AUCUN pod HELIOS dessus) : AUTO depuis la
+  # consigne du 2026-11-17 (etait DENY_RESTART). Reste un APPELANT du watchdog ; quand elle est eteinte, les appelants
+  # sont .155/.158. Reprise verifiee comme un worker + apiserver 6443 ; meme detection NODE_NOT_READY qu'un worker.
+  - {name: k8s-master,     ip: 192.168.148.153, mode: AUTO,         vm_class: K8S_CONTROL_PLANE, incident_namespace: k8s-nodes, incident_app: k8s-master,     incident_type: NODE_NOT_READY, restart_route: CAMUNDA,        notifications: EMAIL_AND_UI}

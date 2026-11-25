@@ -8,6 +8,7 @@ import com.orange.pfe.backend.model.action.AutomationMode;
 import com.orange.pfe.backend.model.action.RemediationTargetKind;
 import com.orange.pfe.backend.model.enums.IncidentSeverity;
 import com.orange.pfe.backend.repository.IncidentActionRepository;
+import com.orange.pfe.backend.service.vmpower.VmPowerPolicy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -41,11 +42,40 @@ public class RemediationPolicyService {
         // EXCEPTION host-ops : un nœud UP avec disque plein / horloge décalée se répare par une COMMANDE
         // HÔTE in-cluster (HOST_IMAGE_GC / HOST_SYNC_TIME), PAS par un reboot VM. On ne force donc
         // RESTART_VM que si l'action n'est pas déjà une commande hôte ciblée.
-        if (!recommendationOnly && "k8s-nodes".equalsIgnoreCase(request.getNamespace())
-                && prediction.getIncidentType() != null
-                && prediction.getIncidentType().toUpperCase(Locale.ROOT).contains("NODE")
-                && actionType != ActionType.HOST_IMAGE_GC && actionType != ActionType.HOST_SYNC_TIME) {
-            actionType = ActionType.RESTART_VM;
+        //
+        // POLICY-HOST-SCOPE-AUDIT-01 (2026-09-08) : le namespace NE SUFFIT PAS. Le détecteur pose
+        // ns = "k8s-nodes" en CONSTANTE pour ses 16 règles en mode "hôte" (extraire(mode="hote")),
+        // donc aussi pour les VM d'infrastructure hors cluster — monitoring (.160), iacamunda (.161),
+        // lb2 (.162) — qui portent toutes un node-exporter. Exemple réel atteignable :
+        // NODE_HIGH_MEMORY sur .161 (mesurée à 82 %, seuil 95) produisait
+        // ns="k8s-nodes" / app="iacamunda" / type contenant "NODE", ce qui suffisait à forcer
+        // RESTART_VM sur une VM qui n'est PAS un nœud. "k8s-nodes" n'existe d'ailleurs pas comme
+        // namespace Kubernetes : c'est une valeur sentinelle de PÉRIMÈTRE, pas une identité.
+        // On exige donc désormais que la cible soit un vrai nœud (voir isKubernetesNode).
+        boolean kubernetesNodeTarget = "k8s-nodes".equalsIgnoreCase(request.getNamespace())
+                && isKubernetesNode(request.getApp());
+        if (!recommendationOnly && kubernetesNodeTarget) {
+            String normalizedIncidentType = prediction.getIncidentType() == null ? ""
+                    : prediction.getIncidentType().trim().toUpperCase(Locale.ROOT);
+            switch (normalizedIncidentType) {
+                // VMDOWN-POLICY-20261105 : RESTART_VM UNIQUEMENT pour une cible AUTO de la politique VM_DOWN
+                // (noms exacts : k8s-worker1, k8s-worker2 et, depuis la consigne du 2026-11-17, k8s-master). Toute
+                // autre cible (ou un mode non AUTO) ne produit JAMAIS de power-on : escalade (détection + notification existantes).
+                case "NODE_NOT_READY", "VM_DOWN", "VM_POWERED_OFF" ->
+                        actionType = VmPowerPolicy.isCamundaRestartable(request.getApp())
+                                ? ActionType.RESTART_VM : ActionType.ESCALATION;
+                case "NODE_DISK_FULL", "NODE_DISK_PRESSURE", "NODE_INODES_FULL" ->
+                        actionType = ActionType.HOST_RECLAIM_DISK;
+                case "NODE_HIGH_CPU", "NODE_CPU_SATURATION" ->
+                        actionType = ActionType.HOST_SERVICE_CPU_QUOTA;
+                case "NODE_HIGH_MEMORY", "NODE_MEMORY_PRESSURE" ->
+                        actionType = ActionType.HOST_SERVICE_MEMORY_LIMIT;
+                default -> {
+                    if (actionType == ActionType.RESTART_VM) {
+                        actionType = ActionType.ESCALATION;
+                    }
+                }
+            }
         }
         String targetNamespace = request.getNamespace();
         String targetName = request.getApp();
@@ -53,14 +83,22 @@ public class RemediationPolicyService {
         boolean dbRelated = isDbRelated(prediction);
         boolean cooldownBlocked = isCooldownBlocked(targetNamespace, targetName, actionType, prediction.getIncidentType());
         boolean confidenceEligible = isConfidenceEligible(actionType, prediction.getConfidence());
-        boolean severityEligible = isSeverityEligible(prediction.getSeverity());
         boolean appAllowlisted = isAppAllowlisted(request.getApp());
         boolean namespaceAllowlisted = isNamespaceAllowlisted(request.getNamespace());
+
+        // Exception CRITICAL strictement limitee au scenario DISK autorise.
+        // diskActionEligible exige flag actif, action exacte, type, namespace et cible approuves.
+        boolean diskActionEligible = isDiskAutoRemediationEligible(
+                actionType, targetNamespace, targetName, prediction.getIncidentType());
+        boolean severityEligible = isSeverityEligible(prediction.getSeverity()) || diskActionEligible;
+
         // Safe actions can execute automatically without human approval
-        boolean safeAction = isSafeAction(actionType);
-        boolean allowedAction = actionType != null && properties.getAllowedActions().contains(actionType);
+        boolean safeAction = isSafeAction(actionType) || diskActionEligible;
+        boolean allowedAction = actionType != null && (properties.getAllowedActions().contains(actionType) || diskActionEligible);
         boolean autoExecutable = properties.isAutomationEnabled()
                 && actionType != null
+                && (actionType != ActionType.HOST_SERVICE_CPU_QUOTA || properties.isBridgeEnabled())
+                && (actionType != ActionType.HOST_SERVICE_MEMORY_LIMIT || properties.isBridgeEnabled())
                 && safeAction
                 && allowedAction
                 && appAllowlisted
@@ -73,12 +111,17 @@ public class RemediationPolicyService {
                 || actionType == null
                 || actionType == ActionType.INVESTIGATION
                 || actionType == ActionType.ESCALATION
+                || (actionType == ActionType.HOST_SERVICE_CPU_QUOTA && !autoExecutable)
+                || (actionType == ActionType.HOST_SERVICE_MEMORY_LIMIT && !autoExecutable)
+                || (actionType == ActionType.HOST_RECLAIM_DISK && !autoExecutable)
                 || dbRelated;
         boolean approvalRequired = !recommendationOnly && !autoExecutable && prediction.isIncident();
         // Incident NŒUD = récupération 100% automatique par le watchdog hôte (rallume la
         // VM), quel que soit le namespace de détection (k8s-nodes, kube-system, ...). On
         // affiche donc le mode AUTO (pas d'action manuelle attendue de l'opérateur).
-        boolean nodeIncident = isNodeIncident(prediction.getIncidentType(), request.getApp());
+        boolean nodeIncident = actionType == ActionType.RESTART_VM
+                && "k8s-nodes".equalsIgnoreCase(request.getNamespace())
+                && isKubernetesNode(request.getApp());
         AutomationMode automationMode = (autoExecutable || nodeIncident)
                 ? AutomationMode.AUTO : AutomationMode.MANUAL;
         String rationale = buildRationale(
@@ -98,7 +141,8 @@ public class RemediationPolicyService {
                 targetNamespace,
                 targetKind,
                 targetName,
-                rationale
+                rationale,
+                prediction.getIncidentType()
         );
     }
 
@@ -108,6 +152,37 @@ public class RemediationPolicyService {
      * Safe actions are low-risk enough to execute automatically without human approval.
      * Rollbacks, node operations, and drains always require approval for safety.
      */
+    private boolean isDiskAutoRemediationEligible(
+            ActionType actionType, String namespace, String target, String incidentType) {
+        if (actionType != ActionType.HOST_RECLAIM_DISK
+                || namespace == null
+                || !"k8s-nodes".equalsIgnoreCase(namespace.trim())
+                || target == null
+                || incidentType == null) {
+            return false;
+        }
+
+        // DISK-E2E-158-02 : le scenario DISK_E2E_158 (k8s-worker1 + NODE_DISK_FULL) n'est gouverne QUE par son drapeau
+        // dedie. L'ancien drapeau global HOST_DISK_REMEDIATION_ENABLED ne l'active pas (et ne le desactive pas).
+        if (HostDiskScenario.matches(namespace, target, incidentType)) {
+            return properties.isHostDiskE2e158Enabled();
+        }
+
+        String normalizedTarget = target.trim().toLowerCase(Locale.ROOT);
+        String normalizedType = incidentType.trim().toUpperCase(Locale.ROOT);
+
+        // NODE_DISK_FULL n'a QU'UNE voie : le scenario ci-dessus. Partout ailleurs (k8s-worker2 = .155, heberge le
+        // primaire CNPG) il n'est JAMAIS eligible, quels que soient les drapeaux.
+        if ("NODE_DISK_FULL".equals(normalizedType)) {
+            return false;
+        }
+
+        // NODE_DISK_PRESSURE / NODE_INODES_FULL : chemin d'origine STRICTEMENT INCHANGE (ancien drapeau global, memes
+        // cibles qu'avant).
+        return properties.isHostDiskRemediationEnabled()
+                && Set.of("k8s-worker1", "k8s-worker2").contains(normalizedTarget)
+                && Set.of("NODE_DISK_PRESSURE", "NODE_INODES_FULL").contains(normalizedType);
+    }
     private boolean isSafeAction(ActionType actionType) {
         return actionType == ActionType.RESTART_POD
                 || actionType == ActionType.SCALE_DEPLOYMENT
@@ -117,7 +192,36 @@ public class RemediationPolicyService {
                 || actionType == ActionType.FORCE_RECREATE_DEPLOYMENT
                 // RESTART_VM auto-exécutable : power-on d'un worker tombé via l'agent hôte
                 // (ne fait que démarrer la VM, jamais l'éteindre -> sûr).
-                || actionType == ActionType.RESTART_VM;
+                || actionType == ActionType.RESTART_VM
+                || actionType == ActionType.HOST_SERVICE_CPU_QUOTA
+                || actionType == ActionType.HOST_SERVICE_MEMORY_LIMIT;
+    }
+
+    /**
+     * Vrai nœud Kubernetes, par opposition à une VM d'infrastructure hors cluster.
+     *
+     * <p>POLICY-HOST-SCOPE-AUDIT-01. C'est l'unique définition d'identité de nœud du backend : une
+     * action hyperviseur (RESTART_VM) ne doit jamais reposer sur le namespace, qui vaut la sentinelle
+     * "k8s-nodes" pour TOUT incident hôte, nœud ou non.
+     *
+     * <p>La convention de nommage retenue est celle déjà en vigueur dans le projet
+     * (voir {@code InfrastructureHealthScheduler#handleNodeOutageRecovery}, les inventaires
+     * {@code ALL_VMX} du watchdog hôte et {@code NOEUDS_CLUSTER} du Bridge) : un nœud du cluster
+     * s'appelle {@code k8s-master*} ou {@code k8s-worker*}.
+     *
+     * <p>ATTENTION : le préfixe {@code k8s-} seul ne suffit PAS. Les VM d'infrastructure portent les
+     * hostnames {@code k8s-monitoring}, {@code k8s-aiCamunda} et {@code k8s-lb2} sans être des nœuds ;
+     * le détecteur les nomme {@code monitoring}, {@code iacamunda} et {@code lb2}. Aucune de ces six
+     * formes ne satisfait ce prédicat.
+     *
+     * <p>L'autorité reste l'API Kubernetes ({@code CoreV1Api.listNode()}, utilisée par
+     * {@code InfrastructureHealthService#checkKubernetesNodes}) ; ce prédicat en est le miroir
+     * statique, vérifié contre l'inventaire réel par les tests du lot.
+     */
+    public static boolean isKubernetesNode(String target) {
+        if (target == null) return false;
+        String t = target.trim().toLowerCase(Locale.ROOT);
+        return t.startsWith("k8s-master") || t.startsWith("k8s-worker");
     }
 
     // Un incident est "noeud" si le type contient NODE ou si la cible est un noeud K8s
@@ -126,9 +230,8 @@ public class RemediationPolicyService {
     private boolean isNodeIncident(String incidentType, String app) {
         boolean typeNode = incidentType != null
                 && incidentType.toUpperCase(Locale.ROOT).contains("NODE");
-        boolean appNode = app != null
-                && (app.toLowerCase(Locale.ROOT).startsWith("k8s-worker")
-                 || app.toLowerCase(Locale.ROOT).startsWith("k8s-master"));
+        // POLICY-HOST-SCOPE-AUDIT-01 : meme predicat, desormais nomme et partage.
+        boolean appNode = isKubernetesNode(app);
         return typeNode || appNode;
     }
 
@@ -189,6 +292,9 @@ public class RemediationPolicyService {
                 return null;
 
             // ── Commandes HÔTE in-cluster (pod privilégié nsenter sur le nœud) ────────
+            case "HOST_RECLAIM_DISK":
+            case "HOST_DISK_RECLAIM":
+                return ActionType.HOST_RECLAIM_DISK;
             case "HOST_IMAGE_GC":
             case "HOST_RUN_IMAGE_GC":
             case "RUN_IMAGE_GC_ON_NODE":
@@ -310,6 +416,7 @@ public class RemediationPolicyService {
             case RESTART_POD, DELETE_CRASHLOOPING_PODS -> RemediationTargetKind.POD;
             case SCALE_DEPLOYMENT, SCALE_DOWN, ROLLBACK_DEPLOYMENT, FORCE_RECREATE_DEPLOYMENT,
                     REMOVE_NETWORK_POLICY -> RemediationTargetKind.DEPLOYMENT;
+            case HOST_RECLAIM_DISK, HOST_SERVICE_CPU_QUOTA, HOST_SERVICE_MEMORY_LIMIT -> RemediationTargetKind.NODE;
             default -> RemediationTargetKind.UNKNOWN;
         };
     }

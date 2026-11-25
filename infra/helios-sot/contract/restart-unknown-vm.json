@@ -1,0 +1,29 @@
+{
+  "case": "restart-unknown-vm",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "113"
+    },
+    "method": "POST",
+    "path": "/restart/lb2"
+  },
+  "response": {
+    "body": {
+      "error": "VM inconnue",
+      "known": [
+        "k8s-lb2",
+        "k8s-master",
+        "k8s-monitoring",
+        "k8s-worker1",
+        "k8s-worker2"
+      ],
+      "node": "lb2",
+      "request_id": "<id>",
+      "started": false,
+      "status": "UNKNOWN_VM",
+      "vm": "lb2"
+    },
+    "status": 404
+  }
+}

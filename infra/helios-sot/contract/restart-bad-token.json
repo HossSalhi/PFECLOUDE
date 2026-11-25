@@ -1,0 +1,18 @@
+{
+  "case": "restart-bad-token",
+  "request": {
+    "auth": "invalid",
+    "headers": {
+      "X-Helios-Incident": "121"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "jeton absent ou invalide",
+      "status": "REJECTED"
+    },
+    "status": 401
+  }
+}

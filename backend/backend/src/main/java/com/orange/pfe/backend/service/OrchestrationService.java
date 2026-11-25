@@ -2,12 +2,8 @@ package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.dto.AIOpsAnalyzeRequest;
 import com.orange.pfe.backend.dto.AIOpsAnalyzeResponse;
-import com.orange.pfe.backend.dto.AIPredictRequest;
-import com.orange.pfe.backend.dto.AIPredictResponse;
 import com.orange.pfe.backend.dto.AlertWebhookRequest;
 import com.orange.pfe.backend.model.action.ActionType;
-import com.orange.pfe.backend.model.action.AutomationMode;
-import com.orange.pfe.backend.model.action.RemediationTargetKind;
 import com.orange.pfe.backend.model.core.Alert;
 import com.orange.pfe.backend.model.core.Incident;
 import com.orange.pfe.backend.model.enums.AlertSource;
@@ -26,13 +22,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Handles incoming alert webhooks. Every webhook is enriched by the AI
- * service: ML classification + LLM explanation + recommended action. When AI
- * agrees an incident is happening, it delegates to the full AIOps pipeline
- * (analyze) which also starts the Camunda workflow + Human Task per the
- * remediation policy. Otherwise we create the incident from the webhook
- * payload but still attach AI's explanation + recommended action so the
- * operator sees what the AI looked at.
+ * Handles incoming alert webhooks. Retrait de l'IA (11 nov. 2026) : chaque webhook est d'abord confronté aux marqueurs
+ * d'état Kubernetes par le pipeline déterministe (analyze) qui, si une panne est confirmée, crée l'incident typé et
+ * démarre le workflow Camunda selon la politique de remédiation. Sinon, l'incident est créé depuis la charge utile
+ * du webhook (source mappée sur l'origine de l'alerte).
  */
 @Service
 public class OrchestrationService {
@@ -42,29 +35,26 @@ public class OrchestrationService {
     private static final Pattern NAMESPACE_HINT = Pattern.compile("(?i)\\bnamespace[=: ]+([a-z0-9-]+)");
     private static final Pattern APP_HINT = Pattern.compile("(?i)\\bapp[=: ]+([a-z0-9-]+)");
     private static final Pattern KNOWN_APPS = Pattern.compile(
-            "(?i)\\b(backend|frontend|ai-service|chromadb|postgres|demo-app|grafana|prometheus|loki|camunda|ollama)\\b");
+            "(?i)\\b(backend|frontend|postgres|demo-app|grafana|prometheus|loki|camunda)\\b");
 
     private final IncidentRepository incidentRepo;
     private final AlertRepository alertRepo;
     private final ActionService actionService;
     private final IncidentHistoryService historyService;
     private final AIOpsOrchestrationService aiOpsOrchestrationService;
-    private final AIOpsClientService aiOpsClientService;
 
     public OrchestrationService(
             IncidentRepository incidentRepo,
             AlertRepository alertRepo,
             ActionService actionService,
             IncidentHistoryService historyService,
-            AIOpsOrchestrationService aiOpsOrchestrationService,
-            AIOpsClientService aiOpsClientService
+            AIOpsOrchestrationService aiOpsOrchestrationService
     ) {
         this.incidentRepo = incidentRepo;
         this.alertRepo = alertRepo;
         this.actionService = actionService;
         this.historyService = historyService;
         this.aiOpsOrchestrationService = aiOpsOrchestrationService;
-        this.aiOpsClientService = aiOpsClientService;
     }
 
     public void handleIncomingAlert(AlertWebhookRequest req) {
@@ -74,45 +64,19 @@ public class OrchestrationService {
         String namespace = extractNamespace(message);
         String app = extractApp(message);
 
-        // 1. Call AI predict first. Used for two things:
-        //    - if AI sees an incident, delegate to the full pipeline (which
-        //      also creates the Camunda workflow + human task)
-        //    - if not, we still attach the AI explanation to the fallback
-        //      incident so the user sees the IA work in the UI.
-        AIPredictResponse aiPrediction = tryPredict(namespace, app);
-
-        if (aiPrediction != null && aiPrediction.isIncident()) {
-            Long id = tryAiPipeline(namespace, app);
-            if (id != null) {
-                recordAlertAndNotification(id, message, alertSource);
-                log.info("Webhook handled by AI pipeline -> incident #{}", id);
-                return;
-            }
-            log.warn("AI agreed on incident but pipeline did not create one - falling back");
+        // 1. Pipeline déterministe d'abord : si les marqueurs d'état Kubernetes confirment une panne, analyze() crée
+        //    l'incident typé et démarre le workflow Camunda selon la politique de remédiation.
+        Long id = tryPipeline(namespace, app);
+        if (id != null) {
+            recordAlertAndNotification(id, message, alertSource);
+            log.info("Webhook handled by the deterministic pipeline -> incident #{}", id);
+            return;
         }
 
-        // 2. Fallback. AI either disagrees or pipeline failed. Create an
-        //    incident from the webhook + enrich with whatever AI returned.
+        // 2. Repli : le pipeline n'a rien créé. On crée l'incident depuis la charge utile du webhook.
         IncidentSeverity severity = parseSeverity(req.getSeverity());
-        Incident incident = createIncidentFromWebhook(message, severity, alertSource, namespace, app, aiPrediction);
+        Incident incident = createIncidentFromWebhook(message, severity, alertSource, namespace, app);
         recordAlertAndNotification(incident.getId(), message, alertSource);
-
-        if (aiPrediction != null && aiPrediction.getRecommendedAction() != null
-                && !aiPrediction.getRecommendedAction().isBlank()
-                && !"NO_ACTION".equalsIgnoreCase(aiPrediction.getRecommendedAction())) {
-            actionService.createAction(
-                    incident,
-                    ActionType.INVESTIGATION,
-                    "AI recommended action: " + aiPrediction.getRecommendedAction()
-                            + (aiPrediction.getDecisionExplanation() != null
-                                    ? " | " + aiPrediction.getDecisionExplanation() : ""),
-                    "AI-SYSTEM",
-                    namespace,
-                    RemediationTargetKind.DEPLOYMENT,
-                    app,
-                    AutomationMode.MANUAL
-            );
-        }
 
         boolean shouldTriggerRemediation =
                 severity == IncidentSeverity.CRITICAL || severity == IncidentSeverity.HIGH;
@@ -133,20 +97,7 @@ public class OrchestrationService {
         }
     }
 
-    private AIPredictResponse tryPredict(String namespace, String app) {
-        try {
-            AIPredictRequest req = new AIPredictRequest();
-            req.setNamespace(namespace);
-            req.setApp(app);
-            req.setWindowMinutes(10);
-            return aiOpsClientService.predict(req);
-        } catch (Exception ex) {
-            log.warn("AI predict failed for webhook (ns={} app={}): {}", namespace, app, ex.getMessage());
-            return null;
-        }
-    }
-
-    private Long tryAiPipeline(String namespace, String app) {
+    private Long tryPipeline(String namespace, String app) {
         try {
             AIOpsAnalyzeRequest analyzeReq = new AIOpsAnalyzeRequest();
             analyzeReq.setNamespace(namespace);
@@ -159,59 +110,25 @@ public class OrchestrationService {
                 return response.getIncidentId();
             }
         } catch (Exception ex) {
-            log.warn("AI pipeline failed for webhook (ns={} app={}): {}", namespace, app, ex.getMessage());
+            log.warn("Deterministic pipeline failed for webhook (ns={} app={}): {}", namespace, app, ex.getMessage());
         }
         return null;
     }
 
     private Incident createIncidentFromWebhook(String message, IncidentSeverity severity,
-                                               AlertSource alertSource, String namespace, String app,
-                                               AIPredictResponse prediction) {
+                                               AlertSource alertSource, String namespace, String app) {
         Incident incident = new Incident();
         incident.setTitle("Auto Incident from Alertmanager");
         incident.setSeverity(severity);
         incident.setStatus(IncidentStatus.NEW);
         incident.setNamespace(namespace);
         incident.setApp(app);
-
-        // If AI ran but said no-incident, mark as AI source and attach its
-        // analysis so the UI still shows ML type + LLM explanation. If AI was
-        // unreachable, keep the legacy mapping.
-        if (prediction != null) {
-            incident.setSource(IncidentSource.AI);
-            incident.setIncidentType(prediction.getIncidentType());
-            String explanation = prediction.getDecisionExplanation();
-            if (explanation == null || explanation.isBlank()) explanation = prediction.getSummary();
-            incident.setExplanation(explanation);
-            incident.setDescription(buildEnrichedDescription(message, prediction));
-        } else {
-            incident.setSource(mapAlertToIncidentSource(alertSource));
-            incident.setDescription(message);
-        }
+        incident.setSource(mapAlertToIncidentSource(alertSource));
+        incident.setDescription(message);
 
         incident = incidentRepo.save(incident);
-        historyService.record(incident, IncidentStatus.NEW,
-                prediction != null ? "Incident created from alert (AI enriched)" : "Incident created from alert (AI unavailable)");
+        historyService.record(incident, IncidentStatus.NEW, "Incident created from alert");
         return incident;
-    }
-
-    private String buildEnrichedDescription(String message, AIPredictResponse p) {
-        double conf = p.getConfidence() != null ? p.getConfidence() : 0.0;
-        String enriched = String.format(
-                "%s | Type: %s | Severity: %s (confidence %.0f%%) | Recommended action: %s | Mode: %s",
-                safe(message),
-                safe(p.getIncidentType()),
-                safe(p.getSeverity()),
-                conf * 100.0,
-                safe(p.getRecommendedAction()),
-                safe(p.getExecutionMode())
-        );
-        if (enriched.length() > 1000) enriched = enriched.substring(0, 997) + "...";
-        return enriched;
-    }
-
-    private String safe(String value) {
-        return value == null ? "unknown" : value;
     }
 
     private void recordAlertAndNotification(Long incidentId, String message, AlertSource alertSource) {

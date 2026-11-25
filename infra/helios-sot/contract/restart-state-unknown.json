@@ -1,0 +1,25 @@
+{
+  "case": "restart-state-unknown",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "132"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "etat d'alimentation non prouve : aucun demarrage",
+      "incident": 132,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "retry_after_s": "<int>",
+      "started": false,
+      "state_reason": "FORMAT_INVALIDE",
+      "status": "STATE_UNKNOWN",
+      "vm": "k8s-worker1"
+    },
+    "status": 503
+  }
+}

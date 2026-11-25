@@ -1,0 +1,22 @@
+{
+  "case": "restart-incident-invalid",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "abc"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "X-Helios-Incident doit etre un entier positif",
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "started": false,
+      "status": "INCIDENT_INVALID",
+      "vm": "k8s-worker1"
+    },
+    "status": 400
+  }
+}

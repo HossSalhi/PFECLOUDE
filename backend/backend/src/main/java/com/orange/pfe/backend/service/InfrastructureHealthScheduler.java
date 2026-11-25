@@ -1,7 +1,6 @@
 package com.orange.pfe.backend.service;
 
 import com.orange.pfe.backend.config.InfraHealthProperties;
-import com.orange.pfe.backend.dto.AIPredictRequest;
 import com.orange.pfe.backend.dto.AIPredictResponse;
 import com.orange.pfe.backend.model.action.ActionType;
 import com.orange.pfe.backend.model.action.AutomationMode;
@@ -14,6 +13,8 @@ import com.orange.pfe.backend.model.enums.IncidentStatus;
 import com.orange.pfe.backend.repository.IncidentRepository;
 import com.orange.pfe.backend.service.InfrastructureHealthService.ComponentStatus;
 import com.orange.pfe.backend.service.remediation.RemediationPlan;
+import com.orange.pfe.backend.service.vmpower.VmPowerPolicy;
+import com.orange.pfe.backend.service.vmpower.VmPowerWatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -42,17 +43,25 @@ public class InfrastructureHealthScheduler {
             IncidentStatus.IN_PROGRESS, IncidentStatus.WAITING_FOR_APPROVAL
     );
 
+    /**
+     * VMDOWN-POLICY-20261105 — composants hébergés par .160 (DETECT_ONLY) : incident + historique + notification
+     * INTERFACE seulement ; jamais de workflow Camunda, d'action ni d'e-mail.
+     */
+    private static final java.util.Set<String> DETECTION_ONLY_APPS = java.util.Set.of("prometheus", "grafana", "loki");
+
+    private static boolean isDetectionOnly(ComponentStatus status) {
+        return "infra".equals(status.namespace()) && DETECTION_ONLY_APPS.contains(status.app());
+    }
+
     private final InfraHealthProperties props;
     private final InfrastructureHealthService healthService;
     private final IncidentRepository incidentRepository;
     private final IncidentHistoryService historyService;
-    private final AIOpsClientService aiOpsClientService;
     private final ActionService actionService;
     private final LeaderElectionService leaderElectionService;
     private final WorkflowService workflowService;
     private final CamundaWorkflowService camundaWorkflowService;
     private final NotificationService notificationService;
-    private final KubernetesSignalEnrichmentService signalEnrichmentService;
     // "camunda" = Camunda orchestre AUSSI la création des incidents infra/nœud (via le process
     // incident-detection → worker ai-classify, branche infra déterministe). "backend" = création directe.
     @org.springframework.beans.factory.annotation.Value("${helios.detection.pipeline:backend}")
@@ -63,25 +72,21 @@ public class InfrastructureHealthScheduler {
             InfrastructureHealthService healthService,
             IncidentRepository incidentRepository,
             IncidentHistoryService historyService,
-            AIOpsClientService aiOpsClientService,
             ActionService actionService,
             LeaderElectionService leaderElectionService,
             WorkflowService workflowService,
             CamundaWorkflowService camundaWorkflowService,
-            NotificationService notificationService,
-            KubernetesSignalEnrichmentService signalEnrichmentService
+            NotificationService notificationService
     ) {
         this.props = props;
         this.healthService = healthService;
         this.incidentRepository = incidentRepository;
         this.historyService = historyService;
-        this.aiOpsClientService = aiOpsClientService;
         this.actionService = actionService;
         this.leaderElectionService = leaderElectionService;
         this.workflowService = workflowService;
         this.camundaWorkflowService = camundaWorkflowService;
         this.notificationService = notificationService;
-        this.signalEnrichmentService = signalEnrichmentService;
     }
 
     @Scheduled(fixedDelayString = "${infra.health.interval-seconds:300}000")
@@ -110,11 +115,15 @@ public class InfrastructureHealthScheduler {
         boolean viaCamunda = "camunda".equalsIgnoreCase(detectionPipeline);
         for (ComponentStatus status : statuses) {
             if (!status.up()) {
-                if (viaCamunda) {
+                if (isDetectionOnly(status)) {
+                    // .160 : détection et historique uniquement (aucun workflow Camunda, aucun e-mail).
+                    if (openIncidentIfNeeded(status)) {
+                        newIncidents++;
+                    }
+                } else if (viaCamunda) {
                     // Camunda orchestre AUSSI la création des incidents infra/nœud : on lui délègue
                     // (sauf si un incident est déjà ouvert -> évite de démarrer un process par cycle).
-                    boolean alreadyOpen = incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
-                            ACTIVE_STATUSES, IncidentSource.AI, status.namespace(), status.app());
+                    boolean alreadyOpen = hasActiveInfrastructureIncident(status);
                     if (!alreadyOpen && camundaWorkflowService.startDetectionWorkflow(
                             status.namespace(), status.app(), "infra", status.detail())) {
                         newIncidents++;
@@ -149,9 +158,7 @@ public class InfrastructureHealthScheduler {
     }
 
     private boolean openIncidentIfNeeded(ComponentStatus status) {
-        boolean alreadyOpen = incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
-                ACTIVE_STATUSES, IncidentSource.AI, status.namespace(), status.app()
-        );
+        boolean alreadyOpen = hasActiveInfrastructureIncident(status);
         if (alreadyOpen) {
             log.debug("Incident already open for {}/{}, skipping", status.namespace(), status.app());
             return false;
@@ -159,15 +166,13 @@ public class InfrastructureHealthScheduler {
         // Anti-doublon (flapping) : si un incident pour CE composant a deja ete cree il y a moins
         // de 5 min (meme deja resolu), on n'en recree pas -> evite la rafale quand une VM infra
         // clignote (down/up/down) sur plusieurs cycles de detection.
-        if (incidentRepository.existsBySourceAndNamespaceAndAppAndCreatedAtAfter(
-                IncidentSource.AI, status.namespace(), status.app(),
-                java.time.LocalDateTime.now().minusMinutes(5))) {
+        if (hasRecentInfrastructureIncident(status)) {
             log.debug("Incident recent (<5min) pour {}/{} — skip (anti-doublon)", status.namespace(), status.app());
             return false;
         }
 
         Incident incident = new Incident();
-        incident.setSource(IncidentSource.AI);
+        incident.setSource(IncidentSource.OTHER);
         incident.setStatus(IncidentStatus.OPEN);
         incident.setNamespace(status.namespace());
         incident.setApp(status.app());
@@ -181,7 +186,7 @@ public class InfrastructureHealthScheduler {
                 "Infrastructure health check detected component DOWN: " + status.detail());
 
         // AI enrichment for all infra incidents
-        enrichIncidentWithAi(incident, status);
+        enrichIncidentDeterministically(incident, status);
 
         // Worker node down → recovery is delegated to the HOST watchdog (vmrun power-on); HELIOS just
         // tracks the outage and resolves it when the node returns to Ready (no failing Camunda action).
@@ -197,9 +202,13 @@ public class InfrastructureHealthScheduler {
             triggerDnsEscalation(incident, status);
         }
 
-        // Notify (email + SSE) for any newly created infra incident
+        // Notify (email + SSE) for any newly created infra incident — .160 : interface seulement.
         try {
-            notificationService.notifyNewIncident(incident);
+            if (isDetectionOnly(status)) {
+                notificationService.notifyNewIncidentUiOnly(incident);
+            } else {
+                notificationService.notifyNewIncident(incident);
+            }
         } catch (Exception ex) {
             log.warn("Failed to send new-incident notification for {}/{}: {}", status.namespace(), status.app(), ex.getMessage());
         }
@@ -209,6 +218,33 @@ public class InfrastructureHealthScheduler {
         return true;
     }
 
+    private boolean hasActiveInfrastructureIncident(ComponentStatus status) {
+        return hasActiveInfrastructureIncident(status, IncidentSource.OTHER)
+                || hasActiveInfrastructureIncident(status, IncidentSource.AI);
+    }
+
+    private boolean hasActiveInfrastructureIncident(ComponentStatus status, IncidentSource source) {
+        return incidentRepository.existsByStatusInAndSourceAndNamespaceAndApp(
+                ACTIVE_STATUSES, source, status.namespace(), status.app()
+        );
+    }
+
+    private boolean hasRecentInfrastructureIncident(ComponentStatus status) {
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusMinutes(5);
+
+        return hasRecentInfrastructureIncident(status, IncidentSource.OTHER, cutoff)
+                || hasRecentInfrastructureIncident(status, IncidentSource.AI, cutoff);
+    }
+
+    private boolean hasRecentInfrastructureIncident(
+            ComponentStatus status,
+            IncidentSource source,
+            java.time.LocalDateTime cutoff
+    ) {
+        return incidentRepository.existsBySourceAndNamespaceAndAppAndCreatedAtAfter(
+                source, status.namespace(), status.app(), cutoff
+        );
+    }
     private void triggerPressureEscalation(Incident incident, ComponentStatus status) {
         String reason = status.detail()
                 + " — Action requise : libérer de l'espace disque sur le nœud "
@@ -240,229 +276,142 @@ public class InfrastructureHealthScheduler {
      */
     private String deterministicInfraExplanation(String type, ComponentStatus status) {
         String comp = status.namespace() + "/" + status.app();
+
         return switch (type == null ? "" : type) {
-            case "DNS_FAILURE" -> "Résolution DNS in-cluster cassée (" + comp + "). Récupération : "
-                    + "restaurer/redémarrer CoreDNS. HELIOS détecte et suit le retour à la normale.";
-            case "NODE_DISK_PRESSURE", "NODE_MEMORY_PRESSURE" -> "Pression ressources sur le nœud ("
-                    + comp + "). Action infra requise (libérer disque/mémoire) — escalade à l'astreinte.";
-            default -> "Composant d'infrastructure injoignable (" + comp + " — VM/service down). La "
-                    + "récupération est une intervention infra (redémarrage du service/VM) ; aucune action "
-                    + "Kubernetes niveau-pod n'est applicable. HELIOS détecte et suit le retour à la normale.";
+            case "NODE_NOT_READY" ->
+                    "Kubernetes node " + status.app() + " is NotReady (" + comp
+                    + "). Check the host watchdog recovery path and confirm node Ready "
+                    + "and cluster health before resolving.";
+            case "VM_DOWN", "VM_POWERED_OFF" ->
+                    "Infrastructure component is unreachable (" + comp
+                    + "). Recovery must be confirmed by the infrastructure health check.";
+            case "DNS_FAILURE" ->
+                    "In-cluster DNS resolution failure (" + comp
+                    + "). Verify CoreDNS and confirm DNS recovery.";
+            case "NODE_DISK_PRESSURE" ->
+                    "Disk pressure detected (" + comp
+                    + "). Check available filesystem space and inode capacity.";
+            case "NODE_MEMORY_PRESSURE" ->
+                    "Memory pressure detected (" + comp
+                    + "). Check node memory usage and reclaimable resources.";
+            default ->
+                    "Infrastructure incident (" + comp
+                    + "). Confirm recovery using the relevant technical health signal.";
         };
     }
 
     private String incidentTypeFor(ComponentStatus status) {
         return switch (status.namespace()) {
-            case "node-pressure" -> status.app().contains("Disk") ? "NODE_DISK_PRESSURE" : "NODE_MEMORY_PRESSURE";
-            case "cluster"       -> "DNS_FAILURE";
-            default              -> "VM_DOWN";
+            case "k8s-nodes" -> "NODE_NOT_READY";
+            case "node-pressure" ->
+                    status.app().contains("Disk")
+                            ? "NODE_DISK_PRESSURE"
+                            : "NODE_MEMORY_PRESSURE";
+            case "cluster" -> "DNS_FAILURE";
+            default -> "VM_DOWN";
         };
     }
-
     private String titleFor(ComponentStatus status) {
         return switch (status.namespace()) {
-            case "node-pressure" -> "Node Pressure: " + status.app() + " detected";
-            case "cluster"       -> "DNS Failure: in-cluster resolution broken";
-            default              -> "Infrastructure DOWN: " + status.namespace() + "/" + status.app();
+            case "k8s-nodes" ->
+                    "Kubernetes node NotReady: " + status.app();
+            case "node-pressure" ->
+                    "Node Pressure: " + status.app() + " detected";
+            case "cluster" ->
+                    "DNS Failure: in-cluster resolution broken";
+            default ->
+                    "Infrastructure DOWN: " + status.namespace() + "/" + status.app();
         };
     }
-
     /**
-     * Pour un nœud WORKER tombé : crée une action RESTART_VM (AUTO) et déclenche le
-     * workflow Camunda qui appelle l'agent hôte pour rallumer la VM. C'est Camunda qui
-     * orchestre la récupération du nœud. Master exclu (jamais rallumé automatiquement).
-     */
-    /**
-     * Worker node NotReady. A node power-on CANNOT be done from inside the cluster (the VM is dead) and
-     * k8s-nodes is intentionally NOT in the remediation allowlist — so we do NOT launch a Camunda
-     * RESTART_VM that would only fail "not allowlisted" and park the incident RESOLUTION_FAILED. The real
-     * recovery is the HOST watchdog (vmrun power-on when NotReady >= 60s). HELIOS records the outage as a
-     * clean escalation IN_PROGRESS and {@link #resolveIncidentIfExists} closes it when the node returns to
-     * Ready (the source of truth) — giving a coherent trace: OPEN -> IN_PROGRESS (watchdog) -> RESOLVED.
+     * VMDOWN-POLICY-20261105 — le scheduler ne déclenche PLUS aucun redémarrage. Il détecte (NODE_NOT_READY via
+     * l'API Kubernetes), crée l'incident et notifie, puis laisse la DÉCISION à {@link VmPowerWatch} :
+     * un power-on n'est demandé que si la VM est prouvée éteinte (vmrun list, 2 observations espacées de 30 s),
+     * les sondes réseau en échec, hors maintenance/cooldown/épisode, et si la politique l'autorise.
+     * Cibles : k8s-worker1/k8s-worker2 et k8s-master (.153, depuis la consigne du 2026-11-17) = AUTO ; toute autre VM ou
+     * tout mode non AUTO = aucune autorisation (détection seule).
      */
     private void handleNodeOutageRecovery(Incident incident, ComponentStatus status) {
-        String node = status.app();
-        if (!"k8s-nodes".equals(status.namespace()) || node == null
-                || !node.toLowerCase().startsWith("k8s-worker")) {
-            return; // seulement les noeuds worker du cluster
+        if (!"k8s-nodes".equals(status.namespace())) {
+            return;
+        }
+        var entry = VmPowerPolicy.find(status.app());
+        if (entry.isEmpty()) {
+            return;  // pas une VM de la politique : rien à décider ici
         }
         try {
-            // A dead node has NO kubectl fix (the VM is unreachable) — the recommended action is to
-            // ESCALATE the outage; the HOST watchdog (vmrun) powers the VM back on. We still orchestrate
-            // this via Camunda for a coherent, traceable workflow: an ESCALATION action is a successful
-            // no-op in the executor (no allowlist check, no RESTART_VM failure), then the verify step polls
-            // the NODE's Ready status (node-aware) and resolves the incident when it rejoins.
-            RemediationPlan plan = new RemediationPlan(
-                    ActionType.ESCALATION, AutomationMode.AUTO,
-                    false, true, false, false, false,
-                    "k8s-nodes", RemediationTargetKind.UNKNOWN, node,
-                    "Panne noeud " + node + " — escalade + power-on delegue au watchdog hote (vmrun)"
-            );
-            var action = actionService.createAction(
-                    incident, ActionType.ESCALATION,
-                    "Escalade de la panne noeud " + node + " — power-on de la VM via le watchdog hote",
-                    "AI-SYSTEM", "k8s-nodes", RemediationTargetKind.UNKNOWN, node,
-                    AutomationMode.AUTO
-            );
-            WorkflowInstance workflow = workflowService.startWorkflow(
-                    incident, "Node-Remediation-Workflow", "k8s-nodes", node);
-            AIPredictResponse pred = new AIPredictResponse();
-            pred.setIncidentType("NODE_NOT_READY");
-            pred.setRecommendedAction("ESCALATE_NODE_OUTAGE_AND_REBALANCE");
-            camundaWorkflowService.startWorkflow(workflow, action, plan, pred);
-            incident.setStatus(IncidentStatus.IN_PROGRESS);
-            incidentRepository.save(incident);
-            historyService.record(incident, IncidentStatus.IN_PROGRESS,
-                    "Escalade Camunda — récupération du nœud " + node + " déléguée au watchdog hôte (vmrun); "
-                    + "surveillance du retour du nœud à l'état Ready");
-            log.warn("Node {} NotReady — Camunda escalation workflow started (recovery via host watchdog)", node);
+            if (entry.get().mode() == VmPowerPolicy.Mode.AUTO) {
+                historyService.record(incident, incident.getStatus(),
+                        "Politique VM_DOWN : le rallumage éventuel de " + status.app() + " est décidé par la "
+                        + "surveillance de puissance (VM éteinte confirmée par vmrun, sondes en échec, hors "
+                        + "maintenance/cooldown) ; aucun démarrage tant que l'arrêt n'est pas prouvé.");
+            } else {
+                historyService.record(incident, incident.getStatus(),
+                        "Politique VM_DOWN : " + status.app() + " n'a AUCUNE autorisation de "
+                        + "redémarrage automatique — détection et notification uniquement ; "
+                        + "redémarrage laissé à l'administrateur.");
+            }
         } catch (Exception ex) {
-            log.error("Node outage handling failed for {}: {}", node, ex.getMessage());
+            log.error("Node outage history failed for {}: {}", status.app(), ex.getMessage());
         }
     }
 
-    private void enrichIncidentWithAi(Incident incident, ComponentStatus status) {
-        try {
-            // L'IA n'enrichit que les incidents NŒUD (k8s-nodes) : là, le vecteur de contexte de panne
-            // (charge des survivants, cause racine via Prometheus .160) donne une classification NODE réelle.
-            // Pour les AUTRES composants infra (VM monitoring/IA/Camunda -> VM_DOWN, pression nœud, DNS) une
-            // VM/un service mort n'a AUCUNE métrique niveau-pod : l'IA plaquerait une classification/action
-            // de POD absurde (ex. POD_PENDING_INSUFFICIENT_RESOURCES -> « ajouter des répliques » sur une VM
-            // éteinte). On garde donc le type DÉTERMINISTE + une explication INFRA, SANS reco d'action K8s.
-            if (!"k8s-nodes".equals(status.namespace())) {
-                incident.setExplanation(deterministicInfraExplanation(incident.getIncidentType(), status));
-                incidentRepository.save(incident);
-                return;
-            }
-            AIPredictRequest req = new AIPredictRequest();
-            req.setNamespace(status.namespace());
-            req.setApp(status.app());
-            req.setWindowMinutes(10);
+    private void enrichIncidentDeterministically(Incident incident, ComponentStatus status) {
+        String type = incident.getIncidentType();
+        incident.setExplanation(deterministicInfraExplanation(type, status));
 
-            // NŒUD/VM MORT : le nœud lui-même ne produit plus de métriques, mais l'IA peut ANALYSER le
-            // CONTEXTE de la panne (nœud injoignable, durée, rayon d'impact, charge des nœuds survivants,
-            // pression avant bascule + cause racine via Prometheus .160). On lui fournit ce vecteur : le
-            // classifieur route alors sur le chemin NODE (NODE_NOT_READY) et l'explication/action/sévérité
-            // deviennent réelles au lieu d'un NO_INCIDENT sur un espace de noms « k8s-nodes » vide.
-            if ("k8s-nodes".equals(status.namespace())) {
-                java.util.Map<String, Double> nodeFeatures =
-                        signalEnrichmentService.collectNodeOutageFeatures(status.app());
-                nodeFeatures.put("node_flap_count", (double) recentNodeFlapCount(status.namespace(), status.app()));
-                req.setFeatureOverrides(nodeFeatures);
-                req.getRemediationContext().put("scenario", "node_outage");
-                req.getRemediationContext().put("node", status.app());
-            }
+        String severity = incident.getSeverity() == null
+                ? "UNKNOWN"
+                : incident.getSeverity().name();
 
-            AIPredictResponse prediction = aiOpsClientService.predict(req);
-            if (prediction == null) return;
+        String description = String.format(
+                "%s | Type: %s | Severity: %s | Decision: deterministic infrastructure policy",
+                safe(buildDescription(status)),
+                safe(type),
+                severity
+        );
 
-            String aiExplanation = prediction.getDecisionExplanation();
-            if (aiExplanation == null || aiExplanation.isBlank()) {
-                aiExplanation = prediction.getSummary();
-            }
-            if (aiExplanation != null && !aiExplanation.isBlank()) {
-                incident.setExplanation(aiExplanation);
-            }
-
-            // CLASSIFICATION PAR L'IA pour les nœuds (master + workers), dans le cycle HELIOS : le TYPE
-            // et la SÉVÉRITÉ de l'incident nœud proviennent désormais de l'IA (plus de type figé en dur).
-            // Le VM_DOWN posé par incidentTypeFor ne sert QUE de repli si l'IA est injoignable ou muette
-            // (résilience : on ne perd jamais l'incident d'un nœud réellement tombé — la DÉTECTION reste
-            // sûre/déterministe, seule la CLASSIFICATION est confiée à l'IA). Les autres composants infra
-            // (VM monitoring/IA, DNS, pressions nœud) gardent leur type déterministe (non concernés ici).
-            String aiType = prediction.getIncidentType();
-            boolean usableAiClass = prediction.isIncident()
-                    && aiType != null && !aiType.isBlank() && !"NO_INCIDENT".equalsIgnoreCase(aiType);
-            if ("k8s-nodes".equals(status.namespace()) && usableAiClass) {
-                incident.setIncidentType(aiType);
-                IncidentSeverity aiSeverity = mapSeverity(prediction.getSeverity());
-                if (aiSeverity != null) {
-                    incident.setSeverity(aiSeverity);
-                }
-                incident.setTitle("Panne nœud (IA: " + aiType + ") — " + status.app());
-                log.info("Incident {} CLASSÉ PAR L'IA (nœud {}): type={} severity={} action={} confidence={}",
-                        incident.getId(), status.app(), aiType, prediction.getSeverity(),
-                        prediction.getRecommendedAction(), prediction.getConfidence());
-            }
-
-            // Rich description with the AI metadata, same format the AIOps pipeline uses so the UI shows
-            // action / executionMode / confidence. Severity shown = the incident's severity field, which
-            // for a NODE incident now reflects the AI classification set just above (and for the other
-            // infra components stays the deterministic severityFor) — single source of truth either way.
-            String authoritativeSeverity = incident.getSeverity() != null
-                    ? incident.getSeverity().name()
-                    : safe(prediction.getSeverity());
-            String enrichedDesc = String.format(
-                    "%s | Type: %s | Severity: %s (confidence %.0f%%) | Recommended action: %s | Mode: %s",
-                    safe(buildDescription(status)),
-                    safe(prediction.getIncidentType()),
-                    authoritativeSeverity,
-                    (prediction.getConfidence() != null ? prediction.getConfidence() : 0.0) * 100.0,
-                    safe(prediction.getRecommendedAction()),
-                    safe(prediction.getExecutionMode())
-            );
-            if (enrichedDesc.length() > 1000) {
-                enrichedDesc = enrichedDesc.substring(0, 997) + "...";
-            }
-            incident.setDescription(enrichedDesc);
-
-            incidentRepository.save(incident);
-
-            // Pas d'action INVESTIGATION ici : la remédiation du noeud est l'action
-            // RESTART_VM (AUTO) creee + executee via Camunda dans triggerNodePowerOnViaCamunda.
-
-            historyService.record(incident, incident.getStatus(),
-                    "AI enrichment: type=" + safe(prediction.getIncidentType())
-                            + " action=" + safe(prediction.getRecommendedAction())
-                            + " confidence=" + (prediction.getConfidence() != null ? prediction.getConfidence() : 0.0));
-
-            log.info("Incident {} enriched by AI: type={} action={}",
-                    incident.getId(), prediction.getIncidentType(), prediction.getRecommendedAction());
-        } catch (Exception ex) {
-            log.warn("AI enrichment failed for incident {} ({}): {}",
-                    incident.getId(), status.namespace() + "/" + status.app(), ex.getMessage());
+        if (description.length() > 1000) {
+            description = description.substring(0, 997) + "...";
         }
-    }
 
+        incident.setDescription(description);
+        incidentRepository.save(incident);
+
+        historyService.record(
+                incident,
+                incident.getStatus(),
+                "Deterministic infrastructure classification: type=" + safe(type)
+        );
+
+        log.info(
+                "Incident {} enriched deterministically: type={} target={}/{}",
+                incident.getId(), type, status.namespace(), status.app()
+        );
+    }
     private String safe(String value) {
         return value == null ? "unknown" : value;
     }
 
-    /** Mappe la sévérité renvoyée par l'IA (LOW/MEDIUM/HIGH/CRITICAL) vers l'enum ; null si inexploitable. */
-    private IncidentSeverity mapSeverity(String s) {
-        if (s == null || s.isBlank()) return null;
-        try {
-            return IncidentSeverity.valueOf(s.trim().toUpperCase(java.util.Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
-    }
-
-    /**
-     * Nombre d'incidents ouverts pour CE nœud sur les 24 dernières heures = signal de "flapping"
-     * (nœud instable qui retombe). Fourni à l'IA (feature node_flap_count) pour qu'elle module sa
-     * sévérité/analyse : un nœud qui claque plusieurs fois évoque un défaut matériel/hôte persistant
-     * plutôt qu'un reboot transitoire. Dégradation propre à 0 en cas d'erreur.
-     */
-    private long recentNodeFlapCount(String namespace, String app) {
-        try {
-            return incidentRepository.findBySource(IncidentSource.AI).stream()
-                    .filter(i -> namespace.equals(i.getNamespace()) && app.equals(i.getApp()))
-                    .filter(i -> i.getCreatedAt() != null
-                            && i.getCreatedAt().isAfter(java.time.LocalDateTime.now().minusHours(24)))
-                    .count();
-        } catch (Exception e) {
-            log.debug("recentNodeFlapCount indisponible pour {}/{}: {}", namespace, app, e.getMessage());
-            return 0L;
-        }
-    }
-
     private boolean resolveIncidentIfExists(ComponentStatus status) {
+
+        // VM_DOWN : le retour du noeud à UP ne suffit pas pour clôturer l'incident.
+        // La résolution doit être confirmée par le worker Camunda verify-remediation.
+        if ("k8s-nodes".equalsIgnoreCase(status.namespace())) {
+            log.info(
+                    "Node {} is UP; incident resolution remains delegated to Camunda verification (no scheduler auto-resolution).",
+                    status.app()
+            );
+            return false;
+        }
+
         // The component (node / infra service) is back UP — that IS the source of truth, so we clear its
         // incident even if the automated remediation had been parked RESOLUTION_FAILED (e.g. the Camunda
         // RESTART_VM workflow timed out while the HOST watchdog actually powered the VM back on). Without
         // this, a recovered worker would keep showing "Infrastructure DOWN … RESOLUTION_FAILED" forever.
-        List<Incident> active = incidentRepository.findBySource(IncidentSource.AI).stream()
+        List<Incident> active = java.util.stream.Stream.concat(
+                    incidentRepository.findBySource(IncidentSource.AI).stream(),
+                    incidentRepository.findBySource(IncidentSource.OTHER).stream())
                 .filter(i -> i.getStatus() != IncidentStatus.RESOLVED
                           && i.getStatus() != IncidentStatus.CLOSED
                           && i.getStatus() != IncidentStatus.ARCHIVED)
@@ -478,7 +427,11 @@ public class InfrastructureHealthScheduler {
             historyService.record(incident, IncidentStatus.RESOLVED,
                     "Infrastructure component is back UP: " + status.detail());
             try {
-                notificationService.notifyIncidentResolved(incident);
+                if (isDetectionOnly(status)) {
+                    notificationService.notifyIncidentResolvedUiOnly(incident);
+                } else {
+                    notificationService.notifyIncidentResolved(incident);
+                }
             } catch (Exception ex) {
                 log.warn("Failed to send resolved notification for {}/{}: {}", status.namespace(), status.app(), ex.getMessage());
             }

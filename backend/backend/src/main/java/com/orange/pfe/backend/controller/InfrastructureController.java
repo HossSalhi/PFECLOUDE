@@ -20,18 +20,23 @@ public class InfrastructureController {
     private final InfrastructureHealthService healthService;
     private final KubernetesDiscoveryService discoveryService;
     private final AiopsPollingProperties pollingProperties;
+    private final org.springframework.beans.factory.ObjectProvider<com.orange.pfe.backend.service.vmpower.VmPowerWatch> vmPowerWatch;
 
     public InfrastructureController(InfrastructureHealthService healthService,
                                     KubernetesDiscoveryService discoveryService,
-                                    AiopsPollingProperties pollingProperties) {
+                                    AiopsPollingProperties pollingProperties,
+                                    org.springframework.beans.factory.ObjectProvider<com.orange.pfe.backend.service.vmpower.VmPowerWatch> vmPowerWatch) {
         this.healthService = healthService;
         this.discoveryService = discoveryService;
         this.pollingProperties = pollingProperties;
+        this.vmPowerWatch = vmPowerWatch;
     }
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
-        List<InfrastructureHealthService.ComponentStatus> statuses = healthService.checkAll();
+        // VMDOWN-POLICY-20261105 : snapshot (<= 45 s) au lieu d'un contrôle complet à chaque appel de l'interface.
+        InfrastructureHealthService.Snapshot snapshot = healthService.freshSnapshot(45_000L);
+        List<InfrastructureHealthService.ComponentStatus> statuses = snapshot.statuses();
 
         List<Map<String, Object>> components = statuses.stream().map(s -> Map.<String, Object>of(
                 "namespace", s.namespace(),
@@ -44,13 +49,17 @@ public class InfrastructureController {
         long upCount   = statuses.stream().filter(InfrastructureHealthService.ComponentStatus::up).count();
         long downCount = statuses.size() - upCount;
 
-        return ResponseEntity.ok(Map.of(
-                "checkedAt",  LocalDateTime.now().toString(),
-                "total",      statuses.size(),
-                "up",         upCount,
-                "down",       downCount,
-                "components", components
-        ));
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("checkedAt", java.time.LocalDateTime.ofInstant(
+                java.time.Instant.ofEpochMilli(snapshot.generatedAtMs()), java.time.ZoneId.systemDefault()).toString());
+        body.put("total", statuses.size());
+        body.put("up", upCount);
+        body.put("down", downCount);
+        body.put("components", components);
+        // Politique VM_DOWN : mode de chaque VM (AUTO / DETECT_ONLY / DENY_RESTART) et dernier état d'alimentation.
+        body.put("vmPolicy", vmPowerWatch.getIfAvailable() != null
+                ? vmPowerWatch.getIfAvailable().snapshot() : com.orange.pfe.backend.service.vmpower.VmPowerWatch.policyOnly());
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/apps")
@@ -69,9 +78,7 @@ public class InfrastructureController {
 
         // Static VM-based services
         for (String[] vm : new String[][]{
-                {"vm-ai-camunda", "ai-service"},
                 {"vm-ai-camunda", "camunda"},
-                {"vm-ai-camunda", "ollama"},
                 {"vm-monitoring",  "prometheus"},
                 {"vm-monitoring",  "grafana"},
                 {"vm-monitoring",  "loki"}

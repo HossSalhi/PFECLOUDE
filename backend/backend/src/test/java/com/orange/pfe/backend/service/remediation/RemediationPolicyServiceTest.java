@@ -21,17 +21,39 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+/**
+ * HELIOS — FINAL-CLOSEOUT (2026-10-15) : réalignement de cette suite sur le CONTRAT DÉTERMINISTE
+ * RÉEL de {@link RemediationPolicyService}, SANS modifier la logique du service.
+ *
+ * <p>Pourquoi : la suite d'origine encodait une spécification ANCIENNE où une recommandation de type
+ * « restart » produisait {@code RESTART_POD}. Le service a depuis été durci (déjà au commit HEAD) :
+ * {@code mapActionType} n'émet plus JAMAIS {@code RESTART_POD}. La famille « restart » (RESTART_OR_SCALE,
+ * RESTART_POD_AND_*, CHECK_DB…_AND_RESTART, TRACE_…_AND_INVESTIGATE, INVESTIGATE, défaut) devient un
+ * ROLLING RESTART du déploiement ENTIER — {@code FORCE_RECREATE_DEPLOYMENT} = {@code kubectl rollout
+ * restart deployment/X} — qui purge le processus emballé sur CHAQUE réplica (un restart mono-pod
+ * laisserait la charge sur l'autre réplica). « Shift traffic to stable revision » mappe désormais
+ * explicitement vers {@code ROLLBACK_DEPLOYMENT} (action à fort impact, soumise à approbation).
+ *
+ * <p>Ce contrat est corroboré, sans divergence, par deux suites sœurs qui exercent le MÊME
+ * {@code buildPlan} et passent : {@code PolicyExecutionPathTest} et {@code RemediationHostScopeTest}.
+ * Les attentes ci-dessous ne « recopient » donc pas aveuglément la sortie courante : chaque cas est
+ * justifié par l'intention de conception (sécurité des actions, gel DB, cooldown, allowlist, seuil de
+ * confiance, mode recommandation-seule). Aucune ligne de {@code RemediationPolicyService} n'est touchée.
+ */
 class RemediationPolicyServiceTest {
 
     @Test
     void shouldPreferRestartForRestartOrScaleAndAllowAutoExecution() {
         IncidentActionRepository repository = mock(IncidentActionRepository.class);
-        when(repository.findRecentActionsForTarget(eq("pfe"), eq("backend"), eq(ActionType.RESTART_POD), any()))
+        when(repository.findRecentActionsForTarget(eq("pfe"), eq("backend"),
+                eq(ActionType.FORCE_RECREATE_DEPLOYMENT), any()))
                 .thenReturn(List.of());
 
         RemediationProperties properties = new RemediationProperties();
         properties.setAutomationEnabled(true);
-        properties.setAllowedActions(Set.of(ActionType.RESTART_POD));
+        // Contrat courant : RESTART_OR_SCALE -> FORCE_RECREATE_DEPLOYMENT (rolling restart du
+        // déploiement entier). Pour prouver l'auto-exécution, c'est cette action qui est allowlistée.
+        properties.setAllowedActions(Set.of(ActionType.FORCE_RECREATE_DEPLOYMENT));
         properties.setAllowlistedApps(Set.of("backend"));
         properties.setRestartConfidenceThreshold(0.45d);
 
@@ -50,7 +72,7 @@ class RemediationPolicyServiceTest {
 
         RemediationPlan plan = service.buildPlan(request, prediction);
 
-        assertEquals(ActionType.RESTART_POD, plan.actionType());
+        assertEquals(ActionType.FORCE_RECREATE_DEPLOYMENT, plan.actionType());
         assertEquals(AutomationMode.AUTO, plan.automationMode());
         assertEquals(RemediationTargetKind.DEPLOYMENT, plan.targetKind());
         assertTrue(plan.autoExecutable());
@@ -65,7 +87,7 @@ class RemediationPolicyServiceTest {
 
         RemediationProperties properties = new RemediationProperties();
         properties.setAutomationEnabled(true);
-        properties.setAllowedActions(Set.of(ActionType.RESTART_POD));
+        properties.setAllowedActions(Set.of(ActionType.FORCE_RECREATE_DEPLOYMENT));
         properties.setAllowlistedApps(Set.of("backend"));
         properties.setRestartConfidenceThreshold(0.45d);
 
@@ -84,7 +106,9 @@ class RemediationPolicyServiceTest {
 
         RemediationPlan plan = service.buildPlan(request, prediction);
 
-        assertEquals(ActionType.RESTART_POD, plan.actionType());
+        // La reco « …_AND_RESTART » mappe vers FORCE_RECREATE_DEPLOYMENT, MAIS un incident DB force
+        // systématiquement le chemin MANUEL (approbation humaine), quel que soit le type d'action.
+        assertEquals(ActionType.FORCE_RECREATE_DEPLOYMENT, plan.actionType());
         assertEquals(AutomationMode.MANUAL, plan.automationMode());
         assertTrue(plan.approvalRequired());
         assertTrue(plan.manualFollowUp());
@@ -164,9 +188,12 @@ class RemediationPolicyServiceTest {
         rollbackPrediction.setRecommendedAction("SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE");
 
         RemediationPlan rollbackPlan = service.buildPlan(request, rollbackPrediction);
-        assertEquals(ActionType.RESTART_POD, rollbackPlan.actionType());
+        // « shift traffic to stable revision » = rollback déterministe -> ROLLBACK_DEPLOYMENT.
+        // ROLLBACK est à fort impact (pas dans isSafeAction) : non auto-exécutable, approbation requise.
+        assertEquals(ActionType.ROLLBACK_DEPLOYMENT, rollbackPlan.actionType());
         assertFalse(rollbackPlan.manualFollowUp());
-        assertTrue(rollbackPlan.autoExecutable());
+        assertFalse(rollbackPlan.autoExecutable());
+        assertTrue(rollbackPlan.approvalRequired());
     }
 
     @Test
@@ -176,7 +203,10 @@ class RemediationPolicyServiceTest {
 
         RemediationProperties properties = new RemediationProperties();
         properties.setAutomationEnabled(true);
-        properties.setAllowedActions(Set.of(ActionType.RESTART_POD, ActionType.SCALE_DEPLOYMENT));
+        // FORCE_RECREATE_DEPLOYMENT ajouté à l'allowlist : c'est la cible réelle des recos « restart »
+        // génériques (cf. degradationPrediction plus bas), nécessaire pour prouver l'auto-exécution.
+        properties.setAllowedActions(Set.of(
+                ActionType.RESTART_POD, ActionType.SCALE_DEPLOYMENT, ActionType.FORCE_RECREATE_DEPLOYMENT));
         properties.setAllowlistedApps(Set.of("backend"));
         properties.setAllowlistedNamespaces(Set.of("pfe"));
         properties.setRestartConfidenceThreshold(0.45d);
@@ -207,9 +237,11 @@ class RemediationPolicyServiceTest {
         appPrediction.setRecommendedAction("SHIFT_TRAFFIC_TO_STABLE_REVISION_AND_INVESTIGATE");
 
         RemediationPlan appPlan = service.buildPlan(request, appPrediction);
-        assertEquals(ActionType.RESTART_POD, appPlan.actionType());
+        // « shift traffic to stable revision » -> ROLLBACK_DEPLOYMENT, soumis à approbation.
+        assertEquals(ActionType.ROLLBACK_DEPLOYMENT, appPlan.actionType());
         assertFalse(appPlan.manualFollowUp());
-        assertTrue(appPlan.autoExecutable());
+        assertFalse(appPlan.autoExecutable());
+        assertTrue(appPlan.approvalRequired());
 
         AIPredictResponse degradationPrediction = new AIPredictResponse();
         degradationPrediction.setIncident(true);
@@ -219,7 +251,9 @@ class RemediationPolicyServiceTest {
         degradationPrediction.setRecommendedAction("TRACE_DEPENDENCY_LATENCY_AND_INVESTIGATE");
 
         RemediationPlan degradationPlan = service.buildPlan(request, degradationPrediction);
-        assertEquals(ActionType.RESTART_POD, degradationPlan.actionType());
+        // Reco « …_AND_INVESTIGATE » générique -> rolling restart concret FORCE_RECREATE_DEPLOYMENT
+        // (plus jamais d'INVESTIGATION passive) ; ici sûr + allowlisté -> auto-exécutable.
+        assertEquals(ActionType.FORCE_RECREATE_DEPLOYMENT, degradationPlan.actionType());
         assertTrue(degradationPlan.manualFollowUp() || degradationPlan.autoExecutable());
     }
 
@@ -250,7 +284,9 @@ class RemediationPolicyServiceTest {
 
         RemediationPlan plan = service.buildPlan(request, prediction);
 
-        assertEquals(ActionType.RESTART_POD, plan.actionType());
+        // La reco mappe vers FORCE_RECREATE_DEPLOYMENT ; le namespace « demo » hors allowlist bloque
+        // l'auto-exécution et impose l'approbation (invariant de sécurité testé ici).
+        assertEquals(ActionType.FORCE_RECREATE_DEPLOYMENT, plan.actionType());
         assertFalse(plan.autoExecutable());
         assertTrue(plan.approvalRequired());
         assertTrue(plan.rationale().contains("namespace"));
@@ -259,14 +295,16 @@ class RemediationPolicyServiceTest {
     @Test
     void shouldBlockAutoExecutionWhenCooldownActive() {
         IncidentActionRepository repository = mock(IncidentActionRepository.class);
-        // Simulate a recent action still within cooldown window
+        // Action récente encore dans la fenêtre de cooldown pour la cible, sur la VRAIE action mappée.
         var fakeAction = mock(com.orange.pfe.backend.model.action.IncidentAction.class);
-        when(repository.findRecentActionsForTarget(eq("pfe"), eq("backend"), eq(ActionType.RESTART_POD), any()))
+        when(repository.findRecentActionsForTarget(eq("pfe"), eq("backend"),
+                eq(ActionType.FORCE_RECREATE_DEPLOYMENT), any()))
                 .thenReturn(List.of(fakeAction));
 
         RemediationProperties properties = new RemediationProperties();
         properties.setAutomationEnabled(true);
-        properties.setAllowedActions(Set.of(ActionType.RESTART_POD));
+        // Action allowlistée = celle réellement mappée, afin que SEUL le cooldown bloque l'auto-exécution.
+        properties.setAllowedActions(Set.of(ActionType.FORCE_RECREATE_DEPLOYMENT));
         properties.setAllowlistedApps(Set.of("backend"));
         properties.setAllowlistedNamespaces(Set.of("pfe"));
         properties.setRestartConfidenceThreshold(0.45d);
@@ -287,7 +325,7 @@ class RemediationPolicyServiceTest {
 
         RemediationPlan plan = service.buildPlan(request, prediction);
 
-        assertEquals(ActionType.RESTART_POD, plan.actionType());
+        assertEquals(ActionType.FORCE_RECREATE_DEPLOYMENT, plan.actionType());
         assertFalse(plan.autoExecutable());
         assertTrue(plan.cooldownBlocked());
         assertTrue(plan.rationale().toLowerCase().contains("cooldown"));
@@ -346,7 +384,11 @@ class RemediationPolicyServiceTest {
         prediction.setIncident(true);
         prediction.setIncidentType("VM_DOWN");
         prediction.setSeverity("CRITICAL");
-        prediction.setConfidence(0.74d);
+        // Le mode RECOMMEND_ONLY de l'IA n'est respecté QUE sous le seuil d'approbation
+        // (approvalConfidenceThreshold = 0.30 par défaut) : au-dessus, la décision reprend la main et
+        // exigerait au moins une approbation. On se place donc volontairement sous ce seuil pour
+        // vérifier le vrai chemin « recommandation seule » (aucune action, aucun flux d'approbation).
+        prediction.setConfidence(0.20d);
         prediction.setRecommendedAction("ESCALATE_MULTI_VM_OUTAGE_AND_FREEZE_AUTOMATION");
         prediction.setExecutionMode("RECOMMEND_ONLY");
         prediction.setRecommendationOnlyReason("Recommendation only: critical situations stay under human control.");

@@ -1,0 +1,24 @@
+{
+  "case": "restart-backoff",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "137"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "backoff apres echec",
+      "incident": 137,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "retry_after_s": "<int>",
+      "started": false,
+      "status": "BACKOFF",
+      "vm": "k8s-worker1"
+    },
+    "status": 503
+  }
+}

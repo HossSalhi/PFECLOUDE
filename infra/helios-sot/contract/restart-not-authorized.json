@@ -1,0 +1,22 @@
+{
+  "case": "restart-not-authorized",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "112"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-master"
+  },
+  "response": {
+    "body": {
+      "error": "aucune autorisation de redemarrage",
+      "node": "k8s-master",
+      "request_id": "<id>",
+      "started": false,
+      "status": "NOT_AUTHORIZED",
+      "vm": "k8s-master"
+    },
+    "status": 403
+  }
+}

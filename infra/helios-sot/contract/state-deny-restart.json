@@ -1,0 +1,40 @@
+{
+  "case": "state-deny-restart",
+  "request": {
+    "auth": "valid",
+    "headers": {},
+    "method": "GET",
+    "path": "/vm/k8s-master/state"
+  },
+  "response": {
+    "body": {
+      "evidence": {
+        "age_ms": "<int>",
+        "duration_ms": "<int>",
+        "list_sha256_12": "<hex12>",
+        "observed_at": "<iso>",
+        "running_count": 0,
+        "source": "vmrun -T ws list",
+        "vmx_matched": false,
+        "vmx_sha256_12": "<hex12>"
+      },
+      "mode": "DENY_RESTART",
+      "power_state": "POWERED_OFF",
+      "state_reason": "OK",
+      "vm": "k8s-master",
+      "watchdog": {
+        "backoff_remaining_s": 0,
+        "cooldown_remaining_s": 0,
+        "host_ram_mb": "<int>",
+        "last_start": null,
+        "maintenance": false,
+        "refusal_codes": [
+          "NOT_AUTHORIZED"
+        ],
+        "start_allowed": false,
+        "starting": false
+      }
+    },
+    "status": 200
+  }
+}

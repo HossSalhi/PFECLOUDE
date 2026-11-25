@@ -1,0 +1,22 @@
+{
+  "case": "restart-detection-only",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "111"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-monitoring"
+  },
+  "response": {
+    "body": {
+      "error": "detection seule : aucun redemarrage automatique",
+      "node": "k8s-monitoring",
+      "request_id": "<id>",
+      "started": false,
+      "status": "DETECTION_ONLY",
+      "vm": "k8s-monitoring"
+    },
+    "status": 403
+  }
+}

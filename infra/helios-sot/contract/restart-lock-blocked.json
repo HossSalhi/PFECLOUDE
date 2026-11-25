@@ -1,0 +1,25 @@
+{
+  "case": "restart-lock-blocked",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "138"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "detail": "PROPRIETAIRE_INTROUVABLE : verrou de k8s-worker1.vmx.lck non attribuable | Error: The virtual machine is in use by another process (locked)",
+      "error": "demarrage non confirme",
+      "incident": 138,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "retry_after_s": "<int>",
+      "started": false,
+      "status": "LOCK_BLOCKED",
+      "vm": "k8s-worker1"
+    },
+    "status": 503
+  }
+}

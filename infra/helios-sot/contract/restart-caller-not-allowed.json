@@ -1,0 +1,18 @@
+{
+  "case": "restart-caller-not-allowed",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "124"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "appelant non autorise",
+      "status": "CALLER_NOT_ALLOWED"
+    },
+    "status": 403
+  }
+}

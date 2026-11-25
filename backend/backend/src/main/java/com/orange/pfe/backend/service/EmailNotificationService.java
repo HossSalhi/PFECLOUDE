@@ -432,20 +432,6 @@ public class EmailNotificationService {
         sendToOperators(subject, body);
     }
 
-    @Async
-    public void sendFineTuningCompleted(String status, int incidents, double f1Score) {
-        String subject = "[HELIOS] Fine-tuning du modèle IA terminé — " + status;
-        String body = buildSystemHtml("Fine-tuning terminé", "#17a2b8",
-                String.format("""
-                    <table style="width:100%%;border-collapse:collapse;">
-                      <tr><td style="padding:8px;font-weight:bold;">Statut</td><td style="padding:8px;">%s</td></tr>
-                      <tr style="background:#f8f9fa;"><td style="padding:8px;font-weight:bold;">Incidents traités</td><td style="padding:8px;">%d</td></tr>
-                      <tr><td style="padding:8px;font-weight:bold;">Score F1</td><td style="padding:8px;">%.4f</td></tr>
-                    </table>
-                """, escapeHtml(status), incidents, f1Score));
-        sendToOperators(subject, body);
-    }
-
     // ── Compte utilisateur (envoi à l'utilisateur concerné) ──────────────────
 
     @Async

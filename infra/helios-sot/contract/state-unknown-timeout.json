@@ -1,0 +1,40 @@
+{
+  "case": "state-unknown-timeout",
+  "request": {
+    "auth": "valid",
+    "headers": {},
+    "method": "GET",
+    "path": "/vm/k8s-worker1/state"
+  },
+  "response": {
+    "body": {
+      "evidence": {
+        "age_ms": "<int>",
+        "duration_ms": "<int>",
+        "list_sha256_12": null,
+        "observed_at": "<iso>",
+        "running_count": null,
+        "source": "vmrun -T ws list",
+        "vmx_matched": null,
+        "vmx_sha256_12": "<hex12>"
+      },
+      "mode": "AUTO",
+      "power_state": "UNKNOWN",
+      "state_reason": "VMRUN_TIMEOUT",
+      "vm": "k8s-worker1",
+      "watchdog": {
+        "backoff_remaining_s": 0,
+        "cooldown_remaining_s": 0,
+        "host_ram_mb": "<int>",
+        "last_start": null,
+        "maintenance": false,
+        "refusal_codes": [
+          "STATE_UNKNOWN"
+        ],
+        "start_allowed": false,
+        "starting": false
+      }
+    },
+    "status": 200
+  }
+}

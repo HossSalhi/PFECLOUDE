@@ -1,0 +1,20 @@
+{
+  "case": "health",
+  "request": {
+    "auth": "missing",
+    "headers": {},
+    "method": "GET",
+    "path": "/health"
+  },
+  "response": {
+    "body": {
+      "auth_configured": true,
+      "contract": 1,
+      "status": "ok",
+      "uptime_s": "<int>",
+      "version": "<hex12>",
+      "vmrun": "ok"
+    },
+    "status": 200
+  }
+}

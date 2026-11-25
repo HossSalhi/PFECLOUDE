@@ -14,10 +14,8 @@ public class InfraHealthProperties {
     private String lokiUrl       = "http://192.168.148.160:3100";
     private String grafanaUrl    = "http://192.168.148.160:3000";
 
-    // VM IaCamunda
-    private String aiServiceUrl  = "http://192.168.148.161:8000";
+    // VM IaCamunda (retrait de l'IA, 11 nov. 2026 : il ne reste que Camunda)
     private String camundaUrl    = "http://192.168.148.161:8088";
-    private String ollamaUrl     = "http://192.168.148.161:11434";
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -37,12 +35,6 @@ public class InfraHealthProperties {
     public String getGrafanaUrl() { return grafanaUrl; }
     public void setGrafanaUrl(String grafanaUrl) { this.grafanaUrl = grafanaUrl; }
 
-    public String getAiServiceUrl() { return aiServiceUrl; }
-    public void setAiServiceUrl(String aiServiceUrl) { this.aiServiceUrl = aiServiceUrl; }
-
     public String getCamundaUrl() { return camundaUrl; }
     public void setCamundaUrl(String camundaUrl) { this.camundaUrl = camundaUrl; }
-
-    public String getOllamaUrl() { return ollamaUrl; }
-    public void setOllamaUrl(String ollamaUrl) { this.ollamaUrl = ollamaUrl; }
 }

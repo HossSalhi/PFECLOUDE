@@ -21,6 +21,12 @@ public interface IncidentActionRepository extends JpaRepository<IncidentAction, 
 
     Optional<IncidentAction> findTopByIncidentIdOrderByCreatedAtDesc(Long incidentId);
 
+    /** VMDOWN-POLICY-20261105 — vrai si l'incident porte déjà une action de ce type (quel que soit son statut). */
+    boolean existsByIncidentIdAndType(Long incidentId, ActionType type);
+
+    /** VMDOWN-POLICY-20261105 — nombre d'actions de ce type pour l'incident (quel que soit leur statut). */
+    long countByIncidentIdAndType(Long incidentId, ActionType type);
+
     Page<IncidentAction> findByStatus(ActionStatus status, Pageable pageable);
 
     Page<IncidentAction> findByIncidentIdAndStatus(Long incidentId, ActionStatus status, Pageable pageable);

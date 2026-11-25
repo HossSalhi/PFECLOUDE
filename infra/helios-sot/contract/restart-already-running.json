@@ -1,0 +1,23 @@
+{
+  "case": "restart-already-running",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "103"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "incident": 103,
+      "node": "k8s-worker1",
+      "noop": true,
+      "reason": "ALREADY_RUNNING",
+      "request_id": "<id>",
+      "status": "ALREADY_RUNNING",
+      "vm": "k8s-worker1"
+    },
+    "status": 200
+  }
+}

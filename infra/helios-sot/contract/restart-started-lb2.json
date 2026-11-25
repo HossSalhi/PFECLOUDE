@@ -1,0 +1,23 @@
+{
+  "case": "restart-started-lb2",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "102"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-lb2"
+  },
+  "response": {
+    "body": {
+      "incident": 102,
+      "node": "k8s-lb2",
+      "request_id": "<id>",
+      "started": true,
+      "state_after": "RUNNING",
+      "status": "STARTED",
+      "vm": "k8s-lb2"
+    },
+    "status": 200
+  }
+}

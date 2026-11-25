@@ -5,5 +5,6 @@ public enum RemediationTargetKind {
     DEPLOYMENT,
     SERVICE,
     DATABASE,
+    NODE,
     UNKNOWN
 }

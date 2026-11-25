@@ -1,0 +1,23 @@
+{
+  "case": "restart-failed",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "141"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "detail": "VMRUN_RC_1: Error: The operation was canceled",
+      "incident": 141,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "started": false,
+      "status": "FAILED",
+      "vm": "k8s-worker1"
+    },
+    "status": 500
+  }
+}

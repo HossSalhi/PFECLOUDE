@@ -1,0 +1,23 @@
+{
+  "case": "restart-maintenance",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "131"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-lb2"
+  },
+  "response": {
+    "body": {
+      "error": "maintenance active : demarrage refuse",
+      "incident": 131,
+      "node": "k8s-lb2",
+      "request_id": "<id>",
+      "started": false,
+      "status": "MAINTENANCE",
+      "vm": "k8s-lb2"
+    },
+    "status": 423
+  }
+}

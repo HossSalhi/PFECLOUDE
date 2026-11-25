@@ -1,0 +1,21 @@
+{
+  "case": "restart-starting",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "105"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "incident": 105,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "status": "STARTING",
+      "vm": "k8s-worker1"
+    },
+    "status": 202
+  }
+}

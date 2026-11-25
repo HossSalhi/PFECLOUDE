@@ -19,6 +19,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Performs health checks on every infrastructure component:
@@ -32,6 +37,12 @@ public class InfrastructureHealthService {
 
     public record ComponentStatus(String namespace, String app, boolean up, String detail) {}
 
+    /** Dernier résultat complet de {@link #checkAll()} (VMDOWN-POLICY-20261105 : l'API n'attend plus 30 s). */
+    public record Snapshot(List<ComponentStatus> statuses, long generatedAtMs) {}
+
+    private volatile Snapshot lastSnapshot;
+    private final ExecutorService pool;
+
     private final InfraHealthProperties props;
     private final HttpClient http;
 
@@ -40,6 +51,22 @@ public class InfrastructureHealthService {
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(props.getTimeoutSeconds()))
                 .build();
+        AtomicInteger n = new AtomicInteger();
+        this.pool = Executors.newFixedThreadPool(7, r -> {
+            Thread t = new Thread(r, "infra-health-" + n.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** Dernier snapshot s'il a moins de {@code maxAgeMs}, sinon un nouveau contrôle complet (parallèle). */
+    public Snapshot freshSnapshot(long maxAgeMs) {
+        Snapshot s = lastSnapshot;
+        if (s != null && System.currentTimeMillis() - s.generatedAtMs() <= maxAgeMs) {
+            return s;
+        }
+        checkAll();
+        return lastSnapshot;
     }
 
     /**
@@ -47,28 +74,47 @@ public class InfrastructureHealthService {
      * Called by InfrastructureHealthScheduler every N seconds.
      */
     public List<ComponentStatus> checkAll() {
+        // VMDOWN-POLICY-20261105 : contrôles PARALLÈLES à délai borné. Avant, ils étaient séquentiels : une VM
+        // muette (.160) bloquait chaque appel ~30 s (3 services x 10 s), donc aussi l'API /api/infrastructure/health.
+        Future<List<ComponentStatus>> nodes = pool.submit(this::checkKubernetesNodes);
+        Future<List<ComponentStatus>> pressures = pool.submit(this::checkNodePressures);
+        Future<ComponentStatus> dns = pool.submit(this::checkDnsResolution);
+        // namespace="infra" : c'est le namespace attendu par l'UI Infrastructure (filtre getVmComponents ->
+        // namespace === 'infra') et par buildDescription (case "infra").
+        Future<ComponentStatus> prometheus = pool.submit(() -> checkVmService("infra", "prometheus", props.getPrometheusUrl()));
+        Future<ComponentStatus> grafana = pool.submit(() -> checkVmService("infra", "grafana", props.getGrafanaUrl()));
+        Future<ComponentStatus> loki = pool.submit(() -> checkVmService("infra", "loki", props.getLokiUrl()));
+        // DÉTERMINISATION HELIOS : composants IA (ai-service, ollama) RETIRÉS de la supervision infra. camunda reste.
+        Future<ComponentStatus> camunda = pool.submit(() -> checkVmService("infra", "camunda", props.getCamundaUrl()));
+
         List<ComponentStatus> results = new ArrayList<>();
-
-        // K8s nodes (NotReady detection)
-        results.addAll(checkKubernetesNodes());
-
-        // Node resource pressure conditions (DiskPressure, MemoryPressure)
-        results.addAll(checkNodePressures());
-
-        // In-cluster DNS resolution health (CoreDNS)
-        results.add(checkDnsResolution());
-
-        // External VM services : stack monitoring (.160) et IA + Camunda (.161).
-        // namespace="infra" : c'est le namespace attendu par l'UI Infrastructure (filtre
-        // getVmComponents -> namespace === 'infra') et par buildDescription (case "infra").
-        results.add(checkVmService("infra", "prometheus", props.getPrometheusUrl()));
-        results.add(checkVmService("infra", "grafana",    props.getGrafanaUrl()));
-        results.add(checkVmService("infra", "loki",       props.getLokiUrl()));
-        results.add(checkVmService("infra", "ai-service", props.getAiServiceUrl()));
-        results.add(checkVmService("infra", "camunda",    props.getCamundaUrl()));
-        results.add(checkVmService("infra", "ollama",     props.getOllamaUrl()));
-
+        results.addAll(await(nodes, List.of()));
+        results.addAll(await(pressures, List.of()));
+        results.add(await(dns, new ComponentStatus("cluster", "coredns", true, "DNS check inconclusive: délai dépassé")));
+        results.add(await(prometheus, timedOut("prometheus")));
+        results.add(await(grafana, timedOut("grafana")));
+        results.add(await(loki, timedOut("loki")));
+        results.add(await(camunda, timedOut("camunda")));
+        lastSnapshot = new Snapshot(List.copyOf(results), System.currentTimeMillis());
         return results;
+    }
+
+    private static ComponentStatus timedOut(String app) {
+        return new ComponentStatus("infra", app, false, "Injoignable: délai dépassé");
+    }
+
+    /** Attend un contrôle au plus (timeout + marge) ; au-delà, repli explicite (jamais un blocage). */
+    private <T> T await(Future<T> future, T fallback) {
+        try {
+            return future.get(props.getTimeoutSeconds() + 5L, TimeUnit.SECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            return fallback;
+        } catch (Exception ex) {
+            future.cancel(true);
+            return fallback;
+        }
     }
 
     /**
@@ -163,7 +209,7 @@ public class InfrastructureHealthService {
         }
     }
 
-    private List<ComponentStatus> checkKubernetesNodes() {
+    List<ComponentStatus> checkKubernetesNodes() {
         List<ComponentStatus> nodeStatuses = new ArrayList<>();
         try {
             ApiClient client = buildK8sClient();

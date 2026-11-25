@@ -77,8 +77,26 @@ public class ActionServiceImpl implements ActionService {
             );
         }
 
-        incidentRepository.findById(incident.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Incident introuvable"));
+        if (type == ActionType.RESTART_VM) {
+            // VMDOWN-POLICY-20261105 : UNE SEULE action RESTART_VM par incident (un démarrage de VM par incident).
+            // Le contrôle se fait SOUS VERROU DE LIGNE sur l'incident (SELECT ... FOR UPDATE, sans migration) :
+            // deux créateurs concurrents (planificateur, bouton « Démarrer », relance Camunda) sont sérialisés,
+            // le second voit l'action du premier et est refusé — quel que soit son statut (PENDING, FAILED...).
+            incidentRepository.findByIdForUpdate(incident.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Incident introuvable"));
+            if (actionRepository.existsByIncidentIdAndType(incident.getId(), ActionType.RESTART_VM)) {
+                throw new ActionException(
+                        String.format(
+                                "Une action RESTART_VM existe deja pour l'incident [%d] : un seul demarrage de VM "
+                                        + "par incident (archiver l'incident pour ouvrir un nouvel episode)",
+                                incident.getId()
+                        )
+                );
+            }
+        } else {
+            incidentRepository.findById(incident.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Incident introuvable"));
+        }
 
         IncidentAction action = new IncidentAction();
         action.setIncident(incident);

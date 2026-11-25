@@ -1,0 +1,18 @@
+{
+  "case": "restart-missing-token",
+  "request": {
+    "auth": "missing",
+    "headers": {
+      "X-Helios-Incident": "122"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "jeton absent ou invalide",
+      "status": "REJECTED"
+    },
+    "status": 401
+  }
+}

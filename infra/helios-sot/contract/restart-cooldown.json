@@ -1,0 +1,24 @@
+{
+  "case": "restart-cooldown",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "135"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "cooldown actif",
+      "incident": 135,
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "retry_after_s": "<int>",
+      "started": false,
+      "status": "COOLDOWN_ACTIVE",
+      "vm": "k8s-worker1"
+    },
+    "status": 503
+  }
+}

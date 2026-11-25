@@ -1,0 +1,18 @@
+{
+  "case": "restart-invalid-name",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "114"
+    },
+    "method": "POST",
+    "path": "/restart/a%20b"
+  },
+  "response": {
+    "body": {
+      "error": "nom de VM invalide",
+      "status": "INVALID_VM_NAME"
+    },
+    "status": 400
+  }
+}

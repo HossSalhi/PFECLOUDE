@@ -1,5 +1,8 @@
 package com.orange.pfe.backend.service.remediation;
 import com.orange.pfe.backend.config.RemediationProperties;
+import com.orange.pfe.backend.config.VmPowerProperties;
+import com.orange.pfe.backend.service.vmpower.VmPowerPolicy;
+import com.orange.pfe.backend.service.vmpower.WatchdogClient;
 import com.orange.pfe.backend.model.action.ActionType;
 import io.kubernetes.client.custom.V1Patch;
 import io.kubernetes.client.openapi.ApiClient;
@@ -19,6 +22,7 @@ import io.kubernetes.client.util.Config;
 import io.kubernetes.client.util.KubeConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.FileReader;
@@ -40,6 +44,21 @@ import java.util.Set;
 @Service
 public class KubernetesRemediationExecutor implements RemediationExecutor {
 
+    // Fixed values for the controlled lab CPU cycle; the Bridge validates the same bounds.
+    private static final String CPU_QUOTA_LAB_SERVICE = "helios-cpuload.service";
+    private static final int CPU_QUOTA_LAB_PERCENT = 25;
+    private static final int CPU_QUOTA_LAB_LEASE_SECONDS = 240;
+    // Parametres bornes du service de charge RAM de laboratoire.
+    private static final String MEMORY_LAB_SERVICE = "helios-memload.service";
+    private static final int MEMORY_LAB_LIMIT_MB = 256;
+    private static final int MEMORY_LAB_LEASE_SECONDS = 240;
+
+    // HOST-CPU-AUTOSTOP : arrêt de la charge de LABORATOIRE après résolution CPU confirmée.
+    // Action dédiée du Bridge ; la cible (helios-cpuload.service) est résolue côté serveur depuis le nœud.
+    private static final String CPU_LOAD_STOP_ACTION = "STOP_CPU_LOAD_SERVICE";
+    // CPU-MASTER-20261029 : k8s-master inclus (cible de laboratoire helios-cpuload.service uniquement).
+    private static final Set<String> CPU_LAB_WORKERS = Set.of("k8s-worker1", "k8s-worker2", "k8s-master");
+
     private static final Logger logger = LoggerFactory.getLogger(KubernetesRemediationExecutor.class);
 
     /** Namespaces the executor will never touch regardless of allowlist configuration. */
@@ -49,18 +68,87 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
     );
 
     private final RemediationProperties properties;
+    private final BridgeClient bridgeClient;
+    private final WatchdogClient watchdogClient;
 
     private volatile CoreV1Api coreV1Api;
     private volatile AppsV1Api appsV1Api;
     private volatile NetworkingV1Api networkingV1Api;
 
     public KubernetesRemediationExecutor(RemediationProperties properties) {
+        this(properties, (action, incidentType, namespace, target, node) ->
+                new BridgeClient.BridgeResponse(false, false, -1,
+                        "Bridge client non injecte ; aucune requete envoyee."));
+    }
+
+    public KubernetesRemediationExecutor(RemediationProperties properties, BridgeClient bridgeClient) {
+        this(properties, bridgeClient, new WatchdogClient(properties, new VmPowerProperties()));
+    }
+
+    @Autowired
+    public KubernetesRemediationExecutor(
+            RemediationProperties properties, BridgeClient bridgeClient, WatchdogClient watchdogClient) {
         this.properties = properties;
+        this.bridgeClient = bridgeClient;
+        this.watchdogClient = watchdogClient;
     }
 
     @Override
     public RemediationExecutionResult execute(RemediationPlan plan) {
         return execute(plan, false);
+    }
+
+    @Override
+    public RemediationExecutionResult stopCpuLoadServiceAfterRecovery(
+            String namespace, String node, String incidentType) {
+        // Nettoyage post-résolution : arrête le générateur de charge de LABORATOIRE après une
+        // récupération CPU confirmée. JAMAIS une commande arbitraire — l'action dédiée du Bridge
+        // STOP_CPU_LOAD_SERVICE résout la cible (helios-cpuload.service) côté serveur depuis le nœud
+        // et refuse toute autre cible. Succès uniquement si le Bridge confirme l'état EFFECTIF.
+        if (!properties.isAutoStopCpuLoadEnabled()) {
+            return new RemediationExecutionResult(false, node,
+                    "Arret charge CPU desactive (remediation.auto-stop-cpu-load-enabled=false).");
+        }
+        if (!"k8s-nodes".equalsIgnoreCase(namespace)) {
+            return new RemediationExecutionResult(false, node,
+                    "Arret charge CPU refuse : namespace cible invalide.");
+        }
+        if (node == null || !CPU_LAB_WORKERS.contains(node)) {
+            return new RemediationExecutionResult(false, node,
+                    "Arret charge CPU refuse : noeud hors allowlist des workers CPU de laboratoire.");
+        }
+        boolean cpuType = "NODE_HIGH_CPU".equalsIgnoreCase(incidentType)
+                || "NODE_CPU_SATURATION".equalsIgnoreCase(incidentType);
+        if (!cpuType) {
+            return new RemediationExecutionResult(false, node,
+                    "Arret charge CPU refuse : type d'incident non CPU.");
+        }
+        if (!properties.isBridgeEnabled()) {
+            return new RemediationExecutionResult(false, node,
+                    "Bridge desactive ; aucun arret de charge envoye.");
+        }
+        try {
+            // Action générique 5 arguments : aucun 'service' fourni -> le Bridge résout
+            // helios-cpuload.service depuis l'allowlist du nœud (REJECTED_TARGET_NOT_ALLOWLISTED sinon).
+            BridgeClient.BridgeResponse response = bridgeClient.sendAction(
+                    CPU_LOAD_STOP_ACTION, incidentType, namespace, node, node);
+            if (response == null) {
+                return new RemediationExecutionResult(false, node,
+                        "Reponse Bridge absente ; arret de charge non confirme.");
+            }
+            boolean success = response.ok() && response.execute() && response.exitCode() == 0;
+            String message = response.message();
+            if (message == null || message.isBlank()) {
+                message = success
+                        ? "Bridge a arrete helios-cpuload.service."
+                        : "Bridge n'a pas confirme l'arret (ok=" + response.ok()
+                          + ", execute=" + response.execute() + ", exitCode=" + response.exitCode() + ").";
+            }
+            return new RemediationExecutionResult(success, node, message);
+        } catch (RuntimeException ex) {
+            return new RemediationExecutionResult(false, node,
+                    "Echec appel Bridge pour l'arret de charge : " + ex.getClass().getSimpleName());
+        }
     }
 
     /**
@@ -81,9 +169,13 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         if (plan.actionType() == ActionType.ESCALATION || plan.actionType() == ActionType.INVESTIGATION) {
             if ("k8s-nodes".equalsIgnoreCase(plan.targetNamespace())) {
                 return new RemediationExecutionResult(true, plan.targetName(),
-                        "Escalade nœud — power-on de la VM " + plan.targetName()
-                        + " délégué au watchdog hôte (équivalent: vmrun start " + plan.targetName()
-                        + "); aucune action kubectl applicable sur un nœud injoignable");
+                        // LOT 3BG : message rendu conforme aux faits. Ce chemin n execute
+                        // plus de power-on depuis le LOT 3BD ; l affirmer serait trompeur
+                        // dans les journaux d incident et les rapports.
+                        "Escalade nœud — aucune action kubectl applicable sur un nœud injoignable ; "
+                        + "le rallumage éventuel de " + plan.targetName() + " relève du chemin "
+                        + "gouverné HELIOS (Policy → PolicyGate → Bridge → hyperviseur), "
+                        + "pas de ce worker");
             }
             return new RemediationExecutionResult(true, plan.targetName(),
                     "Escaladé à l'opérateur humain — aucune action Kubernetes automatique requise");
@@ -93,7 +185,10 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
         // du contrôle d'allowlist de namespace (sinon elles échouent sur "not allowlisted").
         boolean nodeTargetingAction = plan.actionType() == ActionType.RESTART_VM
                 || plan.actionType() == ActionType.HOST_SYNC_TIME
-                || plan.actionType() == ActionType.HOST_IMAGE_GC;
+                || plan.actionType() == ActionType.HOST_IMAGE_GC
+                || plan.actionType() == ActionType.HOST_RECLAIM_DISK
+                || plan.actionType() == ActionType.HOST_SERVICE_CPU_QUOTA
+                || plan.actionType() == ActionType.HOST_SERVICE_MEMORY_LIMIT;
         if (!nodeTargetingAction && !isNamespaceAllowlisted(plan.targetNamespace())) {
             return new RemediationExecutionResult(
                     false,
@@ -118,11 +213,17 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
                     case FORCE_RECREATE_DEPLOYMENT -> forceRecreateDeployment(plan.targetNamespace(), plan.targetName(), dryRun);
                     case CORDON_NODE              -> cordonNode(plan.targetName(), dryRun);
                     case DRAIN_NODE               -> drainNode(plan.targetNamespace(), plan.targetName(), dryRun);
-                    case RESTART_VM               -> restartVm(plan.targetName());
+                    case RESTART_VM               -> restartVm(plan.targetName(), plan.incidentId());
                     case HOST_SYNC_TIME           -> runHostCommand(plan.targetName(), "sync-time",
                             "chronyc makestep || systemctl restart chronyd || systemctl restart systemd-timesyncd", dryRun);
-                    case HOST_IMAGE_GC            -> runHostCommand(plan.targetName(), "image-gc",
-                            "crictl -r unix:///run/containerd/containerd.sock rmi --prune", dryRun);
+                    case HOST_RECLAIM_DISK -> executeHostDiskReclaim(plan, dryRun);
+                    case HOST_SERVICE_CPU_QUOTA -> executeCpuQuotaThroughBridge(plan, dryRun);
+                    case HOST_SERVICE_MEMORY_LIMIT -> executeMemoryLimitThroughBridge(plan, dryRun);
+                    case HOST_IMAGE_GC            -> new RemediationExecutionResult(
+                            false,
+                            plan.targetName(),
+                            "HOST_IMAGE_GC disabled: destructive image pruning is prohibited on the air-gapped cluster; no image was removed"
+                    );
                     default -> new RemediationExecutionResult(
                             false,
                             plan.targetName(),
@@ -172,19 +273,135 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
 
     @Override
     public boolean isNodeReady(String nodeName) {
+        NodeReadinessObservation observation = inspectNodeReadiness(nodeName);
+        return observation.apiAvailable() && observation.ready();
+    }
+
+    @Override
+    public NodeReadinessObservation inspectNodeReadiness(String nodeName) {
+
+        if (nodeName == null || nodeName.isBlank()) {
+            return new NodeReadinessObservation(
+                    false, false, "UNKNOWN",
+                    "Node name is missing"
+            );
+        }
+
         try {
             ensureApis();
-            io.kubernetes.client.openapi.models.V1Node node = coreV1Api.readNode(nodeName).execute();
-            if (node.getStatus() == null || node.getStatus().getConditions() == null) return false;
-            return node.getStatus().getConditions().stream()
-                    .anyMatch(cond -> "Ready".equals(cond.getType()) && "True".equalsIgnoreCase(cond.getStatus()));
+
+            io.kubernetes.client.openapi.models.V1Node node =
+                    coreV1Api.readNode(nodeName).execute();
+
+            if (node == null) {
+                return new NodeReadinessObservation(
+                        false, false, "UNKNOWN",
+                        "Kubernetes API returned no node"
+                );
+            }
+
+            if (node.getStatus() == null
+                    || node.getStatus().getConditions() == null) {
+                return new NodeReadinessObservation(
+                        true, false, "MISSING",
+                        "Node status or conditions are missing"
+                );
+            }
+
+            var readyCondition = node.getStatus().getConditions()
+                    .stream()
+                    .filter(condition -> "Ready".equals(condition.getType()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (readyCondition == null) {
+                return new NodeReadinessObservation(
+                        true, false, "MISSING",
+                        "Ready condition is missing"
+                );
+            }
+
+            String conditionStatus = readyCondition.getStatus() == null
+                    ? "UNKNOWN"
+                    : readyCondition.getStatus();
+
+            boolean ready = "True".equalsIgnoreCase(conditionStatus);
+            String reason = readyCondition.getReason() == null ? "" : readyCondition.getReason();
+
+            return new NodeReadinessObservation(
+                    true,
+                    ready,
+                    conditionStatus,
+                    "Node " + nodeName + " Ready=" + conditionStatus + (reason.isEmpty() ? "" : " (" + reason + ")"),
+                    reason,
+                    ready ? readNodeLeaseAgeSeconds(nodeName) : null
+            );
+
         } catch (ApiException | IOException ex) {
-            // node not found / unreachable = not ready
-            logger.debug("Node readiness check failed for {}: {}", nodeName, ex.getMessage());
-            return false;
+            logger.warn(
+                    "Kubernetes readiness API failed for node {}: {}",
+                    nodeName,
+                    ex.getClass().getSimpleName()
+            );
+
+            return new NodeReadinessObservation(
+                    false,
+                    false,
+                    "UNKNOWN",
+                    "Kubernetes API unavailable for node " + nodeName
+            );
         }
     }
 
+    /**
+     * Âge (secondes) du dernier renouvellement du Lease {@code kube-node-lease/<nœud>} — renouvelé toutes les ~10 s par
+     * un kubelet vivant. {@code null} si illisible : jamais une valeur par défaut « fraîche » (preuve fail-closed).
+     */
+    private Long readNodeLeaseAgeSeconds(String nodeName) {
+        try {
+            io.kubernetes.client.openapi.models.V1Lease lease =
+                    new io.kubernetes.client.openapi.apis.CoordinationV1Api(coreV1Api.getApiClient())
+                            .readNamespacedLease(nodeName, "kube-node-lease").execute();
+            if (lease == null || lease.getSpec() == null || lease.getSpec().getRenewTime() == null) {
+                return null;
+            }
+            long ageMs = System.currentTimeMillis() - lease.getSpec().getRenewTime().toInstant().toEpochMilli();
+            return Math.max(0L, ageMs / 1000L);
+        } catch (Exception ex) {
+            logger.debug("Lease du nœud {} illisible ({})", nodeName, ex.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    @Override
+    public PodSetObservation inspectPods(String namespace, String labelSelector) {
+        if (namespace == null || namespace.isBlank() || labelSelector == null || labelSelector.isBlank()) {
+            return PodSetObservation.unavailable();
+        }
+        try {
+            ensureApis();
+            List<V1Pod> items = coreV1Api.listNamespacedPod(namespace).labelSelector(labelSelector).execute()
+                    .getItems();
+            List<PodSetObservation.PodState> pods = new java.util.ArrayList<>();
+            if (items != null) {
+                for (V1Pod p : items) {
+                    boolean terminating = p.getMetadata() != null && p.getMetadata().getDeletionTimestamp() != null;
+                    boolean ready = p.getStatus() != null && p.getStatus().getConditions() != null
+                            && p.getStatus().getConditions().stream()
+                            .anyMatch(c -> "Ready".equals(c.getType()) && "True".equalsIgnoreCase(c.getStatus()));
+                    pods.add(new PodSetObservation.PodState(
+                            p.getMetadata() == null ? "" : p.getMetadata().getName(),
+                            p.getStatus() == null ? null : p.getStatus().getPhase(),
+                            ready && !terminating,
+                            p.getMetadata() == null ? null : p.getMetadata().getLabels()));
+                }
+            }
+            return new PodSetObservation(true, pods);
+        } catch (ApiException | IOException ex) {
+            logger.warn("Lecture des pods {}/{} impossible ({})", namespace, labelSelector, ex.getClass().getSimpleName());
+            return PodSetObservation.unavailable();
+        }
+    }
     /**
      * Exécute une commande HÔTE sur un nœud, 100% DANS LE CLUSTER : crée un pod PRIVILÉGIÉ éphémère sur
      * le nœud cible (nodeName + hostPID) qui, via `nsenter -t 1`, entre dans l'espace hôte du nœud et
@@ -251,34 +468,94 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
 
     // ── Existing actions ──────────────────────────────────────────────────────
 
-    private RemediationExecutionResult restartVm(String nodeName) {
-        String watchdogUrl = properties.getWatchdogBaseUrl();
-        if (watchdogUrl == null || watchdogUrl.isBlank()) {
-            return new RemediationExecutionResult(false, nodeName,
-                    "VM watchdog URL not configured (remediation.watchdog-base-url)");
+    /**
+     * VMDOWN-POLICY-20261105 — mise sous tension d'une VM par le watchdog hôte, sous la politique UNIQUE
+     * {@link VmPowerPolicy} (table fermée, noms EXACTS : route CAMUNDA {k8s-worker2, k8s-worker1, k8s-lb2} ; .160
+     * en DÉTECTION SEULE donc refusée ici ; .153 sans aucune autorisation ; tout le reste refusé).
+     *
+     * <p>Ordre des gardes (chacun AVANT le suivant, aucun appel réseau tant qu'un garde refuse) :
+     * <ol>
+     *   <li>garde STATIQUE de la politique ({@code VmPowerPolicy.staticRefusal}) — dernier garde avant
+     *       l'hyperviseur, quelle que soit la façon dont le plan a été construit (Policy, orchestration,
+     *       approbation humaine) ;</li>
+     *   <li>client watchdog configuré (URL + jeton), sinon échec fermé sans repli ;</li>
+     *   <li>incident connu (clé d'idempotence {@code X-Helios-Incident}) ;</li>
+     *   <li>UN SEUL {@code POST /restart/<nom>} — jamais rejoué : un délai dépassé n'est pas un échec de
+     *       démarrage mais un état à vérifier en aval.</li>
+     * </ol>
+     * Un succès HTTP ne prouve JAMAIS la récupération : le retour au service est vérifié en aval.
+     */
+    private RemediationExecutionResult restartVm(String nodeName, Long incidentId) {
+        java.util.Optional<VmPowerPolicy.Refusal> refusal = VmPowerPolicy.staticRefusal(nodeName);
+        if (refusal.isPresent()) {
+            logger.warn("RESTART_VM refusé par la politique VM_DOWN ({}) pour {} — aucun appel au watchdog",
+                    refusal.get(), nodeName);
+            return new RemediationExecutionResult(false, nodeName, switch (refusal.get()) {
+                case DETECTION_ONLY -> "RESTART_VM refusé : « " + nodeName + " » est en DÉTECTION SEULE "
+                        + "(VM d'infrastructure hors cluster) — redémarrage laissé à l'administrateur, "
+                        + "aucune action hyperviseur";
+                case NOT_AUTHORIZED -> "RESTART_VM refusé : « " + nodeName + " » (nœud control-plane) n'a aucune "
+                        + "autorisation de redémarrage automatique (politique VM_DOWN) — aucune action hyperviseur";
+                default -> "RESTART_VM refusé : « " + nodeName + " » n'est pas une cible connue de la politique "
+                        + "VM_DOWN (ni nœud Kubernetes autorisé, ni VM d'infrastructure autorisée — hors cluster "
+                        + "ou identifiant inconnu) — aucune action hyperviseur";
+            });
         }
-        String url = watchdogUrl.stripTrailing() + "/restart/" + nodeName;
-        logger.info("Requesting VM restart for node {} via watchdog: {}", nodeName, url);
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
-                    .build();
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .POST(HttpRequest.BodyPublishers.noBody())
-                    .timeout(Duration.ofSeconds(15))
-                    .build();
-            HttpResponse<String> response = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 202) {
-                logger.info("VM restart initiated for node {}", nodeName);
-                return new RemediationExecutionResult(true, nodeName,
-                        "VM restart initiated via watchdog — node will rejoin cluster in ~2min");
-            }
+        // Une seule route par VM : ce point d'exécution est celui de la chaîne CAMUNDA. Une cible relevée par le
+        // chemin DIRECT du backend (.160) n'est jamais redémarrée par un workflow Camunda (pas d'escalade Camunda).
+        if (!VmPowerPolicy.isCamundaRestartable(nodeName)) {
+            logger.warn("RESTART_VM refusé pour {} : route {} — hors chaîne Camunda, aucun appel au watchdog",
+                    nodeName, VmPowerPolicy.routeOf(nodeName));
             return new RemediationExecutionResult(false, nodeName,
-                    "Watchdog returned HTTP " + response.statusCode() + ": " + response.body());
-        } catch (Exception ex) {
-            logger.error("VM restart request failed for node {}: {}", nodeName, ex.getMessage());
-            return new RemediationExecutionResult(false, nodeName, "Watchdog call failed: " + ex.getMessage());
+                    "RESTART_VM refusé : « " + nodeName + " » est relevée par le chemin direct du backend "
+                    + "(VmPowerWatch), jamais par une remédiation Camunda — aucune action hyperviseur");
+        }
+        if (!watchdogClient.isConfigured()) {
+            logger.warn("RESTART_VM refusé pour {} : watchdog hôte non configuré — échec fermé, aucun repli", nodeName);
+            return new RemediationExecutionResult(false, nodeName,
+                    "RESTART_VM refusé : watchdog hôte non configuré "
+                    + "(remediation.master-watchdog-url + master-watchdog-token requis) — aucun repli");
+        }
+        if (incidentId == null) {
+            return new RemediationExecutionResult(false, nodeName,
+                    "RESTART_VM refusé : incident inconnu — l'en-tête X-Helios-Incident (clé d'idempotence) "
+                    + "est obligatoire ; aucun appel au watchdog");
+        }
+        logger.info("Requesting VM power-on for {} (incident #{}) via host watchdog", nodeName, incidentId);
+        WatchdogClient.RestartOutcome outcome = watchdogClient.restart(nodeName, incidentId, null);
+        String suffix = " (requête " + outcome.requestId() + ")";
+        switch (outcome.kind()) {
+            case STARTED:
+                return new RemediationExecutionResult(true, nodeName,
+                        "VM " + nodeName + " démarrée via le watchdog hôte (vmrun start, présence confirmée dans "
+                        + "vmrun list) — récupération à vérifier en aval (un 200 n'est PAS une preuve de "
+                        + "récupération)" + suffix);
+            case ALREADY_RUNNING:
+                return new RemediationExecutionResult(true, nodeName,
+                        "VM " + nodeName + " déjà allumée (watchdog : ALREADY_RUNNING) — AUCUN démarrage effectué "
+                        + "par HELIOS ; récupération à vérifier en aval" + suffix);
+            case ALREADY_STARTING:
+                return new RemediationExecutionResult(true, nodeName,
+                        "Démarrage de " + nodeName + " déjà en cours (watchdog : ALREADY_STARTING) — non relancé ; "
+                        + "récupération à vérifier en aval" + suffix);
+            case ALREADY_EXECUTED:
+                return new RemediationExecutionResult(true, nodeName,
+                        "Incident #" + incidentId + " déjà traité par le watchdog (ALREADY_EXECUTED) — non relancé ; "
+                        + "récupération à vérifier en aval" + suffix);
+            case ACCEPTED_STARTING:
+                return new RemediationExecutionResult(true, nodeName,
+                        "Démarrage de " + nodeName + " accepté par le watchdog (HTTP 202 STARTING) — en cours, non "
+                        + "terminé ; récupération à vérifier en aval" + suffix);
+            case TRANSPORT_ERROR:
+                logger.error("RESTART_VM {} : aucune réponse exploitable du watchdog ({})", nodeName, outcome.error());
+                return new RemediationExecutionResult(false, nodeName,
+                        "RESTART_VM échec : aucune réponse exploitable du watchdog hôte (" + outcome.error()
+                        + ") — le démarrage a pu avoir lieu ; AUCUN rejeu automatique, état à vérifier" + suffix);
+            default:
+                logger.error("RESTART_VM {} refusé/échoué par le watchdog : {}", nodeName, outcome.describe());
+                return new RemediationExecutionResult(false, nodeName,
+                        "RESTART_VM échec : watchdog hôte " + outcome.describe()
+                        + (outcome.detail() != null ? " — " + outcome.detail() : "") + suffix);
         }
     }
 
@@ -891,6 +1168,304 @@ public class KubernetesRemediationExecutor implements RemediationExecutor {
             coreV1Api = new CoreV1Api(client);
             appsV1Api = new AppsV1Api(client);
             networkingV1Api = new NetworkingV1Api(client);
+        }
+    }
+
+    private RemediationExecutionResult executeHostDiskReclaim(
+            RemediationPlan plan, boolean dryRun) throws ApiException, IOException {
+
+        // DISK-E2E-158-02 : le scénario (k8s-worker1 + NODE_DISK_FULL) n'est gouverné QUE par son drapeau dédié ;
+        // l'ancien drapeau global reste le garde-fou de TOUT le reste (chemin d'origine inchangé, même précédence).
+        boolean scenario = plan != null
+                && HostDiskScenario.matches(plan.targetNamespace(), plan.targetName(), plan.incidentType());
+
+        if (plan == null || (!scenario && !properties.isHostDiskRemediationEnabled())) {
+            return new RemediationExecutionResult(
+                    false, plan == null ? "?" : plan.targetName(),
+                    "HOST_RECLAIM_DISK refusé : fonctionnalité DISK désactivée.");
+        }
+
+        if (!"k8s-nodes".equalsIgnoreCase(plan.targetNamespace())) {
+            return new RemediationExecutionResult(false, plan.targetName(),
+                    "HOST_RECLAIM_DISK refusé : namespace cible invalide.");
+        }
+
+        String target = plan.targetName();
+        String canonicalTarget = target == null ? null : Set.of("k8s-worker1", "k8s-worker2")
+                .stream()
+                .filter(candidate -> candidate.equalsIgnoreCase(target.trim()))
+                .findFirst()
+                .orElse(null);
+
+        if (canonicalTarget == null) {
+            return new RemediationExecutionResult(false, target,
+                    "HOST_RECLAIM_DISK refusé : cible hors allowlist des workers.");
+        }
+
+        String type = plan.incidentType() == null
+                ? ""
+                : plan.incidentType().trim().toUpperCase(java.util.Locale.ROOT);
+
+        if (!Set.of("NODE_DISK_FULL", "NODE_DISK_PRESSURE", "NODE_INODES_FULL").contains(type)) {
+            return new RemediationExecutionResult(false, target,
+                    "HOST_RECLAIM_DISK refusé : type d'incident non autorisé.");
+        }
+
+        // DISK-E2E-158-01/02 : worker1 + NODE_DISK_FULL = scenario DISK_E2E_158, gouverné par son drapeau DÉDIÉ. Le Bridge
+        // est le SEUL acteur qui libère les fichiers EXACTS du scénario (jeton) puis MESURE l'occupation réelle de /.
+        // Ce chemin n'appelle JAMAIS le pod hôte privilégié historique : ni en nominal, ni en repli après un échec, ni
+        // lorsque le drapeau dédié est désactivé (refus net).
+        if (DISK_E2E_TARGET.equals(canonicalTarget) && DISK_E2E_TYPE.equals(type)) {
+            if (!properties.isHostDiskE2e158Enabled()) {
+                return new RemediationExecutionResult(false, target,
+                        "HOST_RECLAIM_DISK refusé : scénario DISK_E2E_158 désactivé (HOST_DISK_E2E_158_ENABLED) ; "
+                                + "l'ancien drapeau global ne l'active pas et aucun repli vers le pod hôte n'existe.");
+            }
+            return executeDiskReclaimThroughBridge(plan, canonicalTarget, dryRun);
+        }
+
+        // NODE_DISK_FULL n'a QU'UNE voie : le scénario ci-dessus. Partout ailleurs (k8s-worker2 = .155, primaire CNPG)
+        // il est refusé quels que soient les drapeaux : aucun Bridge, aucun pod hôte, aucune commande.
+        if (DISK_E2E_TYPE.equals(type)) {
+            return new RemediationExecutionResult(false, target,
+                    "HOST_RECLAIM_DISK refusé : NODE_DISK_FULL n'a que la voie du scénario DISK_E2E_158 "
+                            + "(k8s-worker1) ; k8s-worker2/.155 jamais.");
+        }
+
+        // Chemin d'origine, STRICTEMENT INCHANGÉ : NODE_DISK_PRESSURE / NODE_INODES_FULL (ancien drapeau global,
+        // mêmes cibles qu'avant ; le drapeau a déjà été contrôlé en tête de méthode).
+        return executeLegacyHostReclaim(canonicalTarget, dryRun);
+    }
+
+    /**
+     * Chemin d'origine : commande hôte bornée dans un pod hôte privilégié. N'est JAMAIS appelé pour le scénario
+     * DISK_E2E_158 ni pour NODE_DISK_FULL (verrouillé par KubernetesRemediationExecutorDiskScopeTest).
+     */
+    RemediationExecutionResult executeLegacyHostReclaim(
+            String canonicalTarget, boolean dryRun) throws ApiException, IOException {
+        return runHostCommand(
+                canonicalTarget,
+                "disk-reclaim",
+                HOST_DISK_RECLAIM_COMMAND,
+                dryRun);
+    }
+
+    // DISK-E2E-158-01 : valeurs canoniques du scenario (miroir des constantes du Bridge et du client Bridge).
+    static final String DISK_E2E_SCENARIO = "DISK_E2E_158";
+    static final String DISK_E2E_TARGET = "k8s-worker1";
+    static final String DISK_E2E_TYPE = "NODE_DISK_FULL";
+
+    /**
+     * DISK-E2E-158-01 : HOST_RECLAIM_DISK du scenario DISK_E2E_158, execute PAR LE BRIDGE. Un succes ici signifie que le
+     * Bridge a supprime les fichiers exacts du scenario ET mesure une occupation de / &lt;= 77 % ; il ne vaut JAMAIS
+     * resolution : l'incident reste ouvert jusqu'a la verification independante (Prometheus, echantillons consecutifs).
+     */
+    private RemediationExecutionResult executeDiskReclaimThroughBridge(
+            RemediationPlan plan, String target, boolean dryRun) {
+
+        if (dryRun) {
+            return new RemediationExecutionResult(true, target,
+                    "Nettoyage DISK Bridge prepare ; aucune requete envoyee.");
+        }
+
+        if (!properties.isBridgeEnabled()) {
+            return new RemediationExecutionResult(false, target,
+                    "Bridge desactive ; aucune requete DISK envoyee.");
+        }
+
+        Long incidentId = plan.incidentId();
+        if (incidentId == null || incidentId <= 0L) {
+            return new RemediationExecutionResult(false, target,
+                    "Nettoyage DISK refuse : incident source inconnu ; aucune requete envoyee.");
+        }
+
+        try {
+            BridgeClient.BridgeResponse response = bridgeClient.sendDiskReclaimAction(
+                    ActionType.HOST_RECLAIM_DISK.name(),
+                    DISK_E2E_TYPE,
+                    "k8s-nodes",
+                    target,
+                    target,
+                    DISK_E2E_SCENARIO,
+                    incidentId);
+
+            if (response == null) {
+                return new RemediationExecutionResult(false, target,
+                        "Reponse Bridge absente ; resultat non confirme.");
+            }
+
+            boolean success = response.ok()
+                    && response.execute()
+                    && response.exitCode() == 0;
+
+            String message = response.message();
+            if (message == null || message.isBlank()) {
+                message = success
+                        ? "Bridge a termine le nettoyage DISK."
+                        : "Bridge n'a pas confirme le nettoyage DISK (ok="
+                                + response.ok() + ", execute=" + response.execute()
+                                + ", exitCode=" + response.exitCode() + ").";
+            }
+
+            return new RemediationExecutionResult(success, target, message);
+        } catch (RuntimeException ex) {
+            logger.warn("Bridge DISK reclaim request failed; exception type={}",
+                    ex.getClass().getSimpleName());
+            return new RemediationExecutionResult(false, target,
+                    "Echec de la requete DISK Bridge ; consulter les journaux Bridge.");
+        }
+    }
+
+    // Action DISK BORNÉE : vacuum du journal systemd à 200 Mo (rétention), + rapports df (mesure
+    // avant/après côté hôte). AUCUN `crictl rmi` (cluster air-gap : image supprimée = irrécupérable),
+    // AUCUNE suppression générale de fichiers, AUCUN accès aux données applicatives/PVC.
+    // Garantie verrouillée par HostDiskReclaimCommandSafetyTest.
+    static final String HOST_DISK_RECLAIM_COMMAND =
+            "set -eu; journalctl --vacuum-size=200M; df -hT /; df -ih /";
+    private RemediationExecutionResult executeCpuQuotaThroughBridge(
+            RemediationPlan plan, boolean dryRun) {
+
+        // CPU-02 : garde a l EXECUTION (couvre les instances Camunda DEJA soumises
+        // avant la bascule vers v25 — un drapeau a l ingestion ne les arreterait pas).
+        // Meme convention que HOST_RECLAIM_DISK (executeHostDiskReclaim).
+        if (plan == null || !properties.isHostCpuRemediationEnabled()) {
+            return new RemediationExecutionResult(
+                    false, plan == null ? "?" : plan.targetName(),
+                    "CPU quota Bridge refuse : remediation CPU backend desactivee "
+                    + "(HOST_CPU_REMEDIATION_ENABLED=false ; proprietaire = Camunda v25).");
+        }
+
+        String target = plan.targetName();
+        String namespace = plan.targetNamespace();
+        String type = plan.incidentType();
+
+        if (!"k8s-nodes".equalsIgnoreCase(namespace)) {
+            return new RemediationExecutionResult(false, target,
+                    "CPU quota Bridge refuse : namespace cible invalide.");
+        }
+
+        // CPU-MASTER-20261029 : k8s-master ajouté. Le quota ne vise que helios-cpuload.service (résolu
+        // depuis l'allowlist du Bridge) ; etcd/kubelet/apiserver restent protégés par QUOTA_SERVICES_INTERDITS.
+        if (target == null || !Set.of("k8s-worker1", "k8s-worker2", "k8s-master").contains(target)) {
+            return new RemediationExecutionResult(false, target,
+                    "CPU quota Bridge refuse : cible hors allowlist des workers CPU de laboratoire.");
+        }
+
+        if ("NODE_HIGH_CPU".equalsIgnoreCase(type)) {
+            type = "NODE_HIGH_CPU";
+        } else if ("NODE_CPU_SATURATION".equalsIgnoreCase(type)) {
+            type = "NODE_CPU_SATURATION";
+        } else {
+            return new RemediationExecutionResult(false, target,
+                    "CPU quota Bridge refuse : type d'incident non autorise.");
+        }
+
+        if (dryRun) {
+            return new RemediationExecutionResult(true, target,
+                    "CPU quota Bridge prepare ; aucune requete envoyee.");
+        }
+
+        if (!properties.isBridgeEnabled()) {
+            return new RemediationExecutionResult(false, target,
+                    "Bridge desactive ; aucune requete CPU envoyee.");
+        }
+
+        try {
+            BridgeClient.BridgeResponse response = bridgeClient.sendAction(
+                    ActionType.HOST_SERVICE_CPU_QUOTA.name(),
+                    type,
+                    namespace,
+                    target,
+                    target,
+                    CPU_QUOTA_LAB_SERVICE,
+                    CPU_QUOTA_LAB_PERCENT,
+                    CPU_QUOTA_LAB_LEASE_SECONDS);
+
+            if (response == null) {
+                return new RemediationExecutionResult(false, target,
+                        "Reponse Bridge absente ; resultat non confirme.");
+            }
+
+            boolean success = response.ok()
+                    && response.execute()
+                    && response.exitCode() == 0;
+
+            String message = response.message();
+            if (message == null || message.isBlank()) {
+                message = success
+                        ? "Bridge a termine l'action CPU."
+                        : "Bridge n'a pas confirme l'execution CPU (ok="
+                                + response.ok() + ", execute=" + response.execute()
+                                + ", exitCode=" + response.exitCode() + ").";
+            }
+
+            return new RemediationExecutionResult(success, target, message);
+        } catch (RuntimeException ex) {
+            logger.warn("Bridge CPU quota request failed; exception type={}",
+                    ex.getClass().getSimpleName());
+            return new RemediationExecutionResult(false, target,
+                    "Echec de la requete CPU Bridge ; consulter les journaux Bridge.");
+        }
+    }
+    private RemediationExecutionResult executeMemoryLimitThroughBridge(
+            RemediationPlan plan, boolean dryRun) {
+        if (plan == null || !properties.isHostMemoryRemediationEnabled()) {
+            return new RemediationExecutionResult(false,
+                    plan == null ? "?" : plan.targetName(),
+                    "Remediation RAM refusee : flag desactive ou plan absent.");
+        }
+
+        String target = plan.targetName();
+        String namespace = plan.targetNamespace();
+        String type = plan.incidentType();
+
+        if (!"k8s-nodes".equalsIgnoreCase(namespace)) {
+            return new RemediationExecutionResult(false, target,
+                    "Remediation RAM refusee : namespace invalide.");
+        }
+        if (!"k8s-worker1".equalsIgnoreCase(target)) {
+            return new RemediationExecutionResult(false, target,
+                    "Remediation RAM limitee au worker laboratoire k8s-worker1.");
+        }
+        if (!"NODE_HIGH_MEMORY".equalsIgnoreCase(type)
+                && !"NODE_MEMORY_PRESSURE".equalsIgnoreCase(type)) {
+            return new RemediationExecutionResult(false, target,
+                    "Remediation RAM refusee : type incident non autorise.");
+        }
+        if (dryRun) {
+            return new RemediationExecutionResult(true, target,
+                    "[DRY-RUN] Action RAM preparee ; aucune requete Bridge envoyee.");
+        }
+        if (!properties.isBridgeEnabled()) {
+            return new RemediationExecutionResult(false, target,
+                    "Bridge desactive ; aucune requete RAM envoyee.");
+        }
+
+        try {
+            BridgeClient.BridgeResponse response = bridgeClient.sendMemoryLimitAction(
+                    ActionType.HOST_SERVICE_MEMORY_LIMIT.name(),
+                    type, namespace, target, target,
+                    MEMORY_LAB_SERVICE, MEMORY_LAB_LIMIT_MB, MEMORY_LAB_LEASE_SECONDS);
+
+            if (response == null) {
+                return new RemediationExecutionResult(false, target,
+                        "Reponse Bridge absente ; execution RAM non confirmee.");
+            }
+            boolean success = response.ok() && response.execute() && response.exitCode() == 0;
+            String message = response.message();
+            if (message == null || message.isBlank()) {
+                message = success
+                        ? "Bridge a confirme l'action RAM."
+                        : "Bridge n'a pas confirme l'execution RAM (ok="
+                            + response.ok() + ", execute=" + response.execute()
+                            + ", exitCode=" + response.exitCode() + ").";
+            }
+            return new RemediationExecutionResult(success, target, message);
+        } catch (RuntimeException ex) {
+            logger.warn("Bridge RAM request failed; exception type={}",
+                    ex.getClass().getSimpleName());
+            return new RemediationExecutionResult(false, target,
+                    "Echec de la requete RAM Bridge ; consulter les journaux Bridge.");
         }
     }
 

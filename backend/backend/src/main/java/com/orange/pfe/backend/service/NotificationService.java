@@ -71,6 +71,42 @@ public class NotificationService {
         emailService.ifPresent(e -> e.sendIncidentDetected(incident));
     }
 
+    /**
+     * VMDOWN-POLICY-20261105 — notification INTERFACE SEULE (SSE) : aucun webhook, aucun e-mail. Utilisée pour la
+     * VM en DÉTECTION SEULE (.160) : l'incident est visible et historisé, l'administrateur n'est pas sollicité
+     * automatiquement et rien n'est escaladé.
+     */
+    public void notifyNewIncidentUiOnly(Incident incident) {
+        sseEventService.broadcast("incident_created", Map.of(
+                "id",          incident.getId(),
+                "title",       incident.getTitle(),
+                "severity",    incident.getSeverity() != null ? incident.getSeverity().name() : "UNKNOWN",
+                "status",      incident.getStatus() != null ? incident.getStatus().name() : "NEW",
+                "description", incident.getDescription() != null ? incident.getDescription() : ""
+        ));
+    }
+
+    /** Pendant de {@link #notifyNewIncidentUiOnly} à la clôture : SSE seulement, ni webhook ni e-mail. */
+    public void notifyIncidentResolvedUiOnly(Incident incident) {
+        sseEventService.broadcast("incident_resolved", Map.of(
+                "id",     incident.getId(),
+                "title",  incident.getTitle(),
+                "status", "RESOLVED"
+        ));
+    }
+
+    /**
+     * Échec de remédiation, INTERFACE SEULE (SSE) : ni webhook ni e-mail. Utilisé pour la VM dont la politique limite
+     * les notifications à l'interface (.160) : l'état d'échec est explicite et visible, personne n'est sollicité.
+     */
+    public void notifyRemediationFailedUiOnly(Incident incident, String reason) {
+        sseEventService.broadcast("remediation_failed", Map.of(
+                "id",     incident.getId(),
+                "title",  incident.getTitle(),
+                "reason", reason != null ? reason : "unknown"
+        ));
+    }
+
     public void notifyIncidentUpdated(Incident incident) {
         sseEventService.broadcast("incident_updated", Map.of(
                 "id",       incident.getId(),
@@ -160,10 +196,6 @@ public class NotificationService {
                 "target",     target != null ? target : ""
         ));
         emailService.ifPresent(e -> e.sendRemediationExecuted(incident, actionType, target));
-    }
-
-    public void notifyFineTuningCompleted(String status, int incidents, double f1Score) {
-        emailService.ifPresent(e -> e.sendFineTuningCompleted(status, incidents, f1Score));
     }
 
     // ── Private ──────────────────────────────────────────────────────────────

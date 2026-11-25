@@ -1,0 +1,18 @@
+{
+  "case": "restart-auth-not-configured",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "123"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "authentification watchdog non configuree",
+      "status": "AUTH_NOT_CONFIGURED"
+    },
+    "status": 503
+  }
+}

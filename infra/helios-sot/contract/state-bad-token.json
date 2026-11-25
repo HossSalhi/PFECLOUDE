@@ -1,0 +1,16 @@
+{
+  "case": "state-bad-token",
+  "request": {
+    "auth": "invalid",
+    "headers": {},
+    "method": "GET",
+    "path": "/vm/k8s-worker1/state"
+  },
+  "response": {
+    "body": {
+      "error": "jeton absent ou invalide",
+      "status": "REJECTED"
+    },
+    "status": 401
+  }
+}

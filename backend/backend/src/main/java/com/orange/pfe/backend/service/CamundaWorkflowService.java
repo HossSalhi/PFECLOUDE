@@ -93,6 +93,22 @@ public class CamundaWorkflowService {
      * l'unique tâche `ai-classify` appellera l'IA. No-op si Camunda injoignable (=> 0 détection,
      * cohérent avec « Camunda = orchestrateur central »). Retourne true si le process a démarré.
      */
+    private static String buildDetectionBusinessId(String namespace, String app) {
+        if (namespace == null || namespace.isBlank() || app == null || app.isBlank()) {
+            throw new IllegalArgumentException("Namespace et cible requis pour le Business ID");
+        }
+
+        String businessId = "HELIOS-DETECTION|"
+                + namespace.trim().toLowerCase(java.util.Locale.ROOT)
+                + "|"
+                + app.trim().toLowerCase(java.util.Locale.ROOT);
+
+        if (businessId.length() > 256) {
+            throw new IllegalArgumentException("Business ID de détection supérieur à 256 caractères");
+        }
+
+        return businessId;
+    }
     public boolean startDetectionWorkflow(String namespace, String app) {
         return startDetectionWorkflow(namespace, app, "app", null);
     }
@@ -119,6 +135,7 @@ public class CamundaWorkflowService {
                     .newCreateInstanceCommand()
                     .bpmnProcessId(DETECTION_PROCESS_ID)
                     .latestVersion()
+                    .businessId(buildDetectionBusinessId(namespace, app))
                     .variables(vars)
                     .send()
                     .join();
@@ -187,76 +204,267 @@ public class CamundaWorkflowService {
             RemediationPlan plan,
             AIPredictResponse prediction
     ) {
-        if (workflow == null || action == null || plan == null || plan.actionType() == null) {
-            return;
-        }
-        if (!isEnabled()) {
-            logger.warn("Camunda unavailable — L17 fallback: executing remediation directly for workflow {}", workflow.getId());
-            executeWithoutCamunda(workflow, plan, "Camunda unavailable");
-            return;
+        startWorkflowWithOutcome(workflow, action, plan, prediction, true);
+    }
+
+    /**
+     * Retourne un resultat explicite afin que les orchestrateurs distinguent
+     * le lancement confirme, le fallback et le suivi manuel.
+     *
+     * Pour les remediations host CPU/DISK, allowDirectFallback doit rester false :
+     * ces actions doivent passer par le workflow gouverne et sa verification.
+     */
+    public CamundaLaunchOutcome startWorkflowWithOutcome(
+            WorkflowInstance workflow,
+            IncidentAction action,
+            RemediationPlan plan,
+            AIPredictResponse prediction,
+            boolean allowDirectFallback
+    ) {
+        if (workflow == null || action == null || plan == null
+                || plan.actionType() == null || prediction == null) {
+            return CamundaLaunchOutcome.NOT_STARTED;
         }
 
+        String existingProcessKey = workflow.getCamundaProcessInstanceKey();
+        if (existingProcessKey != null && !existingProcessKey.isBlank()) {
+            logger.warn(
+                    "Camunda process already attached to workflow {}; refusing to create another process",
+                    workflow.getId()
+            );
+            return CamundaLaunchOutcome.PROCESS_ALREADY_ATTACHED;
+        }
+
+        if (!isReachable()) {
+            String reason = "Camunda unavailable before process creation";
+
+            if (!isEnabled()) {
+                if (allowDirectFallback) {
+                    logger.warn(
+                            "Camunda disabled or client unavailable; using legacy direct fallback for workflow {}",
+                            workflow.getId()
+                    );
+                    return executeWithoutCamunda(workflow, plan, reason);
+                }
+
+                return markManualFollowUp(
+                        workflow,
+                        reason + "; direct fallback disabled for this remediation",
+                        CamundaLaunchOutcome.LAUNCH_FAILED
+                );
+            }
+
+            logger.warn(
+                    "Camunda is enabled but unreachable for workflow {}; direct fallback suppressed",
+                    workflow.getId()
+            );
+            return markManualFollowUp(
+                    workflow,
+                    reason + "; Camunda is enabled but unreachable; direct fallback suppressed",
+                    CamundaLaunchOutcome.LAUNCH_FAILED
+            );
+        }
+
+        final String processId;
+        final Map<String, Object> variables;
+
         try {
-            String processId = resolveProcessId(prediction.getIncidentType(), plan);
-            ProcessInstanceEvent processInstanceEvent = requireClient()
+            processId = resolveProcessId(prediction.getIncidentType(), plan);
+            variables = buildVariables(workflow, action, plan, prediction);
+        } catch (Exception ex) {
+            logger.error(
+                    "Unable to prepare Camunda process before submission for workflow {}",
+                    workflow.getId(),
+                    ex
+            );
+            String reason = "Camunda preparation failed before submission";
+            if (allowDirectFallback) {
+                return executeWithoutCamunda(workflow, plan, reason);
+            }
+            return markManualFollowUp(
+                    workflow,
+                    reason + "; direct fallback disabled for host remediation",
+                    CamundaLaunchOutcome.LAUNCH_FAILED
+            );
+        }
+
+        final ProcessInstanceEvent processInstanceEvent;
+        try {
+            processInstanceEvent = requireClient()
                     .newCreateInstanceCommand()
                     .bpmnProcessId(processId)
                     .latestVersion()
-                    .variables(buildVariables(workflow, action, plan, prediction))
+                    .businessId("HELIOS-WORKFLOW-" + workflow.getId())
+                    .variables(variables)
                     .send()
                     .join();
+        } catch (Exception ex) {
+            logger.error(
+                    "Camunda process creation outcome is uncertain for workflow {}; direct fallback suppressed",
+                    workflow.getId(),
+                    ex
+            );
 
+            try {
+                workflowService.addWorkflowLog(
+                        workflow.getId(),
+                        "Camunda creation outcome uncertain: "
+                                + ex.getClass().getSimpleName()
+                                + "; direct fallback suppressed to prevent duplicate remediation"
+                );
+            } catch (Exception logEx) {
+                logger.error(
+                        "Unable to persist uncertain Camunda creation log for workflow {}",
+                        workflow.getId(),
+                        logEx
+                );
+            }
+
+            try {
+                workflowService.updateOrchestrationState(
+                        workflow,
+                        WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                        "Camunda creation outcome uncertain; automatic fallback suppressed to prevent duplicate remediation"
+                );
+            } catch (Exception stateEx) {
+                logger.error(
+                        "Unable to persist uncertain Camunda creation state for workflow {}",
+                        workflow.getId(),
+                        stateEx
+                );
+            }
+            return CamundaLaunchOutcome.MANUAL_FOLLOW_UP_REQUIRED;
+        }
+
+        try {
             workflowService.attachCamundaProcess(
                     workflow,
                     processInstanceEvent.getBpmnProcessId(),
                     String.valueOf(processInstanceEvent.getProcessInstanceKey())
             );
+
             workflowService.updateOrchestrationState(
                     workflow,
-                    plan.approvalRequired() ? WorkflowOrchestrationState.WAITING_FOR_APPROVAL : WorkflowOrchestrationState.EXECUTION_PENDING,
-                    "Camunda orchestration started with process instance " + processInstanceEvent.getProcessInstanceKey()
+                    plan.approvalRequired()
+                            ? WorkflowOrchestrationState.WAITING_FOR_APPROVAL
+                            : WorkflowOrchestrationState.EXECUTION_PENDING,
+                    "Camunda orchestration started with process instance "
+                            + processInstanceEvent.getProcessInstanceKey()
             );
+            return CamundaLaunchOutcome.CAMUNDA_STARTED;
         } catch (Exception ex) {
-            logger.error("Unable to start Camunda workflow for workflow {}", workflow.getId(), ex);
-            workflow.addLog("Camunda start failed: " + ex.getMessage());
-            // L17 — Camunda unreachable after attempt: don't strand the workflow, execute directly.
-            executeWithoutCamunda(workflow, plan, "Camunda start failed: " + ex.getMessage());
+            logger.error(
+                    "Camunda process {} was created for workflow {}, but local persistence failed; direct fallback suppressed",
+                    processInstanceEvent.getProcessInstanceKey(),
+                    workflow.getId(),
+                    ex
+            );
+
+            try {
+                workflowService.addWorkflowLog(
+                        workflow.getId(),
+                        "Camunda process created with key "
+                                + processInstanceEvent.getProcessInstanceKey()
+                                + "; local state persistence failed; no direct fallback attempted"
+                );
+            } catch (Exception logEx) {
+                logger.error(
+                        "Unable to persist Camunda post-creation diagnostic for workflow {}",
+                        workflow.getId(),
+                        logEx
+                );
+            }
+
+            try {
+                workflowService.updateOrchestrationState(
+                        workflow,
+                        WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                        "Camunda process was created with key "
+                                + processInstanceEvent.getProcessInstanceKey()
+                                + "; local state persistence failed; direct fallback suppressed"
+                );
+            } catch (Exception stateEx) {
+                logger.error(
+                        "Unable to persist manual follow-up state for workflow {}",
+                        workflow.getId(),
+                        stateEx
+                );
+            }
+            return CamundaLaunchOutcome.MANUAL_FOLLOW_UP_REQUIRED;
         }
     }
-
     /**
      * L17 — Camunda fallback. When the orchestrator is unreachable, the backend executes the
      * remediation DIRECTLY (instead of leaving the workflow stuck) — but only for auto-executable
      * plans that do not require human approval. Approval-gated plans stay manual, since without
      * Camunda there is no approval channel and a human must decide.
      */
-    private void executeWithoutCamunda(WorkflowInstance workflow, RemediationPlan plan, String reason) {
+    private CamundaLaunchOutcome executeWithoutCamunda(
+            WorkflowInstance workflow, RemediationPlan plan, String reason) {
         if (plan.approvalRequired() || !plan.autoExecutable()) {
             workflowService.updateOrchestrationState(
                     workflow,
                     WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
                     reason + " — approval required, kept for manual handling"
             );
-            return;
+            return CamundaLaunchOutcome.MANUAL_FOLLOW_UP_REQUIRED;
         }
+
         try {
             RemediationExecutionResult result = remediationExecutor.execute(plan);
-            workflow.addLog("Direct remediation (Camunda fallback): " + result.message());
+            workflowService.addWorkflowLog(
+                    workflow.getId(),
+                    "Direct remediation (Camunda fallback): " + result.message()
+            );
             workflowService.updateOrchestrationState(
                     workflow,
-                    result.success() ? WorkflowOrchestrationState.EXECUTION_PENDING : WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                    result.success()
+                            ? WorkflowOrchestrationState.EXECUTION_PENDING
+                            : WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
                     reason + " — executed directly via Kubernetes executor: " + result.message()
             );
-            logger.warn("L17 fallback executed remediation for workflow {} (success={})",
-                    workflow.getId(), result.success());
+            logger.warn(
+                    "L17 fallback executed remediation for workflow {} (success={})",
+                    workflow.getId(), result.success()
+            );
+            return result.success()
+                    ? CamundaLaunchOutcome.DIRECT_FALLBACK_EXECUTED
+                    : CamundaLaunchOutcome.DIRECT_FALLBACK_FAILED;
         } catch (Exception ex) {
             logger.error("L17 fallback execution failed for workflow {}", workflow.getId(), ex);
+            try {
+                workflowService.updateOrchestrationState(
+                        workflow,
+                        WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
+                        reason + " — direct execution failed: " + ex.getMessage()
+                );
+            } catch (Exception stateEx) {
+                logger.error(
+                        "Unable to persist fallback failure state for workflow {}",
+                        workflow.getId(),
+                        stateEx
+                );
+            }
+            return CamundaLaunchOutcome.DIRECT_FALLBACK_FAILED;
+        }
+    }
+
+    private CamundaLaunchOutcome markManualFollowUp(
+            WorkflowInstance workflow, String reason, CamundaLaunchOutcome outcome) {
+        try {
             workflowService.updateOrchestrationState(
                     workflow,
                     WorkflowOrchestrationState.MANUAL_FOLLOW_UP,
-                    reason + " — direct execution failed: " + ex.getMessage()
+                    reason
+            );
+        } catch (Exception stateEx) {
+            logger.error(
+                    "Unable to persist manual follow-up state for workflow {}",
+                    workflow.getId(),
+                    stateEx
             );
         }
+        return outcome;
     }
 
     public void publishDecision(WorkflowInstance workflow, TaskDecision decision, Long actionId) {

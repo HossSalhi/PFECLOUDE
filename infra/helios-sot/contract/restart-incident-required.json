@@ -1,0 +1,20 @@
+{
+  "case": "restart-incident-required",
+  "request": {
+    "auth": "valid",
+    "headers": {},
+    "method": "POST",
+    "path": "/restart/k8s-worker1"
+  },
+  "response": {
+    "body": {
+      "error": "en-tete X-Helios-Incident obligatoire",
+      "node": "k8s-worker1",
+      "request_id": "<id>",
+      "started": false,
+      "status": "INCIDENT_REQUIRED",
+      "vm": "k8s-worker1"
+    },
+    "status": 400
+  }
+}

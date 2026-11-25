@@ -16,6 +16,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -100,11 +101,15 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), req);
     }
 
-    // ── 502 BAD GATEWAY ────────────────────────────────────────────────────────
-
-    @ExceptionHandler(AIOpsIntegrationException.class)
-    public ResponseEntity<ErrorResponse> aiopsIntegration(AIOpsIntegrationException ex, HttpServletRequest req) {
-        return build(HttpStatus.BAD_GATEWAY, ex.getMessage(), req);
+    // ── ResponseStatusException : préserver le statut porté (ex. 404/400 émis par les services) ──
+    // Sans ce handler, le fallback générique ci-dessous masquerait ces statuts en 500 (défaut d'intégration
+    // constaté via le vrai contrôleur de carte : « incident introuvable » 404 et « PASS sans observations » 400
+    // revenaient en 500). On renvoie le statut réellement porté par l'exception, au format d'erreur de l'API.
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> responseStatus(ResponseStatusException ex, HttpServletRequest req) {
+        HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+        String msg = ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
+        return build(status, msg, req);
     }
 
     // ── 500 FALLBACK ───────────────────────────────────────────────────────────
