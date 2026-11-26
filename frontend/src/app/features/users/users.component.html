@@ -7,25 +7,35 @@
         <i class="fas fa-users"></i> Gestion des Utilisateurs
       </h1>
       <p class="page-subtitle">
-        <span *ngIf="isSuperAdmin">Administration complète — création, modification, suppression et contrôle des accès</span>
-        <span *ngIf="isAdmin && !isSuperAdmin">Supervision — blocage et déblocage des comptes utilisateurs</span>
+        @if (isSuperAdmin) {
+          <span>Administration complète — création, modification, suppression et contrôle des accès</span>
+        }
+        @if (isAdmin && !isSuperAdmin) {
+          <span>Supervision — blocage et déblocage des comptes utilisateurs</span>
+        }
       </p>
     </div>
-    <button *ngIf="isSuperAdmin" class="btn-primary" (click)="openCreate()">
-      <i class="fas fa-user-plus"></i> Nouvel utilisateur
-    </button>
+    @if (isSuperAdmin) {
+      <button class="btn-primary" (click)="openCreate()">
+        <i class="fas fa-user-plus"></i> Nouvel utilisateur
+      </button>
+    }
   </div>
 
   <!-- Flash messages -->
-  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
-  <div *ngIf="error"   class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+  @if (success) {
+    <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+  }
+  @if (error) {
+    <div   class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+  }
 
   <!-- Filters -->
   <div class="filters-bar">
     <div class="search-wrap">
       <i class="fas fa-search"></i>
       <input type="text" placeholder="Rechercher par nom, email, identifiant…"
-             [(ngModel)]="searchQuery" (ngModelChange)="applyFilters()">
+        [(ngModel)]="searchQuery" (ngModelChange)="applyFilters()">
     </div>
     <select [(ngModel)]="filterRole" (ngModelChange)="applyFilters()" class="filter-select">
       <option value="">Tous les rôles</option>
@@ -44,114 +54,136 @@
 
   <!-- Table -->
   <div class="table-card">
-    <div *ngIf="loading" class="table-loading">
-      <div class="spinner"></div> Chargement…
-    </div>
+    @if (loading) {
+      <div class="table-loading">
+        <div class="spinner"></div> Chargement…
+      </div>
+    }
 
-    <table *ngIf="!loading" class="users-table">
-      <thead>
-        <tr>
-          <th>Utilisateur</th>
-          <th>Email</th>
-          <th>Rôle</th>
-          <th>Statut</th>
-          <th>Dernière connexion</th>
-          <th>Créé le</th>
-          <th class="actions-col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let u of filteredUsers" [class.row-blocked]="u.blockedAt" [class.row-disabled]="!u.enabled && !u.blockedAt">
-          <td>
-            <div class="user-cell">
-              <div class="user-avatar-sm" [ngClass]="'role-' + u.role.toLowerCase().replace('_','-')">
-                {{ ((u.firstName && u.firstName[0]) || u.username[0]).toUpperCase() }}
-              </div>
-              <div>
-                <div class="user-name-cell">{{ u.firstName }} {{ u.lastName }}</div>
-                <div class="user-username">&#64;{{ u.username }}</div>
-              </div>
-            </div>
-          </td>
-          <td class="text-muted">{{ u.email }}</td>
-          <td>
-            <span class="role-badge" [ngClass]="'role-' + u.role.toLowerCase().replace('_','-')">
+    @if (!loading) {
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th>Utilisateur</th>
+            <th>Email</th>
+            <th>Rôle</th>
+            <th>Statut</th>
+            <th>Dernière connexion</th>
+            <th>Créé le</th>
+            <th class="actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (u of filteredUsers; track u) {
+            <tr [class.row-blocked]="u.blockedAt" [class.row-disabled]="!u.enabled && !u.blockedAt">
+              <td>
+                <div class="user-cell">
+                  <div class="user-avatar-sm" [ngClass]="'role-' + u.role.toLowerCase().replace('_','-')">
+                    {{ ((u.firstName && u.firstName[0]) || u.username[0]).toUpperCase() }}
+                  </div>
+                  <div>
+                    <div class="user-name-cell">{{ u.firstName }} {{ u.lastName }}</div>
+                    <div class="user-username">&#64;{{ u.username }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="text-muted">{{ u.email }}</td>
+              <td>
+                <span class="role-badge" [ngClass]="'role-' + u.role.toLowerCase().replace('_','-')">
               <i class="fas" [ngClass]="{
                 'fa-crown':       u.role === 'SUPER_ADMIN',
                 'fa-user-shield': u.role === 'ADMIN',
                 'fa-user':        u.role === 'USER'
               }"></i>
-              {{ u.role === 'SUPER_ADMIN' ? 'Super Admin' : u.role === 'ADMIN' ? 'Admin' : 'Utilisateur' }}
-            </span>
-          </td>
-          <td>
-            <span class="status-badge" [ngClass]="'status-' + getStatus(u)">
-              <span class="status-dot"></span>
-              {{ getStatus(u) === 'active' ? 'Actif' : getStatus(u) === 'blocked' ? 'Bloqué' : 'Désactivé' }}
-            </span>
-            <div *ngIf="u.blockedAt" class="block-reason" title="{{ u.blockReason }}">
-              <i class="fas fa-info-circle"></i> {{ u.blockReason }}
-            </div>
-          </td>
-          <td class="text-muted">{{ formatDate(u.lastLoginAt) }}</td>
-          <td class="text-muted">{{ formatDate(u.createdAt) }}</td>
-          <td class="actions-cell">
-            <!-- SUPER_ADMIN actions -->
-            <ng-container *ngIf="isSuperAdmin">
-              <button class="btn-icon btn-edit" (click)="openEdit(u)" title="Modifier">
-                <i class="fas fa-pen"></i>
-              </button>
-              <button class="btn-icon btn-toggle" (click)="toggleEnabled(u)"
-                      [title]="u.enabled ? 'Désactiver' : 'Activer'">
-                <i class="fas" [ngClass]="u.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
-              </button>
-              <button class="btn-icon btn-reset" (click)="openResetPassword(u)" title="Réinitialiser MDP">
-                <i class="fas fa-key"></i>
-              </button>
-              <button *ngIf="canBlock(u)" class="btn-icon btn-block" (click)="openBlock(u)" title="Bloquer">
-                <i class="fas fa-ban"></i>
-              </button>
-              <button *ngIf="canUnblock(u)" class="btn-icon btn-unblock" (click)="unblock(u)" title="Débloquer">
-                <i class="fas fa-lock-open"></i>
-              </button>
-              <button class="btn-icon btn-delete" (click)="openDelete(u)" title="Supprimer">
-                <i class="fas fa-trash"></i>
-              </button>
-            </ng-container>
-
-            <!-- ADMIN actions -->
-            <ng-container *ngIf="isAdmin && !isSuperAdmin">
-              <span *ngIf="u.role !== 'USER'" class="text-muted" style="font-size:12px;font-style:italic;">—</span>
-              <button *ngIf="canBlock(u)"   class="btn-icon btn-block"   (click)="openBlock(u)"  title="Bloquer">
-                <i class="fas fa-ban"></i>
-              </button>
-              <button *ngIf="canUnblock(u)" class="btn-icon btn-unblock" (click)="unblock(u)"    title="Débloquer">
-                <i class="fas fa-lock-open"></i>
-              </button>
-            </ng-container>
-          </td>
-        </tr>
-        <tr *ngIf="filteredUsers.length === 0 && !loading">
-          <td colspan="7" class="empty-state">
-            <i class="fas fa-users-slash"></i>
-            <p>Aucun utilisateur trouvé</p>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+                  {{ u.role === 'SUPER_ADMIN' ? 'Super Admin' : u.role === 'ADMIN' ? 'Admin' : 'Utilisateur' }}
+                </span>
+              </td>
+              <td>
+                <span class="status-badge" [ngClass]="'status-' + getStatus(u)">
+                  <span class="status-dot"></span>
+                  {{ getStatus(u) === 'active' ? 'Actif' : getStatus(u) === 'blocked' ? 'Bloqué' : 'Désactivé' }}
+                </span>
+                @if (u.blockedAt) {
+                  <div class="block-reason" title="{{ u.blockReason }}">
+                    <i class="fas fa-info-circle"></i> {{ u.blockReason }}
+                  </div>
+                }
+              </td>
+              <td class="text-muted">{{ formatDate(u.lastLoginAt) }}</td>
+              <td class="text-muted">{{ formatDate(u.createdAt) }}</td>
+              <td class="actions-cell">
+                <!-- SUPER_ADMIN actions -->
+                @if (isSuperAdmin) {
+                  <button class="btn-icon btn-edit" (click)="openEdit(u)" title="Modifier">
+                    <i class="fas fa-pen"></i>
+                  </button>
+                  <button class="btn-icon btn-toggle" (click)="toggleEnabled(u)"
+                    [title]="u.enabled ? 'Désactiver' : 'Activer'">
+                    <i class="fas" [ngClass]="u.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                  </button>
+                  <button class="btn-icon btn-reset" (click)="openResetPassword(u)" title="Réinitialiser MDP">
+                    <i class="fas fa-key"></i>
+                  </button>
+                  @if (canBlock(u)) {
+                    <button class="btn-icon btn-block" (click)="openBlock(u)" title="Bloquer">
+                      <i class="fas fa-ban"></i>
+                    </button>
+                  }
+                  @if (canUnblock(u)) {
+                    <button class="btn-icon btn-unblock" (click)="unblock(u)" title="Débloquer">
+                      <i class="fas fa-lock-open"></i>
+                    </button>
+                  }
+                  <button class="btn-icon btn-delete" (click)="openDelete(u)" title="Supprimer">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                }
+                <!-- ADMIN actions -->
+                @if (isAdmin && !isSuperAdmin) {
+                  @if (u.role !== 'USER') {
+                    <span class="text-muted" style="font-size:12px;font-style:italic;">—</span>
+                  }
+                  @if (canBlock(u)) {
+                    <button   class="btn-icon btn-block"   (click)="openBlock(u)"  title="Bloquer">
+                      <i class="fas fa-ban"></i>
+                    </button>
+                  }
+                  @if (canUnblock(u)) {
+                    <button class="btn-icon btn-unblock" (click)="unblock(u)"    title="Débloquer">
+                      <i class="fas fa-lock-open"></i>
+                    </button>
+                  }
+                }
+              </td>
+            </tr>
+          }
+          @if (filteredUsers.length === 0 && !loading) {
+            <tr>
+              <td colspan="7" class="empty-state">
+                <i class="fas fa-users-slash"></i>
+                <p>Aucun utilisateur trouvé</p>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
   </div>
 </div>
 
 <!-- ── Modal: Create / Edit ────────────────────────────────────────────── -->
-<div class="modal-overlay" *ngIf="showCreateModal || showEditModal" (click)="closeModals()">
-  <div class="modal" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas" [ngClass]="showCreateModal ? 'fa-user-plus' : 'fa-pen'"></i>
-        {{ showCreateModal ? 'Créer un utilisateur' : 'Modifier l\'utilisateur' }}</h3>
+@if (showCreateModal || showEditModal) {
+  <div class="modal-overlay" (click)="closeModals()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3><i class="fas" [ngClass]="showCreateModal ? 'fa-user-plus' : 'fa-pen'"></i>
+      {{ showCreateModal ? 'Créer un utilisateur' : 'Modifier l\'utilisateur' }}</h3>
       <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+      @if (modalError) {
+        <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+      }
       <div class="form-row-2">
         <div class="form-group">
           <label>Prénom</label>
@@ -171,7 +203,9 @@
         <input type="email" [(ngModel)]="formEmail" placeholder="email@exemple.com" class="form-input">
       </div>
       <div class="form-group">
-        <label>Mot de passe {{ showEditModal ? '(laisser vide = inchangé)' : '' }} <span *ngIf="showCreateModal" class="required">*</span></label>
+        <label>Mot de passe {{ showEditModal ? '(laisser vide = inchangé)' : '' }} @if (showCreateModal) {
+          <span class="required">*</span>
+        }</label>
         <input type="password" [(ngModel)]="formPassword" placeholder="Minimum 8 caractères" class="form-input">
       </div>
       <div class="form-group">
@@ -186,84 +220,103 @@
     <div class="modal-footer">
       <button class="btn-secondary" (click)="closeModals()">Annuler</button>
       <button class="btn-primary" (click)="showCreateModal ? submitCreate() : submitEdit()" [disabled]="saving">
-        <span *ngIf="saving" class="btn-spinner"></span>
+        @if (saving) {
+          <span class="btn-spinner"></span>
+        }
         {{ saving ? 'Enregistrement…' : (showCreateModal ? 'Créer' : 'Enregistrer') }}
       </button>
     </div>
   </div>
 </div>
+}
 
 <!-- ── Modal: Block ────────────────────────────────────────────────────── -->
-<div class="modal-overlay" *ngIf="showBlockModal" (click)="closeModals()">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header danger">
-      <h3><i class="fas fa-ban"></i> Bloquer l'utilisateur</h3>
-      <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Bloquer <strong>&#64;{{ selectedUser?.username }}</strong> — précisez la raison :</p>
-      <div class="form-group">
-        <label>Raison <span class="required">*</span></label>
-        <textarea [(ngModel)]="blockReason" rows="3" placeholder="Motif du blocage…" class="form-input"></textarea>
+@if (showBlockModal) {
+  <div class="modal-overlay" (click)="closeModals()">
+    <div class="modal modal-sm" (click)="$event.stopPropagation()">
+      <div class="modal-header danger">
+        <h3><i class="fas fa-ban"></i> Bloquer l'utilisateur</h3>
+        <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        @if (modalError) {
+          <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+        }
+        <p class="modal-desc">Bloquer <strong>&#64;{{ selectedUser?.username }}</strong> — précisez la raison :</p>
+        <div class="form-group">
+          <label>Raison <span class="required">*</span></label>
+          <textarea [(ngModel)]="blockReason" rows="3" placeholder="Motif du blocage…" class="form-input"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" (click)="closeModals()">Annuler</button>
+        <button class="btn-danger" (click)="submitBlock()" [disabled]="saving || !blockReason.trim()">
+          @if (saving) {
+            <span class="btn-spinner"></span>
+          }
+          {{ saving ? 'Blocage…' : 'Bloquer' }}
+        </button>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeModals()">Annuler</button>
-      <button class="btn-danger" (click)="submitBlock()" [disabled]="saving || !blockReason.trim()">
-        <span *ngIf="saving" class="btn-spinner"></span>
-        {{ saving ? 'Blocage…' : 'Bloquer' }}
-      </button>
-    </div>
   </div>
-</div>
+}
 
 <!-- ── Modal: Reset Password ───────────────────────────────────────────── -->
-<div class="modal-overlay" *ngIf="showResetModal" (click)="closeModals()">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-key"></i> Réinitialiser le mot de passe</h3>
-      <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Nouveau mot de passe pour <strong>&#64;{{ selectedUser?.username }}</strong> :</p>
-      <div class="form-group">
-        <label>Nouveau mot de passe <span class="required">*</span></label>
-        <input type="password" [(ngModel)]="newPassword" placeholder="Minimum 8 caractères" class="form-input">
+@if (showResetModal) {
+  <div class="modal-overlay" (click)="closeModals()">
+    <div class="modal modal-sm" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3><i class="fas fa-key"></i> Réinitialiser le mot de passe</h3>
+        <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        @if (modalError) {
+          <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+        }
+        <p class="modal-desc">Nouveau mot de passe pour <strong>&#64;{{ selectedUser?.username }}</strong> :</p>
+        <div class="form-group">
+          <label>Nouveau mot de passe <span class="required">*</span></label>
+          <input type="password" [(ngModel)]="newPassword" placeholder="Minimum 8 caractères" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" (click)="closeModals()">Annuler</button>
+        <button class="btn-primary" (click)="submitReset()" [disabled]="saving || newPassword.length < 8">
+          @if (saving) {
+            <span class="btn-spinner"></span>
+          }
+          {{ saving ? 'Réinitialisation…' : 'Réinitialiser' }}
+        </button>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeModals()">Annuler</button>
-      <button class="btn-primary" (click)="submitReset()" [disabled]="saving || newPassword.length < 8">
-        <span *ngIf="saving" class="btn-spinner"></span>
-        {{ saving ? 'Réinitialisation…' : 'Réinitialiser' }}
-      </button>
-    </div>
   </div>
-</div>
+}
 
 <!-- ── Modal: Delete Confirm ──────────────────────────────────────────── -->
-<div class="modal-overlay" *ngIf="showDeleteConfirm" (click)="closeModals()">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header danger">
-      <h3><i class="fas fa-trash"></i> Supprimer l'utilisateur</h3>
-      <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <p class="modal-desc">
-        Voulez-vous vraiment supprimer <strong>&#64;{{ selectedUser?.username }}</strong> ?<br>
-        <span style="color:#c62828;font-size:13px;">Cette action est irréversible.</span>
-      </p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeModals()">Annuler</button>
-      <button class="btn-danger" (click)="confirmDelete()" [disabled]="saving">
-        <span *ngIf="saving" class="btn-spinner"></span>
-        {{ saving ? 'Suppression…' : 'Supprimer définitivement' }}
-      </button>
+@if (showDeleteConfirm) {
+  <div class="modal-overlay" (click)="closeModals()">
+    <div class="modal modal-sm" (click)="$event.stopPropagation()">
+      <div class="modal-header danger">
+        <h3><i class="fas fa-trash"></i> Supprimer l'utilisateur</h3>
+        <button class="modal-close" (click)="closeModals()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Voulez-vous vraiment supprimer <strong>&#64;{{ selectedUser?.username }}</strong> ?<br>
+          <span style="color:#c62828;font-size:13px;">Cette action est irréversible.</span>
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" (click)="closeModals()">Annuler</button>
+        <button class="btn-danger" (click)="confirmDelete()" [disabled]="saving">
+          @if (saving) {
+            <span class="btn-spinner"></span>
+          }
+          {{ saving ? 'Suppression…' : 'Supprimer définitivement' }}
+        </button>
+      </div>
     </div>
   </div>
-</div>
+}
 
 

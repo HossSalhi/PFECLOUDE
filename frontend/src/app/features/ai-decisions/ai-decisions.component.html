@@ -19,195 +19,222 @@
 <!-- ── Scenario Filters ── -->
 <div class="filter-bar mb-20">
   <span class="filter-label"><i class="fas fa-sliders"></i> Scénario</span>
-  <button *ngFor="let f of scenarioFilters"
-          class="filter-pill"
-          [class.active]="scenarioFilter === f.value"
-          (click)="setFilter(f.value)">
-    {{ f.label }}
-  </button>
+  @for (f of scenarioFilters; track f) {
+    <button
+      class="filter-pill"
+      [class.active]="scenarioFilter === f.value"
+      (click)="setFilter(f.value)">
+      {{ f.label }}
+    </button>
+  }
 </div>
 
 <!-- ── Loading ── -->
-<div *ngIf="loading" style="padding:60px;text-align:center;">
-  <div class="spinner-orange"></div>
-  <div class="text-muted" style="margin-top:14px;">Chargement des décisions de remédiation…</div>
-</div>
+@if (loading) {
+  <div style="padding:60px;text-align:center;">
+    <div class="spinner-orange"></div>
+    <div class="text-muted" style="margin-top:14px;">Chargement des décisions de remédiation…</div>
+  </div>
+}
 
 <!-- ── Table Card ── -->
-<div *ngIf="!loading" class="card">
-  <div class="card-header">
-    <div class="card-title">
-      <div class="card-title-icon"><i class="fas fa-scale-balanced"></i></div>
-      Incidents et règle de remédiation appliquée
-      <span class="badge-status running" style="margin-left:8px;">{{ filtered.length }}</span>
+@if (!loading) {
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-scale-balanced"></i></div>
+        Incidents et règle de remédiation appliquée
+        <span class="badge-status running" style="margin-left:8px;">{{ filtered.length }}</span>
+      </div>
     </div>
-  </div>
-
-  <div *ngIf="filtered.length === 0" class="empty-state">
-    <div class="empty-icon"><i class="fas fa-scale-balanced"></i></div>
-    <div class="empty-title">Aucune décision de remédiation</div>
-    <div class="empty-text">Aucune décision de remédiation ne correspond au filtre sélectionné.</div>
-  </div>
-
-  <div *ngIf="filtered.length > 0" class="data-table-wrapper">
-    <table class="orange-table">
-      <thead>
-        <tr>
-          <th>Titre</th>
-          <th>Type d'incident</th>
-          <th>Scénario</th>
-          <th>Action (référence)</th>
-          <th>Sévérité</th>
-          <th>Statut</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <ng-container *ngFor="let inc of filtered">
-
-          <!-- Main row -->
-          <tr>
-            <td class="col-title">{{ displayTitle(inc.title) }}</td>
-            <td>
-              <span class="mono" style="font-size:12px;background:var(--gray-100);padding:3px 8px;border-radius:4px;">
-                {{ inc.incidentType || '—' }}
-              </span>
-            </td>
-            <td>
-              <span *ngIf="scenarioOf(inc) as sc" class="badge-status running">
-                <i class="fas" [ngClass]="sc.icon"></i> {{ sc.scenario }}
-              </span>
-              <span *ngIf="!scenarioOf(inc)" class="badge-status idle">Hors catalogue</span>
-            </td>
-            <td>
-              <span *ngIf="scenarioOf(inc) as sc" class="mono" style="font-size:12px;background:var(--gray-100);padding:3px 8px;border-radius:4px;">
-                {{ sc.actionId }}
-              </span>
-              <span *ngIf="!scenarioOf(inc)" class="text-muted" style="font-size:12px;">— hors catalogue (voir détail)</span>
-            </td>
-            <td>
-              <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">{{ inc.severity }}</span>
-            </td>
-            <td>
-              <span class="badge-status" [ngClass]="(inc.status || '').toLowerCase()">{{ inc.status }}</span>
-            </td>
-            <td>
-              <div style="display:flex;gap:6px;justify-content:flex-end;">
-                <button class="btn btn-ghost btn-xs" (click)="toggleExpand(inc.id)">
-                  <i class="fas" [ngClass]="expandedId === inc.id ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
-                  {{ expandedId === inc.id ? 'Masquer' : 'Détail' }}
-                </button>
-                <button class="btn btn-xs"
-                        style="background:var(--orange-pale);color:var(--orange-primary);border:1px solid var(--orange-light);"
-                        (click)="openFeedback(inc.id)">
-                  <i class="fas fa-comment"></i>
-                  {{ feedbackIncidentId === inc.id ? 'Fermer' : 'Retour' }}
-                </button>
-              </div>
-            </td>
-          </tr>
-
-          <!-- Expanded detail : règle de RÉFÉRENCE (par type) ; l'exécution réelle figure dans le détail de l'incident -->
-          <tr *ngIf="expandedId === inc.id">
-            <td colspan="7" style="padding:0;">
-              <div style="background:var(--orange-pale);padding:20px 24px;border-top:1px solid rgba(255,121,0,0.15);">
-
-                <!-- Règle déterministe (scénario couvert) -->
-                <div *ngIf="scenarioOf(inc) as sc">
-                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-                    <span class="badge-status running"><i class="fas" [ngClass]="sc.icon"></i> {{ sc.scenario }}</span>
-                    <span class="mono" style="font-size:12px;">{{ sc.ruleId }}</span>
-                    <span class="badge-status"
-                          [ngClass]="sc.validationStatus === 'E2E_VALIDATED_HISTORICAL' ? 'running' : (sc.validationStatus === 'ESCALATION_BY_DESIGN' ? 'idle' : 'resolution_failed')">
-                      {{ validationText(sc.validationStatus) }}
+    @if (filtered.length === 0) {
+      <div class="empty-state">
+        <div class="empty-icon"><i class="fas fa-scale-balanced"></i></div>
+        <div class="empty-title">Aucune décision de remédiation</div>
+        <div class="empty-text">Aucune décision de remédiation ne correspond au filtre sélectionné.</div>
+      </div>
+    }
+    @if (filtered.length > 0) {
+      <div class="data-table-wrapper">
+        <table class="orange-table">
+          <thead>
+            <tr>
+              <th>Titre</th>
+              <th>Type d'incident</th>
+              <th>Scénario</th>
+              <th>Action (référence)</th>
+              <th>Sévérité</th>
+              <th>Statut</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (inc of filtered; track inc) {
+              <!-- Main row -->
+              <tr>
+                <td class="col-title">{{ displayTitle(inc.title) }}</td>
+                <td>
+                  <span class="mono" style="font-size:12px;background:var(--gray-100);padding:3px 8px;border-radius:4px;">
+                    {{ inc.incidentType || '—' }}
+                  </span>
+                </td>
+                <td>
+                  @if (scenarioOf(inc); as sc) {
+                    <span class="badge-status running">
+                      <i class="fas" [ngClass]="sc.icon"></i> {{ sc.scenario }}
                     </span>
+                  }
+                  @if (!scenarioOf(inc)) {
+                    <span class="badge-status idle">Hors catalogue</span>
+                  }
+                </td>
+                <td>
+                  @if (scenarioOf(inc); as sc) {
+                    <span class="mono" style="font-size:12px;background:var(--gray-100);padding:3px 8px;border-radius:4px;">
+                      {{ sc.actionId }}
+                    </span>
+                  }
+                  @if (!scenarioOf(inc)) {
+                    <span class="text-muted" style="font-size:12px;">— hors catalogue (voir détail)</span>
+                  }
+                </td>
+                <td>
+                  <span class="badge-status" [ngClass]="(inc.severity || '').toLowerCase()">{{ inc.severity }}</span>
+                </td>
+                <td>
+                  <span class="badge-status" [ngClass]="(inc.status || '').toLowerCase()">{{ inc.status }}</span>
+                </td>
+                <td>
+                  <div style="display:flex;gap:6px;justify-content:flex-end;">
+                    <button class="btn btn-ghost btn-xs" (click)="toggleExpand(inc.id)">
+                      <i class="fas" [ngClass]="expandedId === inc.id ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                      {{ expandedId === inc.id ? 'Masquer' : 'Détail' }}
+                    </button>
+                    <button class="btn btn-xs"
+                      style="background:var(--orange-pale);color:var(--orange-primary);border:1px solid var(--orange-light);"
+                      (click)="openFeedback(inc.id)">
+                      <i class="fas fa-comment"></i>
+                      {{ feedbackIncidentId === inc.id ? 'Fermer' : 'Retour' }}
+                    </button>
                   </div>
-                  <div class="grid-2" style="gap:20px;">
-                    <div>
-                      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Règle configurée (référence par type — n'implique pas l'exécution)</div>
-                      <div style="font-size:13px;line-height:1.7;color:var(--gray-700);">
-                        <div><strong>Condition :</strong> {{ sc.detectionCondition }} — {{ sc.thresholdNote }}</div>
-                        <div><strong>Action configurée :</strong> <span class="mono">{{ sc.actionId }}</span> — {{ sc.actionLabel }}</div>
-                        <div><strong>Mode d'exécution :</strong> {{ sc.executionMode }}</div>
-                        <div><strong>Escalade :</strong> {{ sc.escalationStrategy }}</div>
+                </td>
+              </tr>
+              <!-- Expanded detail : règle de RÉFÉRENCE (par type) ; l'exécution réelle figure dans le détail de l'incident -->
+              @if (expandedId === inc.id) {
+                <tr>
+                  <td colspan="7" style="padding:0;">
+                    <div style="background:var(--orange-pale);padding:20px 24px;border-top:1px solid rgba(255,121,0,0.15);">
+                      <!-- Règle déterministe (scénario couvert) -->
+                      @if (scenarioOf(inc); as sc) {
+                        <div>
+                          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                            <span class="badge-status running"><i class="fas" [ngClass]="sc.icon"></i> {{ sc.scenario }}</span>
+                            <span class="mono" style="font-size:12px;">{{ sc.ruleId }}</span>
+                            <span class="badge-status"
+                              [ngClass]="sc.validationStatus === 'E2E_VALIDATED_HISTORICAL' ? 'running' : (sc.validationStatus === 'ESCALATION_BY_DESIGN' ? 'idle' : 'resolution_failed')">
+                              {{ validationText(sc.validationStatus) }}
+                            </span>
+                          </div>
+                          <div class="grid-2" style="gap:20px;">
+                            <div>
+                              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Règle configurée (référence par type — n'implique pas l'exécution)</div>
+                              <div style="font-size:13px;line-height:1.7;color:var(--gray-700);">
+                                <div><strong>Condition :</strong> {{ sc.detectionCondition }} — {{ sc.thresholdNote }}</div>
+                                <div><strong>Action configurée :</strong> <span class="mono">{{ sc.actionId }}</span> — {{ sc.actionLabel }}</div>
+                                <div><strong>Mode d'exécution :</strong> {{ sc.executionMode }}</div>
+                                <div><strong>Escalade :</strong> {{ sc.escalationStrategy }}</div>
+                              </div>
+                            </div>
+                            <div>
+                              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Préconditions & vérification</div>
+                              <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--gray-700);line-height:1.6;">
+                                @for (p of sc.contextPreconditions; track p) {
+                                  <li>{{ p }}</li>
+                                }
+                                @for (v of sc.verificationCriteria; track v) {
+                                  <li><em>Vérif :</em> {{ v }}</li>
+                                }
+                              </ul>
+                            </div>
+                          </div>
+                          <div style="font-size:11px;color:var(--gray-500);margin-top:10px;">
+                            <i class="fas fa-circle-info" style="margin-right:5px;"></i>Configuration de RÉFÉRENCE par type (n'implique pas l'exécution) ; l'action réellement exécutée figure dans le détail de l'incident. {{ sc.validationNote }} — source : <span class="mono">{{ sc.configSource }}</span>
+                          </div>
+                        </div>
+                      }
+                      <!-- Type hors catalogue déterministe : l'action réelle figure dans le détail de l'incident -->
+                      @if (!scenarioOf(inc)) {
+                        <div style="font-size:13px;color:var(--gray-700);line-height:1.7;margin-bottom:12px;">
+                          Aucune règle de catalogue déterministe (CPU, VM_DOWN, DISK) ne couvre le type
+                          <span class="mono">{{ inc.incidentType || '(non renseigné)' }}</span>.
+                          L'<strong>action réellement enregistrée</strong> pour cet incident est visible dans sa page de détail.
+                        </div>
+                      }
+                      <div class="grid-2" style="gap:20px;margin-top:14px;">
+                        <div>
+                          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Description de l'incident</div>
+                          <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ inc.description || 'Aucune description.' }}</div>
+                        </div>
+                        <div>
+                          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Qualification enregistrée</div>
+                          @if (inc.explanation) {
+                            <div style="font-size:13px;line-height:1.7;color:var(--gray-600);font-style:italic;background:white;padding:12px;border-radius:6px;border-left:2px solid var(--orange-primary);">
+                              {{ inc.explanation }}
+                            </div>
+                          }
+                          @if (!inc.explanation) {
+                            <div class="text-muted" style="font-size:13px;">NON COLLECTÉ</div>
+                          }
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,121,0,0.15);">
+                        <span class="text-muted" style="font-size:13px;">Créé : <strong style="color:var(--gray-800);">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</strong></span>
                       </div>
                     </div>
-                    <div>
-                      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Préconditions & vérification</div>
-                      <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--gray-700);line-height:1.6;">
-                        <li *ngFor="let p of sc.contextPreconditions">{{ p }}</li>
-                        <li *ngFor="let v of sc.verificationCriteria"><em>Vérif :</em> {{ v }}</li>
-                      </ul>
-                    </div>
-                  </div>
-                  <div style="font-size:11px;color:var(--gray-500);margin-top:10px;">
-                    <i class="fas fa-circle-info" style="margin-right:5px;"></i>Configuration de RÉFÉRENCE par type (n'implique pas l'exécution) ; l'action réellement exécutée figure dans le détail de l'incident. {{ sc.validationNote }} — source : <span class="mono">{{ sc.configSource }}</span>
-                  </div>
-                </div>
-
-                <!-- Type hors catalogue déterministe : l'action réelle figure dans le détail de l'incident -->
-                <div *ngIf="!scenarioOf(inc)" style="font-size:13px;color:var(--gray-700);line-height:1.7;margin-bottom:12px;">
-                  Aucune règle de catalogue déterministe (CPU, VM_DOWN, DISK) ne couvre le type
-                  <span class="mono">{{ inc.incidentType || '(non renseigné)' }}</span>.
-                  L'<strong>action réellement enregistrée</strong> pour cet incident est visible dans sa page de détail.
-                </div>
-
-                <div class="grid-2" style="gap:20px;margin-top:14px;">
-                  <div>
-                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Description de l'incident</div>
-                    <div style="font-size:14px;line-height:1.7;color:var(--gray-700);">{{ inc.description || 'Aucune description.' }}</div>
-                  </div>
-                  <div>
-                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--gray-400);margin-bottom:6px;">Qualification enregistrée</div>
-                    <div *ngIf="inc.explanation" style="font-size:13px;line-height:1.7;color:var(--gray-600);font-style:italic;background:white;padding:12px;border-radius:6px;border-left:2px solid var(--orange-primary);">
-                      {{ inc.explanation }}
-                    </div>
-                    <div *ngIf="!inc.explanation" class="text-muted" style="font-size:13px;">NON COLLECTÉ</div>
-                  </div>
-                </div>
-                <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,121,0,0.15);">
-                  <span class="text-muted" style="font-size:13px;">Créé : <strong style="color:var(--gray-800);">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</strong></span>
-                </div>
-              </div>
-            </td>
-          </tr>
-
-          <!-- Feedback row -->
-          <tr *ngIf="feedbackIncidentId === inc.id">
-            <td colspan="7" style="padding:0;">
-              <div style="background:#FFF8F0;padding:18px 24px;border-top:1px solid var(--orange-light);">
-                <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--gray-900);">
-                  <i class="fas fa-comment-dots" style="color:var(--orange-primary);margin-right:6px;"></i>
-                  Retour opérateur sur la décision
-                </div>
-                <div style="display:flex;gap:10px;margin-bottom:12px;">
-                  <button class="btn btn-sm btn-success" [style.opacity]="feedbackCorrect === true ? '1' : '0.5'"
+                  </td>
+                </tr>
+              }
+              <!-- Feedback row -->
+              @if (feedbackIncidentId === inc.id) {
+                <tr>
+                  <td colspan="7" style="padding:0;">
+                    <div style="background:#FFF8F0;padding:18px 24px;border-top:1px solid var(--orange-light);">
+                      <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--gray-900);">
+                        <i class="fas fa-comment-dots" style="color:var(--orange-primary);margin-right:6px;"></i>
+                        Retour opérateur sur la décision
+                      </div>
+                      <div style="display:flex;gap:10px;margin-bottom:12px;">
+                        <button class="btn btn-sm btn-success" [style.opacity]="feedbackCorrect === true ? '1' : '0.5'"
                           (click)="feedbackCorrect=true">
-                    <i class="fas fa-thumbs-up"></i> Décision pertinente
-                  </button>
-                  <button class="btn btn-sm btn-danger" [style.opacity]="feedbackCorrect === false ? '1' : '0.5'"
+                          <i class="fas fa-thumbs-up"></i> Décision pertinente
+                        </button>
+                        <button class="btn btn-sm btn-danger" [style.opacity]="feedbackCorrect === false ? '1' : '0.5'"
                           (click)="feedbackCorrect=false">
-                    <i class="fas fa-thumbs-down"></i> Décision à revoir
-                  </button>
-                </div>
-                <input [(ngModel)]="feedbackComment"
-                       class="form-control"
-                       style="max-width:500px;margin-bottom:12px;"
-                       placeholder="Commentaire optionnel…">
-                <div style="display:flex;align-items:center;gap:12px;">
-                  <button class="btn btn-orange btn-sm" (click)="submitFeedback()">
-                    <i class="fas fa-paper-plane"></i> Envoyer
-                  </button>
-                  <span *ngIf="feedbackSuccess" style="color:var(--color-success);font-size:13px;font-weight:600;">
-                    <i class="fas fa-circle-check"></i> {{ feedbackSuccess }}
-                  </span>
-                </div>
-              </div>
-            </td>
-          </tr>
-
-        </ng-container>
-      </tbody>
-    </table>
-  </div>
-</div>
+                          <i class="fas fa-thumbs-down"></i> Décision à revoir
+                        </button>
+                      </div>
+                      <input [(ngModel)]="feedbackComment"
+                        class="form-control"
+                        style="max-width:500px;margin-bottom:12px;"
+                        placeholder="Commentaire optionnel…">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                          <button class="btn btn-orange btn-sm" (click)="submitFeedback()">
+                            <i class="fas fa-paper-plane"></i> Envoyer
+                          </button>
+                          @if (feedbackSuccess) {
+                            <span style="color:var(--color-success);font-size:13px;font-weight:600;">
+                              <i class="fas fa-circle-check"></i> {{ feedbackSuccess }}
+                            </span>
+                          }
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  }

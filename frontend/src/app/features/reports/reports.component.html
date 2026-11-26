@@ -1,195 +1,262 @@
 <div class="org-scope">
-<div class="org-page">
+  <div class="org-page">
 
-  <div class="page-header">
-    <div>
-      <h1 class="page-title"><i class="fas fa-file-lines"></i> Gestion des rapports</h1>
-      <p class="page-subtitle">Rapports calculés sur les données réelles de la plateforme : génération manuelle ou périodique, comparaison entre périodes, export PDF et CSV.</p>
-    </div>
-    <div class="header-actions">
-      <button *ngIf="canGenerate" class="btn-primary" (click)="openGenerate()"><i class="fas fa-file-circle-plus"></i> Générer un rapport</button>
-    </div>
-  </div>
-
-  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
-  <div *ngIf="error" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
-
-  <div class="tabs">
-    <button class="tab" [class.active]="tab === 'reports'" (click)="setTab('reports')"><i class="fas fa-folder-open"></i> Rapports générés</button>
-    <button class="tab" [class.active]="tab === 'stats'" (click)="setTab('stats')"><i class="fas fa-chart-column"></i> Statistiques d'activité</button>
-    <button class="tab" [class.active]="tab === 'schedules'" (click)="setTab('schedules')"><i class="fas fa-calendar-check"></i> Plannings périodiques</button>
-  </div>
-
-  <!-- ══ Rapports générés ═══════════════════════════════════════════════════ -->
-  <ng-container *ngIf="tab === 'reports'">
-    <div class="filters-bar">
-      <select class="filter-select" [(ngModel)]="typeFilter" (ngModelChange)="load(true)">
-        <option value="">Tous les types</option>
-        <option *ngFor="let t of types" [value]="t.type">{{ t.label }}</option>
-      </select>
-      <button class="btn-secondary" (click)="load()"><i class="fas fa-rotate"></i> Actualiser</button>
-      <span class="results-count">{{ total }} rapport(s)</span>
-    </div>
-
-    <div class="table-card">
-      <div *ngIf="loading" class="table-loading"><div class="spinner"></div> Chargement…</div>
-      <table *ngIf="!loading" class="org-table">
-        <thead>
-          <tr><th>Rapport</th><th>Origine</th><th>Généré le</th><th>Par</th><th>Résumé</th><th>Statut</th><th>Actions</th></tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let r of items" class="clickable" (click)="open(r)">
-            <td><span class="text-strong">{{ r.title }}</span><div class="text-muted text-small" *ngIf="r.comparePrevious">avec comparaison à la période précédente</div></td>
-            <td><span class="badge" [ngClass]="r.trigger === 'SCHEDULED' ? 'st-in_progress' : 'st-planned'">{{ r.trigger === 'SCHEDULED' ? 'Périodique' : 'Manuel' }}</span></td>
-            <td style="white-space:nowrap">{{ fmt(r.generatedAt) }}</td>
-            <td>{{ r.generatedBy || '—' }}</td>
-            <td class="text-small">{{ r.summary }}</td>
-            <td><span class="badge" [ngClass]="r.status === 'COMPLETED' ? 'st-completed' : 'st-failure'">{{ r.status === 'COMPLETED' ? 'Terminé' : 'Échec' }}</span></td>
-            <td class="actions-cell" (click)="$event.stopPropagation()">
-              <button class="btn-icon btn-view" title="Consulter" (click)="open(r)"><i class="fas fa-eye"></i></button>
-              <ng-container *ngIf="canExport && r.status === 'COMPLETED'">
-                <button class="btn-icon btn-edit" title="Exporter en PDF" [disabled]="exportingId === r.id" (click)="exportReport(r, 'pdf')"><i class="fas fa-file-pdf"></i></button>
-                <button class="btn-icon btn-ok" title="Exporter en CSV" [disabled]="exportingId === r.id" (click)="exportReport(r, 'csv')"><i class="fas fa-file-csv"></i></button>
-              </ng-container>
-            </td>
-          </tr>
-          <tr *ngIf="items.length === 0">
-            <td colspan="7" class="org-empty"><i class="fas fa-file-circle-question"></i><p>Aucun rapport généré pour le moment.</p></td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="pager" *ngIf="!loading && total > 0">
-        <span>Page {{ page + 1 }} / {{ totalPages }}</span>
-        <div class="pager-btns">
-          <button (click)="goTo(0)" [disabled]="page === 0">«</button>
-          <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
-          <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
-          <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
-        </div>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-file-lines"></i> Gestion des rapports</h1>
+        <p class="page-subtitle">Rapports calculés sur les données réelles de la plateforme : génération manuelle ou périodique, comparaison entre périodes, export PDF et CSV.</p>
+      </div>
+      <div class="header-actions">
+        @if (canGenerate) {
+          <button class="btn-primary" (click)="openGenerate()"><i class="fas fa-file-circle-plus"></i> Générer un rapport</button>
+        }
       </div>
     </div>
-  </ng-container>
+
+    @if (success) {
+      <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+    }
+    @if (error) {
+      <div class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+    }
+
+    <div class="tabs">
+      <button class="tab" [class.active]="tab === 'reports'" (click)="setTab('reports')"><i class="fas fa-folder-open"></i> Rapports générés</button>
+      <button class="tab" [class.active]="tab === 'stats'" (click)="setTab('stats')"><i class="fas fa-chart-column"></i> Statistiques d'activité</button>
+      <button class="tab" [class.active]="tab === 'schedules'" (click)="setTab('schedules')"><i class="fas fa-calendar-check"></i> Plannings périodiques</button>
+    </div>
+
+    <!-- ══ Rapports générés ═══════════════════════════════════════════════════ -->
+    @if (tab === 'reports') {
+      <div class="filters-bar">
+        <select class="filter-select" [(ngModel)]="typeFilter" (ngModelChange)="load(true)">
+          <option value="">Tous les types</option>
+          @for (t of types; track t) {
+            <option [value]="t.type">{{ t.label }}</option>
+          }
+        </select>
+        <button class="btn-secondary" (click)="load()"><i class="fas fa-rotate"></i> Actualiser</button>
+        <span class="results-count">{{ total }} rapport(s)</span>
+      </div>
+      <div class="table-card">
+        @if (loading) {
+          <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+        }
+        @if (!loading) {
+          <table class="org-table">
+            <thead>
+              <tr><th>Rapport</th><th>Origine</th><th>Généré le</th><th>Par</th><th>Résumé</th><th>Statut</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              @for (r of items; track r) {
+                <tr class="clickable" (click)="open(r)">
+                  <td><span class="text-strong">{{ r.title }}</span>@if (r.comparePrevious) {
+                  <div class="text-muted text-small">avec comparaison à la période précédente</div>
+                }</td>
+                <td><span class="badge" [ngClass]="r.trigger === 'SCHEDULED' ? 'st-in_progress' : 'st-planned'">{{ r.trigger === 'SCHEDULED' ? 'Périodique' : 'Manuel' }}</span></td>
+                <td style="white-space:nowrap">{{ fmt(r.generatedAt) }}</td>
+                <td>{{ r.generatedBy || '—' }}</td>
+                <td class="text-small">{{ r.summary }}</td>
+                <td><span class="badge" [ngClass]="r.status === 'COMPLETED' ? 'st-completed' : 'st-failure'">{{ r.status === 'COMPLETED' ? 'Terminé' : 'Échec' }}</span></td>
+                <td class="actions-cell" (click)="$event.stopPropagation()">
+                  <button class="btn-icon btn-view" title="Consulter" (click)="open(r)"><i class="fas fa-eye"></i></button>
+                  @if (canExport && r.status === 'COMPLETED') {
+                    <button class="btn-icon btn-edit" title="Exporter en PDF" [disabled]="exportingId === r.id" (click)="exportReport(r, 'pdf')"><i class="fas fa-file-pdf"></i></button>
+                    <button class="btn-icon btn-ok" title="Exporter en CSV" [disabled]="exportingId === r.id" (click)="exportReport(r, 'csv')"><i class="fas fa-file-csv"></i></button>
+                  }
+                </td>
+              </tr>
+            }
+            @if (items.length === 0) {
+              <tr>
+                <td colspan="7" class="org-empty"><i class="fas fa-file-circle-question"></i><p>Aucun rapport généré pour le moment.</p></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+      @if (!loading && total > 0) {
+        <div class="pager">
+          <span>Page {{ page + 1 }} / {{ totalPages }}</span>
+          <div class="pager-btns">
+            <button (click)="goTo(0)" [disabled]="page === 0">«</button>
+            <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
+            <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
+            <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+          </div>
+        </div>
+      }
+    </div>
+  }
 
   <!-- ══ Statistiques d'activité ════════════════════════════════════════════ -->
-  <ng-container *ngIf="tab === 'stats'">
+  @if (tab === 'stats') {
     <div class="card card-pad">
       <div class="card-title"><i class="fas fa-chart-column"></i> Activités de la plateforme sur une période</div>
-      <div *ngIf="statsError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ statsError }}</div>
+      @if (statsError) {
+        <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ statsError }}</div>
+      }
       <div class="filters-bar" style="margin-bottom:0">
-        <button *ngFor="let p of presets" class="btn-secondary" (click)="applyPreset('stats', p)">{{ presetLabels[p] }}</button>
+        @for (p of presets; track p) {
+          <button class="btn-secondary" (click)="applyPreset('stats', p)">{{ presetLabels[p] }}</button>
+        }
         <label class="filter-check">Du <input class="filter-input" type="date" [(ngModel)]="statsFrom"></label>
         <label class="filter-check">au <input class="filter-input" type="date" [(ngModel)]="statsTo"></label>
         <label class="filter-check"><input type="checkbox" [(ngModel)]="statsCompare"> Comparer à la période précédente</label>
         <button class="btn-primary" (click)="computeStats()" [disabled]="statsLoading">
-          <span *ngIf="statsLoading" class="btn-spinner"></span><i *ngIf="!statsLoading" class="fas fa-calculator"></i> Calculer
-        </button>
+          @if (statsLoading) {
+            <span class="btn-spinner"></span>
+            }@if (!statsLoading) {
+            <i class="fas fa-calculator"></i>
+            } Calculer
+          </button>
+        </div>
       </div>
-    </div>
-    <div *ngIf="statsLoading" class="table-loading"><div class="spinner"></div> Calcul en cours…</div>
-    <app-report-view *ngIf="statsContent && !statsLoading" [content]="statsContent"></app-report-view>
-    <div *ngIf="!statsContent && !statsLoading" class="alert-info"><i class="fas fa-circle-info"></i> Choisissez une période puis lancez le calcul. Ces statistiques ne sont pas enregistrées : utilisez « Générer un rapport » pour en conserver une trace.</div>
-  </ng-container>
+      @if (statsLoading) {
+        <div class="table-loading"><div class="spinner"></div> Calcul en cours…</div>
+      }
+      @if (statsContent && !statsLoading) {
+        <app-report-view [content]="statsContent"></app-report-view>
+      }
+      @if (!statsContent && !statsLoading) {
+        <div class="alert-info"><i class="fas fa-circle-info"></i> Choisissez une période puis lancez le calcul. Ces statistiques ne sont pas enregistrées : utilisez « Générer un rapport » pour en conserver une trace.</div>
+      }
+    }
 
-  <!-- ══ Plannings périodiques ══════════════════════════════════════════════ -->
-  <ng-container *ngIf="tab === 'schedules'">
-    <div class="alert-info"><i class="fas fa-circle-info"></i>
+    <!-- ══ Plannings périodiques ══════════════════════════════════════════════ -->
+    @if (tab === 'schedules') {
+      <div class="alert-info"><i class="fas fa-circle-info"></i>
       Un rapport est généré automatiquement pour la dernière période complète (hier, semaine précédente ou mois précédent) — une seule fois par période, sans doublon.
     </div>
-    <div class="card card-pad" *ngIf="canSchedule">
-      <div class="card-title"><i class="fas fa-calendar-plus"></i> Nouveau planning</div>
-      <div class="filters-bar" style="margin-bottom:0">
-        <select class="filter-select" [(ngModel)]="newScheduleType">
-          <option *ngFor="let t of types" [value]="t.type">{{ t.label }}</option>
-        </select>
-        <select class="filter-select" [(ngModel)]="newScheduleFrequency">
-          <option *ngFor="let f of frequencies" [value]="f">{{ frequencyLabels[f] }}</option>
-        </select>
-        <button class="btn-primary" (click)="addSchedule()" [disabled]="scheduleBusy"><i class="fas fa-plus"></i> Ajouter</button>
+    @if (canSchedule) {
+      <div class="card card-pad">
+        <div class="card-title"><i class="fas fa-calendar-plus"></i> Nouveau planning</div>
+        <div class="filters-bar" style="margin-bottom:0">
+          <select class="filter-select" [(ngModel)]="newScheduleType">
+            @for (t of types; track t) {
+              <option [value]="t.type">{{ t.label }}</option>
+            }
+          </select>
+          <select class="filter-select" [(ngModel)]="newScheduleFrequency">
+            @for (f of frequencies; track f) {
+              <option [value]="f">{{ frequencyLabels[f] }}</option>
+            }
+          </select>
+          <button class="btn-primary" (click)="addSchedule()" [disabled]="scheduleBusy"><i class="fas fa-plus"></i> Ajouter</button>
+        </div>
       </div>
-    </div>
+    }
     <div class="table-card">
-      <div *ngIf="schedulesLoading" class="table-loading"><div class="spinner"></div> Chargement…</div>
-      <table *ngIf="!schedulesLoading" class="org-table">
-        <thead><tr><th>Rapport</th><th>Fréquence</th><th>État</th><th>Créé par</th><th>Dernière génération</th><th>Actions</th></tr></thead>
-        <tbody>
-          <tr *ngFor="let s of schedules" [class.row-muted]="!s.enabled">
-            <td class="text-strong">{{ s.typeLabel }}</td>
-            <td>{{ frequencyLabels[s.frequency] }}</td>
-            <td><span class="badge" [ngClass]="s.enabled ? 'st-completed' : 'st-cancelled'">{{ s.enabled ? 'Actif' : 'Désactivé' }}</span></td>
-            <td>{{ s.createdBy || '—' }}</td>
-            <td>{{ fmt(s.lastGeneratedAt) }}</td>
-            <td class="actions-cell">
-              <ng-container *ngIf="canSchedule">
-                <button class="btn-icon btn-warn" [title]="s.enabled ? 'Désactiver' : 'Activer'" [disabled]="scheduleBusy" (click)="toggleSchedule(s)">
-                  <i class="fas" [ngClass]="s.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i></button>
-                <button class="btn-icon btn-delete" title="Supprimer" [disabled]="scheduleBusy" (click)="removeSchedule(s)"><i class="fas fa-trash"></i></button>
-              </ng-container>
-            </td>
-          </tr>
-          <tr *ngIf="schedules.length === 0">
-            <td colspan="6" class="org-empty"><i class="fas fa-calendar-xmark"></i><p>Aucun planning défini.</p></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </ng-container>
-</div>
-
-<!-- ══ Génération ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showGenerate" (click)="showGenerate = false">
-  <div class="modal modal-lg" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-file-circle-plus"></i> Générer un rapport</h3>
-      <button class="modal-close" (click)="showGenerate = false"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <div class="section-title" style="margin-top:0">Type de rapport</div>
-      <div class="type-grid">
-        <button *ngFor="let t of types" type="button" class="type-card" [class.selected]="genType === t.type" (click)="genType = t.type">
-          <strong>{{ t.label }}</strong><span>{{ t.description }}</span>
-        </button>
+      @if (schedulesLoading) {
+        <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+      }
+      @if (!schedulesLoading) {
+        <table class="org-table">
+          <thead><tr><th>Rapport</th><th>Fréquence</th><th>État</th><th>Créé par</th><th>Dernière génération</th><th>Actions</th></tr></thead>
+          <tbody>
+            @for (s of schedules; track s) {
+              <tr [class.row-muted]="!s.enabled">
+                <td class="text-strong">{{ s.typeLabel }}</td>
+                <td>{{ frequencyLabels[s.frequency] }}</td>
+                <td><span class="badge" [ngClass]="s.enabled ? 'st-completed' : 'st-cancelled'">{{ s.enabled ? 'Actif' : 'Désactivé' }}</span></td>
+                <td>{{ s.createdBy || '—' }}</td>
+                <td>{{ fmt(s.lastGeneratedAt) }}</td>
+                <td class="actions-cell">
+                  @if (canSchedule) {
+                    <button class="btn-icon btn-warn" [title]="s.enabled ? 'Désactiver' : 'Activer'" [disabled]="scheduleBusy" (click)="toggleSchedule(s)">
+                      <i class="fas" [ngClass]="s.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i></button>
+                      <button class="btn-icon btn-delete" title="Supprimer" [disabled]="scheduleBusy" (click)="removeSchedule(s)"><i class="fas fa-trash"></i></button>
+                    }
+                  </td>
+                </tr>
+              }
+              @if (schedules.length === 0) {
+                <tr>
+                  <td colspan="6" class="org-empty"><i class="fas fa-calendar-xmark"></i><p>Aucun planning défini.</p></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
       </div>
-      <div class="section-title">Période d'analyse</div>
-      <div class="filters-bar">
-        <button *ngFor="let p of presets" type="button" class="btn-secondary" (click)="applyPreset('gen', p)">{{ presetLabels[p] }}</button>
-      </div>
-      <div class="form-row-2">
-        <div class="form-group"><label>Du <span class="required">*</span></label><input class="form-input" type="date" [(ngModel)]="genFrom"></div>
-        <div class="form-group"><label>Au (inclus) <span class="required">*</span></label><input class="form-input" type="date" [(ngModel)]="genTo"></div>
-      </div>
-      <label class="filter-check"><input type="checkbox" [(ngModel)]="genCompare"> Comparer à la période précédente de même durée</label>
-      <p class="hint">Période limitée à 366 jours, sans début dans le futur. Le rapport est calculé sur les données réelles et conservé dans la liste.</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="showGenerate = false">Annuler</button>
-      <button class="btn-primary" (click)="generate()" [disabled]="generating">
-        <span *ngIf="generating" class="btn-spinner"></span> {{ generating ? 'Génération…' : 'Générer' }}
-      </button>
-    </div>
+    }
   </div>
-</div>
 
-<!-- ══ Consultation ═════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="viewing" (click)="closeViewer()">
-  <div class="modal modal-xl" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-file-lines"></i> {{ viewing.report.title }}</h3>
-      <button class="modal-close" (click)="closeViewer()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="viewLoading" class="table-loading"><div class="spinner"></div> Chargement du rapport…</div>
-      <div *ngIf="!viewLoading && viewing.errorMessage" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ viewing.errorMessage }}</div>
-      <div *ngIf="!viewLoading && !viewContent && !viewing.errorMessage" class="alert-error"><i class="fas fa-exclamation-circle"></i> Ce rapport n'a pas de contenu exploitable.</div>
-      <app-report-view *ngIf="!viewLoading && viewContent" [content]="viewContent"></app-report-view>
-    </div>
-    <div class="modal-footer">
-      <ng-container *ngIf="canExport && viewing.report.status === 'COMPLETED'">
-        <button class="btn-secondary" [disabled]="exportingId === viewing.report.id" (click)="exportReport(viewing.report, 'pdf')"><i class="fas fa-file-pdf"></i> PDF</button>
-        <button class="btn-secondary" [disabled]="exportingId === viewing.report.id" (click)="exportReport(viewing.report, 'csv')"><i class="fas fa-file-csv"></i> CSV</button>
-      </ng-container>
-      <button class="btn-secondary" (click)="closeViewer()">Fermer</button>
-    </div>
+  <!-- ══ Génération ═══════════════════════════════════════════════════════════ -->
+  @if (showGenerate) {
+    <div class="modal-overlay" (click)="showGenerate = false">
+      <div class="modal modal-lg" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3><i class="fas fa-file-circle-plus"></i> Générer un rapport</h3>
+          <button class="modal-close" (click)="showGenerate = false"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          @if (modalError) {
+            <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+          }
+          <div class="section-title" style="margin-top:0">Type de rapport</div>
+          <div class="type-grid">
+            @for (t of types; track t) {
+              <button type="button" class="type-card" [class.selected]="genType === t.type" (click)="genType = t.type">
+                <strong>{{ t.label }}</strong><span>{{ t.description }}</span>
+              </button>
+            }
+          </div>
+          <div class="section-title">Période d'analyse</div>
+          <div class="filters-bar">
+            @for (p of presets; track p) {
+              <button type="button" class="btn-secondary" (click)="applyPreset('gen', p)">{{ presetLabels[p] }}</button>
+            }
+          </div>
+          <div class="form-row-2">
+            <div class="form-group"><label>Du <span class="required">*</span></label><input class="form-input" type="date" [(ngModel)]="genFrom"></div>
+            <div class="form-group"><label>Au (inclus) <span class="required">*</span></label><input class="form-input" type="date" [(ngModel)]="genTo"></div>
+          </div>
+          <label class="filter-check"><input type="checkbox" [(ngModel)]="genCompare"> Comparer à la période précédente de même durée</label>
+          <p class="hint">Période limitée à 366 jours, sans début dans le futur. Le rapport est calculé sur les données réelles et conservé dans la liste.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" (click)="showGenerate = false">Annuler</button>
+          <button class="btn-primary" (click)="generate()" [disabled]="generating">
+            @if (generating) {
+              <span class="btn-spinner"></span>
+              } {{ generating ? 'Génération…' : 'Générer' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- ══ Consultation ═════════════════════════════════════════════════════════ -->
+    @if (viewing) {
+      <div class="modal-overlay" (click)="closeViewer()">
+        <div class="modal modal-xl" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3><i class="fas fa-file-lines"></i> {{ viewing.report.title }}</h3>
+            <button class="modal-close" (click)="closeViewer()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            @if (viewLoading) {
+              <div class="table-loading"><div class="spinner"></div> Chargement du rapport…</div>
+            }
+            @if (!viewLoading && viewing.errorMessage) {
+              <div class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ viewing.errorMessage }}</div>
+            }
+            @if (!viewLoading && !viewContent && !viewing.errorMessage) {
+              <div class="alert-error"><i class="fas fa-exclamation-circle"></i> Ce rapport n'a pas de contenu exploitable.</div>
+            }
+            @if (!viewLoading && viewContent) {
+              <app-report-view [content]="viewContent"></app-report-view>
+            }
+          </div>
+          <div class="modal-footer">
+            @if (canExport && viewing.report.status === 'COMPLETED') {
+              <button class="btn-secondary" [disabled]="exportingId === viewing.report.id" (click)="exportReport(viewing.report, 'pdf')"><i class="fas fa-file-pdf"></i> PDF</button>
+              <button class="btn-secondary" [disabled]="exportingId === viewing.report.id" (click)="exportReport(viewing.report, 'csv')"><i class="fas fa-file-csv"></i> CSV</button>
+            }
+            <button class="btn-secondary" (click)="closeViewer()">Fermer</button>
+          </div>
+        </div>
+      </div>
+    }
   </div>
-</div>
-</div>

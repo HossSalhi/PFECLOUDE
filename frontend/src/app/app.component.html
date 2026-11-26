@@ -1,303 +1,312 @@
-<div class="app-layout" *ngIf="authService.isLoggedIn(); else loginView">
-
-  <!-- ══ Sidebar ════════════════════════════════════════════════════════════ -->
-  <aside class="sidebar">
-
-    <!-- Brand -->
-    <div class="sidebar-header">
-      <app-orange-logo [size]="52" style="filter:drop-shadow(0 3px 12px rgba(255,121,0,.5));flex-shrink:0;"></app-orange-logo>
-      <div class="brand-label">
-        <div class="brand-name">HELIOS</div>
-        <div class="brand-sub">Supervision &amp; Auto-remédiation</div>
+@if (authService.isLoggedIn()) {
+  <div class="app-layout">
+    <!-- ══ Sidebar ════════════════════════════════════════════════════════════ -->
+    <aside class="sidebar">
+      <!-- Brand -->
+      <div class="sidebar-header">
+        <app-orange-logo [size]="52" style="filter:drop-shadow(0 3px 12px rgba(255,121,0,.5));flex-shrink:0;"></app-orange-logo>
+        <div class="brand-label">
+          <div class="brand-name">HELIOS</div>
+          <div class="brand-sub">Supervision &amp; Auto-remédiation</div>
+        </div>
       </div>
-    </div>
-
-    <!-- Nav -->
-    <nav class="sidebar-nav">
-
-      <!-- Role pill -->
-      <div class="sidebar-role-badge" [ngClass]="'srb-' + (authService.getRole() || 'user').toLowerCase().replace('_','-')">
+      <!-- Nav -->
+      <nav class="sidebar-nav">
+        <!-- Role pill -->
+        <div class="sidebar-role-badge" [ngClass]="'srb-' + (authService.getRole() || 'user').toLowerCase().replace('_','-')">
         <i class="fas" [ngClass]="{
           'fa-crown':       authService.isSuperAdmin(),
           'fa-user-shield': authService.isAdmin(),
           'fa-user':        authService.isUser()
         }"></i>
-        <span>{{ authService.isSuperAdmin() ? 'Super Admin' : authService.isAdmin() ? 'Admin' : 'Utilisateur' }}</span>
+          <span>{{ authService.isSuperAdmin() ? 'Super Admin' : authService.isAdmin() ? 'Admin' : 'Utilisateur' }}</span>
+        </div>
+        <!-- Surveillance -->
+        <div class="nav-section-label">Surveillance</div>
+        <a routerLink="/dashboard" class="nav-item" [class.active]="isActive('/dashboard')">
+          <i class="fas fa-chart-line nav-icon"></i>
+          <span class="nav-label">Dashboard</span>
+        </a>
+        <a routerLink="/incidents" class="nav-item" [class.active]="isActive('/incidents')">
+          <i class="fas fa-triangle-exclamation nav-icon"></i>
+          <span class="nav-label">Incidents</span>
+          @if (incidentBadge > 0) {
+            <span class="nav-badge">{{ incidentBadge }}</span>
+          }
+        </a>
+        <a routerLink="/applications" class="nav-item" [class.active]="isActive('/applications')">
+          <i class="fas fa-cubes nav-icon"></i>
+          <span class="nav-label">Applications</span>
+        </a>
+        <a routerLink="/infrastructure" class="nav-item" [class.active]="isActive('/infrastructure')">
+          <i class="fas fa-server nav-icon"></i>
+          <span class="nav-label">Infrastructure</span>
+        </a>
+        <!-- Remédiation déterministe -->
+        @if (authService.isAtLeastAdmin()) {
+          <div class="nav-divider"></div>
+          <div class="nav-section-label">Remédiation déterministe</div>
+          <a routerLink="/ai-decisions" class="nav-item" [class.active]="isActive('/ai-decisions')">
+            <i class="fas fa-scale-balanced nav-icon"></i>
+            <span class="nav-label">Décisions de remédiation</span>
+          </a>
+          <a routerLink="/remediation" class="nav-item" [class.active]="isActive('/remediation')">
+            <i class="fas fa-wrench nav-icon"></i>
+            <span class="nav-label">Remédiation</span>
+          </a>
+          <a routerLink="/tasks" class="nav-item" [class.active]="isActive('/tasks')">
+            <i class="fas fa-circle-xmark nav-icon"></i>
+            <span class="nav-label">Remédiations Échouées</span>
+            @if (taskBadge > 0) {
+              <span class="nav-badge">{{ taskBadge }}</span>
+            }
+          </a>
+        }
+        <!-- Administration -->
+        @if (authService.isAtLeastAdmin()) {
+          <div class="nav-divider"></div>
+          <div class="nav-section-label">Administration</div>
+          <a routerLink="/users" class="nav-item" [class.active]="isActive('/users')">
+            <i class="fas fa-users-cog nav-icon"></i>
+            <span class="nav-label">Utilisateurs</span>
+          </a>
+        }
+        <!-- Organisation : maintenance, équipes, tâches, audit, rapports (visibilité selon les permissions du Backend) -->
+        @if (perms.canAny('MAINTENANCE_VIEW', 'TEAMS_VIEW', 'TASKS_VIEW', 'AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL', 'REPORTS_VIEW')) {
+          <div class="nav-divider"></div>
+          <div class="nav-section-label">Organisation</div>
+          @if (perms.can('MAINTENANCE_VIEW')) {
+            <a routerLink="/maintenance" class="nav-item" [class.active]="isActive('/maintenance')">
+              <i class="fas fa-screwdriver-wrench nav-icon"></i>
+              <span class="nav-label">Maintenance</span>
+            </a>
+          }
+          @if (perms.can('TEAMS_VIEW')) {
+            <a routerLink="/teams" class="nav-item" [class.active]="isActive('/teams')">
+              <i class="fas fa-people-group nav-icon"></i>
+              <span class="nav-label">Équipes</span>
+            </a>
+          }
+          @if (perms.can('TASKS_VIEW')) {
+            <a routerLink="/team-tasks" class="nav-item"
+              [class.active]="isActive('/team-tasks') || router.url.startsWith('/team-tasks?')">
+              <i class="fas fa-list-check nav-icon"></i>
+              <span class="nav-label">Tâches d'équipe</span>
+            </a>
+          }
+          @if (perms.canAny('AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL')) {
+            <a routerLink="/audit-trail" class="nav-item" [class.active]="isActive('/audit-trail')">
+              <i class="fas fa-clipboard-check nav-icon"></i>
+              <span class="nav-label">Audit et activités</span>
+            </a>
+          }
+          @if (perms.can('REPORTS_VIEW')) {
+            <a routerLink="/reports" class="nav-item" [class.active]="isActive('/reports')">
+              <i class="fas fa-file-lines nav-icon"></i>
+              <span class="nav-label">Rapports</span>
+            </a>
+          }
+        }
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-version">HELIOS v2.0 · Orange Tunisie</div>
       </div>
-
-      <!-- Surveillance -->
-      <div class="nav-section-label">Surveillance</div>
-
-      <a routerLink="/dashboard" class="nav-item" [class.active]="isActive('/dashboard')">
-        <i class="fas fa-chart-line nav-icon"></i>
-        <span class="nav-label">Dashboard</span>
-      </a>
-
-      <a routerLink="/incidents" class="nav-item" [class.active]="isActive('/incidents')">
-        <i class="fas fa-triangle-exclamation nav-icon"></i>
-        <span class="nav-label">Incidents</span>
-        <span *ngIf="incidentBadge > 0" class="nav-badge">{{ incidentBadge }}</span>
-      </a>
-
-      <a routerLink="/applications" class="nav-item" [class.active]="isActive('/applications')">
-        <i class="fas fa-cubes nav-icon"></i>
-        <span class="nav-label">Applications</span>
-      </a>
-
-      <a routerLink="/infrastructure" class="nav-item" [class.active]="isActive('/infrastructure')">
-        <i class="fas fa-server nav-icon"></i>
-        <span class="nav-label">Infrastructure</span>
-      </a>
-
-      <!-- Remédiation déterministe -->
-      <ng-container *ngIf="authService.isAtLeastAdmin()">
-        <div class="nav-divider"></div>
-        <div class="nav-section-label">Remédiation déterministe</div>
-
-        <a routerLink="/ai-decisions" class="nav-item" [class.active]="isActive('/ai-decisions')">
-          <i class="fas fa-scale-balanced nav-icon"></i>
-          <span class="nav-label">Décisions de remédiation</span>
-        </a>
-
-        <a routerLink="/remediation" class="nav-item" [class.active]="isActive('/remediation')">
-          <i class="fas fa-wrench nav-icon"></i>
-          <span class="nav-label">Remédiation</span>
-        </a>
-
-        <a routerLink="/tasks" class="nav-item" [class.active]="isActive('/tasks')">
-          <i class="fas fa-circle-xmark nav-icon"></i>
-          <span class="nav-label">Remédiations Échouées</span>
-          <span *ngIf="taskBadge > 0" class="nav-badge">{{ taskBadge }}</span>
-        </a>
-      </ng-container>
-
-      <!-- Administration -->
-      <ng-container *ngIf="authService.isAtLeastAdmin()">
-        <div class="nav-divider"></div>
-        <div class="nav-section-label">Administration</div>
-
-        <a routerLink="/users" class="nav-item" [class.active]="isActive('/users')">
-          <i class="fas fa-users-cog nav-icon"></i>
-          <span class="nav-label">Utilisateurs</span>
-        </a>
-      </ng-container>
-
-      <!-- Organisation : maintenance, équipes, tâches, audit, rapports (visibilité selon les permissions du Backend) -->
-      <ng-container *ngIf="perms.canAny('MAINTENANCE_VIEW', 'TEAMS_VIEW', 'TASKS_VIEW', 'AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL', 'REPORTS_VIEW')">
-        <div class="nav-divider"></div>
-        <div class="nav-section-label">Organisation</div>
-
-        <a *ngIf="perms.can('MAINTENANCE_VIEW')" routerLink="/maintenance" class="nav-item" [class.active]="isActive('/maintenance')">
-          <i class="fas fa-screwdriver-wrench nav-icon"></i>
-          <span class="nav-label">Maintenance</span>
-        </a>
-
-        <a *ngIf="perms.can('TEAMS_VIEW')" routerLink="/teams" class="nav-item" [class.active]="isActive('/teams')">
-          <i class="fas fa-people-group nav-icon"></i>
-          <span class="nav-label">Équipes</span>
-        </a>
-
-        <a *ngIf="perms.can('TASKS_VIEW')" routerLink="/team-tasks" class="nav-item"
-           [class.active]="isActive('/team-tasks') || router.url.startsWith('/team-tasks?')">
-          <i class="fas fa-list-check nav-icon"></i>
-          <span class="nav-label">Tâches d'équipe</span>
-        </a>
-
-        <a *ngIf="perms.canAny('AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL')" routerLink="/audit-trail" class="nav-item" [class.active]="isActive('/audit-trail')">
-          <i class="fas fa-clipboard-check nav-icon"></i>
-          <span class="nav-label">Audit et activités</span>
-        </a>
-
-        <a *ngIf="perms.can('REPORTS_VIEW')" routerLink="/reports" class="nav-item" [class.active]="isActive('/reports')">
-          <i class="fas fa-file-lines nav-icon"></i>
-          <span class="nav-label">Rapports</span>
-        </a>
-      </ng-container>
-
-    </nav>
-
-    <div class="sidebar-footer">
-      <div class="sidebar-version">HELIOS v2.0 · Orange Tunisie</div>
-    </div>
-  </aside>
-
-  <!-- ══ Main Content ═══════════════════════════════════════════════════════ -->
-  <div class="main-content">
-
-    <!-- Navbar -->
-    <header class="navbar-orange">
-
-      <!-- Search -->
-      <div class="navbar-center">
-        <div class="navbar-search">
-          <i class="fas fa-search search-icon"></i>
-          <input type="text" placeholder="Rechercher un incident, une application…">
+    </aside>
+    <!-- ══ Main Content ═══════════════════════════════════════════════════════ -->
+    <div class="main-content">
+      <!-- Navbar -->
+      <header class="navbar-orange">
+        <!-- Search -->
+        <div class="navbar-center">
+          <div class="navbar-search">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" placeholder="Rechercher un incident, une application…">
+          </div>
         </div>
-      </div>
-
-      <!-- Right -->
-      <div class="navbar-right">
-
-        <!-- Live indicator -->
-        <div class="nav-live">
-          <div class="live-dot-nav" [style.background]="sseConnected ? '#22C55E' : '#EF4444'"></div>
-          <span>{{ sseConnected ? 'EN DIRECT' : 'HORS LIGNE' }}</span>
-          <span class="clock">{{ currentTime }}</span>
-        </div>
-
-        <div class="nav-divider"></div>
-
-        <!-- Dark mode toggle -->
-        <div class="nav-icon-btn" [title]="isDark ? 'Mode clair' : 'Mode sombre'" (click)="toggleTheme()">
-          <i class="fas" [ngClass]="isDark ? 'fa-sun' : 'fa-moon'"></i>
-        </div>
-
-        <!-- Notifications -->
-        <div class="nav-icon-btn nav-notif-btn" title="Notifications" (click)="toggleNotifs($event)">
-          <i class="fas fa-bell"></i>
-          <span class="notif-count" *ngIf="unreadNotifCount > 0">{{ unreadNotifCount > 9 ? '9+' : unreadNotifCount }}</span>
-
-          <!-- Notification dropdown -->
-          <div class="notif-dropdown" *ngIf="showNotifs" (click)="$event.stopPropagation()">
-            <div class="notif-dd-header">
-              <span><i class="fas fa-bell"></i> Notifications</span>
-              <span class="notif-dd-sub">{{ notifications.length }} alerte(s) email</span>
-            </div>
-            <div class="notif-dd-list">
-              <div *ngIf="notifications.length === 0" class="notif-dd-empty">
-                <i class="fas fa-inbox"></i><span>Aucune notification</span>
+        <!-- Right -->
+        <div class="navbar-right">
+          <!-- Live indicator -->
+          <div class="nav-live">
+            <div class="live-dot-nav" [style.background]="sseConnected ? '#22C55E' : '#EF4444'"></div>
+            <span>{{ sseConnected ? 'EN DIRECT' : 'HORS LIGNE' }}</span>
+            <span class="clock">{{ currentTime }}</span>
+          </div>
+          <div class="nav-divider"></div>
+          <!-- Dark mode toggle -->
+          <div class="nav-icon-btn" [title]="isDark ? 'Mode clair' : 'Mode sombre'" (click)="toggleTheme()">
+            <i class="fas" [ngClass]="isDark ? 'fa-sun' : 'fa-moon'"></i>
+          </div>
+          <!-- Notifications -->
+          <div class="nav-icon-btn nav-notif-btn" title="Notifications" (click)="toggleNotifs($event)">
+            <i class="fas fa-bell"></i>
+            @if (unreadNotifCount > 0) {
+              <span class="notif-count">{{ unreadNotifCount > 9 ? '9+' : unreadNotifCount }}</span>
+            }
+            <!-- Notification dropdown -->
+            @if (showNotifs) {
+              <div class="notif-dropdown" (click)="$event.stopPropagation()">
+                <div class="notif-dd-header">
+                  <span><i class="fas fa-bell"></i> Notifications</span>
+                  <span class="notif-dd-sub">{{ notifications.length }} alerte(s) email</span>
+                </div>
+                <div class="notif-dd-list">
+                  @if (notifications.length === 0) {
+                    <div class="notif-dd-empty">
+                      <i class="fas fa-inbox"></i><span>Aucune notification</span>
+                    </div>
+                  }
+                  @for (n of notifications; track n) {
+                    <button class="notif-dd-item" (click)="openNotif(n)">
+                      <span class="notif-dot" [ngClass]="n.severity.toLowerCase()"></span>
+                      <span class="notif-body">
+                        <span class="notif-title">{{ n.title }}</span>
+                        <span class="notif-meta">
+                          <span class="badge-status" [ngClass]="n.severity.toLowerCase()">{{ n.severity }}</span>
+                          <span class="notif-email"><i class="fas fa-envelope"></i> email</span>
+                          <span class="notif-time">{{ notifTime(n.createdAt) }}</span>
+                        </span>
+                      </span>
+                    </button>
+                  }
+                </div>
               </div>
-              <button *ngFor="let n of notifications" class="notif-dd-item" (click)="openNotif(n)">
-                <span class="notif-dot" [ngClass]="n.severity.toLowerCase()"></span>
-                <span class="notif-body">
-                  <span class="notif-title">{{ n.title }}</span>
-                  <span class="notif-meta">
-                    <span class="badge-status" [ngClass]="n.severity.toLowerCase()">{{ n.severity }}</span>
-                    <span class="notif-email"><i class="fas fa-envelope"></i> email</span>
-                    <span class="notif-time">{{ notifTime(n.createdAt) }}</span>
-                  </span>
-                </span>
-              </button>
+            }
+          </div>
+          <!-- Settings -->
+          <div class="nav-icon-btn" title="Paramètres du compte" (click)="openSettings()">
+            <i class="fas fa-gear"></i>
+          </div>
+          <div class="nav-divider"></div>
+          <!-- User dropdown -->
+          <div class="nav-user" (click)="toggleUserMenu()">
+            <div class="user-avatar">{{ userInitials }}</div>
+            <div class="user-info">
+              <span class="user-name">{{ userName }}</span>
+              <span class="user-role">{{ userRole | lowercase }}</span>
             </div>
+            <i class="fas fa-chevron-down"
+              style="font-size:10px;color:var(--text-tertiary);margin-left:2px;transition:transform .2s;"
+            [style.transform]="showUserMenu ? 'rotate(180deg)' : 'rotate(0)'"></i>
+            <!-- Dropdown -->
+            @if (showUserMenu) {
+              <div class="user-dropdown" (click)="$event.stopPropagation()">
+                <button class="user-dd-item" (click)="openSettings('password')">
+                  <i class="fas fa-lock"></i> Changer le mot de passe
+                </button>
+                <button class="user-dd-item" (click)="openSettings('email')">
+                  <i class="fas fa-envelope"></i> Changer l'email
+                </button>
+                <div class="user-dd-separator"></div>
+                <button class="user-dd-item user-dd-logout" (click)="logout()">
+                  <i class="fas fa-sign-out-alt"></i> Déconnexion
+                </button>
+              </div>
+            }
           </div>
         </div>
-
-        <!-- Settings -->
-        <div class="nav-icon-btn" title="Paramètres du compte" (click)="openSettings()">
-          <i class="fas fa-gear"></i>
-        </div>
-
-        <div class="nav-divider"></div>
-
-        <!-- User dropdown -->
-        <div class="nav-user" (click)="toggleUserMenu()">
-          <div class="user-avatar">{{ userInitials }}</div>
-          <div class="user-info">
-            <span class="user-name">{{ userName }}</span>
-            <span class="user-role">{{ userRole | lowercase }}</span>
-          </div>
-          <i class="fas fa-chevron-down"
-             style="font-size:10px;color:var(--text-tertiary);margin-left:2px;transition:transform .2s;"
-             [style.transform]="showUserMenu ? 'rotate(180deg)' : 'rotate(0)'"></i>
-
-          <!-- Dropdown -->
-          <div class="user-dropdown" *ngIf="showUserMenu" (click)="$event.stopPropagation()">
-            <button class="user-dd-item" (click)="openSettings('password')">
-              <i class="fas fa-lock"></i> Changer le mot de passe
-            </button>
-            <button class="user-dd-item" (click)="openSettings('email')">
-              <i class="fas fa-envelope"></i> Changer l'email
-            </button>
-            <div class="user-dd-separator"></div>
-            <button class="user-dd-item user-dd-logout" (click)="logout()">
-              <i class="fas fa-sign-out-alt"></i> Déconnexion
-            </button>
-          </div>
-        </div>
-
-      </div>
-    </header>
-
-    <!-- Page -->
-    <main class="page-content">
-      <router-outlet></router-outlet>
-    </main>
+      </header>
+      <!-- Page -->
+      <main class="page-content">
+        <router-outlet></router-outlet>
+      </main>
+    </div>
   </div>
-
-</div>
+} @else {
+  <router-outlet></router-outlet>
+}
 
 <!-- Auth pages (login, register…) -->
-<ng-template #loginView>
-  <router-outlet></router-outlet>
-</ng-template>
 
 <!-- ══ Account Settings Modal ════════════════════════════════════════════════ -->
-<div class="modal-backdrop" *ngIf="showSettingsModal" (click)="closeSettings()"></div>
-<div class="settings-modal" *ngIf="showSettingsModal">
-  <div class="settings-modal-header">
-    <span>Paramètres du compte</span>
-    <button class="settings-close-btn" (click)="closeSettings()"><i class="fas fa-times"></i></button>
+@if (showSettingsModal) {
+  <div class="modal-backdrop" (click)="closeSettings()"></div>
+}
+@if (showSettingsModal) {
+  <div class="settings-modal">
+    <div class="settings-modal-header">
+      <span>Paramètres du compte</span>
+      <button class="settings-close-btn" (click)="closeSettings()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="settings-tabs">
+      <button class="settings-tab" [class.active]="settingsTab === 'password'" (click)="settingsTab = 'password'">
+        <i class="fas fa-lock"></i> Mot de passe
+      </button>
+      <button class="settings-tab" [class.active]="settingsTab === 'email'" (click)="settingsTab = 'email'">
+        <i class="fas fa-envelope"></i> Email
+      </button>
+    </div>
+    <!-- Change password -->
+    @if (settingsTab === 'password') {
+      <div class="settings-form">
+        <div class="settings-field">
+          <label>Mot de passe actuel</label>
+          <input type="password" [(ngModel)]="currentPassword" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="settings-field">
+          <label>Nouveau mot de passe</label>
+          <input type="password" [(ngModel)]="newPassword" placeholder="Min. 8 caractères" autocomplete="new-password">
+        </div>
+        <div class="settings-field">
+          <label>Confirmer le nouveau mot de passe</label>
+          <input type="password" [(ngModel)]="confirmPassword" placeholder="••••••••" autocomplete="new-password">
+        </div>
+        @if (passwordError) {
+          <div class="settings-feedback error"  >{{ passwordError }}</div>
+        }
+        @if (passwordSuccess) {
+          <div class="settings-feedback success">{{ passwordSuccess }}</div>
+        }
+        <button class="settings-submit-btn" (click)="submitChangePassword()" [disabled]="passwordLoading">
+          @if (passwordLoading) {
+            <i class="fas fa-spinner fa-spin"></i>
+          }
+          @if (!passwordLoading) {
+            <i class="fas fa-save"></i>
+          }
+          {{ passwordLoading ? 'Enregistrement…' : 'Enregistrer' }}
+        </button>
+      </div>
+    }
+    <!-- Change email -->
+    @if (settingsTab === 'email') {
+      <div class="settings-form">
+        <div class="settings-field">
+          <label>Mot de passe actuel</label>
+          <input type="password" [(ngModel)]="emailCurrentPassword" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="settings-field">
+          <label>Nouvel email</label>
+          <input type="email" [(ngModel)]="newEmail" placeholder="nouveau@email.com" autocomplete="email">
+        </div>
+        @if (emailError) {
+          <div class="settings-feedback error"  >{{ emailError }}</div>
+        }
+        @if (emailSuccess) {
+          <div class="settings-feedback success">{{ emailSuccess }}</div>
+        }
+        <button class="settings-submit-btn" (click)="submitChangeEmail()" [disabled]="emailLoading">
+          @if (emailLoading) {
+            <i class="fas fa-spinner fa-spin"></i>
+          }
+          @if (!emailLoading) {
+            <i class="fas fa-save"></i>
+          }
+          {{ emailLoading ? 'Enregistrement…' : 'Enregistrer' }}
+        </button>
+      </div>
+    }
   </div>
-
-  <div class="settings-tabs">
-    <button class="settings-tab" [class.active]="settingsTab === 'password'" (click)="settingsTab = 'password'">
-      <i class="fas fa-lock"></i> Mot de passe
-    </button>
-    <button class="settings-tab" [class.active]="settingsTab === 'email'" (click)="settingsTab = 'email'">
-      <i class="fas fa-envelope"></i> Email
-    </button>
-  </div>
-
-  <!-- Change password -->
-  <div *ngIf="settingsTab === 'password'" class="settings-form">
-    <div class="settings-field">
-      <label>Mot de passe actuel</label>
-      <input type="password" [(ngModel)]="currentPassword" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <div class="settings-field">
-      <label>Nouveau mot de passe</label>
-      <input type="password" [(ngModel)]="newPassword" placeholder="Min. 8 caractères" autocomplete="new-password">
-    </div>
-    <div class="settings-field">
-      <label>Confirmer le nouveau mot de passe</label>
-      <input type="password" [(ngModel)]="confirmPassword" placeholder="••••••••" autocomplete="new-password">
-    </div>
-    <div class="settings-feedback error"   *ngIf="passwordError">{{ passwordError }}</div>
-    <div class="settings-feedback success" *ngIf="passwordSuccess">{{ passwordSuccess }}</div>
-    <button class="settings-submit-btn" (click)="submitChangePassword()" [disabled]="passwordLoading">
-      <i class="fas fa-spinner fa-spin" *ngIf="passwordLoading"></i>
-      <i class="fas fa-save" *ngIf="!passwordLoading"></i>
-      {{ passwordLoading ? 'Enregistrement…' : 'Enregistrer' }}
-    </button>
-  </div>
-
-  <!-- Change email -->
-  <div *ngIf="settingsTab === 'email'" class="settings-form">
-    <div class="settings-field">
-      <label>Mot de passe actuel</label>
-      <input type="password" [(ngModel)]="emailCurrentPassword" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <div class="settings-field">
-      <label>Nouvel email</label>
-      <input type="email" [(ngModel)]="newEmail" placeholder="nouveau@email.com" autocomplete="email">
-    </div>
-    <div class="settings-feedback error"   *ngIf="emailError">{{ emailError }}</div>
-    <div class="settings-feedback success" *ngIf="emailSuccess">{{ emailSuccess }}</div>
-    <button class="settings-submit-btn" (click)="submitChangeEmail()" [disabled]="emailLoading">
-      <i class="fas fa-spinner fa-spin" *ngIf="emailLoading"></i>
-      <i class="fas fa-save" *ngIf="!emailLoading"></i>
-      {{ emailLoading ? 'Enregistrement…' : 'Enregistrer' }}
-    </button>
-  </div>
-</div>
+}
 
 <!-- ══ Toast notifications ════════════════════════════════════════════════════ -->
 <div class="toast-container">
-  <div *ngFor="let t of toasts" class="toast" [ngClass]="t.type">
-    <div class="toast-header">
-      <i class="fas fa-circle-exclamation" [style.color]="t.type === 'critical' ? 'var(--danger)' : 'var(--brand)'"></i>
-      {{ t.title }}
+  @for (t of toasts; track t) {
+    <div class="toast" [ngClass]="t.type">
+      <div class="toast-header">
+        <i class="fas fa-circle-exclamation" [style.color]="t.type === 'critical' ? 'var(--danger)' : 'var(--brand)'"></i>
+        {{ t.title }}
+      </div>
+      <div class="toast-body">{{ t.message }}</div>
     </div>
-    <div class="toast-body">{{ t.message }}</div>
-  </div>
+  }
 </div>

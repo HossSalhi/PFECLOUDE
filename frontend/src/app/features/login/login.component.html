@@ -66,105 +66,112 @@
       </div>
 
       <!-- Step 1 — Credentials -->
-      <form *ngIf="step === 'credentials'" (ngSubmit)="submitCredentials()" novalidate class="login-form">
-
-        <div class="form-group">
-          <label for="username">
-            <i class="fas fa-user"></i> Identifiant
-          </label>
-          <div class="input-wrap">
-            <input id="username" type="text" class="form-control"
-                   [(ngModel)]="username" name="username"
-                   autocomplete="username" required autofocus
-                   placeholder="Votre identifiant">
+      @if (step === 'credentials') {
+        <form (ngSubmit)="submitCredentials()" novalidate class="login-form">
+          <div class="form-group">
+            <label for="username">
+              <i class="fas fa-user"></i> Identifiant
+            </label>
+            <div class="input-wrap">
+              <input id="username" type="text" class="form-control"
+                [(ngModel)]="username" name="username"
+                autocomplete="username" required autofocus
+                placeholder="Votre identifiant">
+            </div>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label for="password">
-            <i class="fas fa-lock"></i> Mot de passe
-          </label>
-          <div class="input-wrap">
-            <input id="password" [type]="showPassword ? 'text' : 'password'"
-                   class="form-control"
-                   [(ngModel)]="password" name="password"
-                   autocomplete="current-password" required
-                   placeholder="Votre mot de passe">
-            <button type="button" class="input-eye" (click)="showPassword = !showPassword">
-              <i [class]="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
-            </button>
+          <div class="form-group">
+            <label for="password">
+              <i class="fas fa-lock"></i> Mot de passe
+            </label>
+            <div class="input-wrap">
+              <input id="password" [type]="showPassword ? 'text' : 'password'"
+                class="form-control"
+                [(ngModel)]="password" name="password"
+                autocomplete="current-password" required
+                placeholder="Votre mot de passe">
+              <button type="button" class="input-eye" (click)="showPassword = !showPassword">
+                <i [class]="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div *ngIf="error" class="login-error">
-          <i class="fas fa-circle-exclamation"></i> {{ error }}
-        </div>
-
-        <button type="submit" class="btn-login" [disabled]="loading || !username || !password">
-          <span *ngIf="loading" class="login-spinner"></span>
-          <span *ngIf="!loading"><i class="fas fa-arrow-right-to-bracket"></i></span>
-          {{ loading ? 'Connexion en cours…' : 'Se connecter' }}
-        </button>
-
-        <div class="login-hint">
-          <i class="fas fa-shield-halved"></i>
-          Accès sécurisé — Authentification JWT + 2FA
-        </div>
-
-        <div class="login-extra-links">
-          <a routerLink="/forgot-password" class="extra-link">
-            <i class="fas fa-key"></i> Mot de passe oublié ?
-          </a>
-          <span class="separator">•</span>
-          <a routerLink="/register" class="extra-link">
-            <i class="fas fa-user-plus"></i> Créer un compte
-          </a>
-        </div>
-      </form>
+          @if (error) {
+            <div class="login-error">
+              <i class="fas fa-circle-exclamation"></i> {{ error }}
+            </div>
+          }
+          <button type="submit" class="btn-login" [disabled]="loading || !username || !password">
+            @if (loading) {
+              <span class="login-spinner"></span>
+            }
+            @if (!loading) {
+              <span><i class="fas fa-arrow-right-to-bracket"></i></span>
+            }
+            {{ loading ? 'Connexion en cours…' : 'Se connecter' }}
+          </button>
+          <div class="login-hint">
+            <i class="fas fa-shield-halved"></i>
+            Accès sécurisé — Authentification JWT + 2FA
+          </div>
+          <div class="login-extra-links">
+            <a routerLink="/forgot-password" class="extra-link">
+              <i class="fas fa-key"></i> Mot de passe oublié ?
+            </a>
+            <span class="separator">•</span>
+            <a routerLink="/register" class="extra-link">
+              <i class="fas fa-user-plus"></i> Créer un compte
+            </a>
+          </div>
+        </form>
+      }
 
       <!-- Step 2 — TOTP 2FA -->
-      <form *ngIf="step === '2fa'" (ngSubmit)="submitTotp()" novalidate class="login-form">
-
-        <div class="totp-header">
-          <div class="totp-icon"><i class="fas fa-shield-halved"></i></div>
-          <h3>Vérification en deux étapes</h3>
-          <p>Scannez le QR code avec <strong>Google Authenticator</strong>, puis saisissez le code à 6 chiffres.</p>
-        </div>
-
-        <!-- QR Code affiché à chaque fois -->
-        <div *ngIf="qrCodeDataUri" class="qr-section">
-          <div class="qr-label"><i class="fas fa-qrcode"></i> Scanner avec Google Authenticator</div>
-          <img [src]="qrCodeDataUri" alt="QR Code 2FA" class="qr-image">
-          <div class="qr-hint">Ouvrez Google Authenticator → <strong>+</strong> → Scanner un QR code</div>
-        </div>
-
-        <div class="totp-divider" *ngIf="qrCodeDataUri">
-          <span>puis entrez le code</span>
-        </div>
-
-        <div class="form-group">
-          <label for="totpCode"><i class="fas fa-key"></i> Code de vérification</label>
-          <input id="totpCode" type="text" class="form-control totp-input"
-                 [(ngModel)]="totpCode" name="totpCode"
-                 maxlength="6" pattern="\d{6}"
-                 autocomplete="one-time-code"
-                 placeholder="000 000" required autofocus>
-        </div>
-
-        <div *ngIf="error" class="login-error">
-          <i class="fas fa-circle-exclamation"></i> {{ error }}
-        </div>
-
-        <button type="submit" class="btn-login" [disabled]="loading || totpCode.length !== 6">
-          <span *ngIf="loading" class="login-spinner"></span>
-          <span *ngIf="!loading"><i class="fas fa-check-circle"></i></span>
-          {{ loading ? 'Vérification…' : 'Confirmer' }}
-        </button>
-
-        <button type="button" class="btn-back" (click)="backToCredentials()">
-          <i class="fas fa-arrow-left"></i> Retour à la connexion
-        </button>
-      </form>
+      @if (step === '2fa') {
+        <form (ngSubmit)="submitTotp()" novalidate class="login-form">
+          <div class="totp-header">
+            <div class="totp-icon"><i class="fas fa-shield-halved"></i></div>
+            <h3>Vérification en deux étapes</h3>
+            <p>Scannez le QR code avec <strong>Google Authenticator</strong>, puis saisissez le code à 6 chiffres.</p>
+          </div>
+          <!-- QR Code affiché à chaque fois -->
+          @if (qrCodeDataUri) {
+            <div class="qr-section">
+              <div class="qr-label"><i class="fas fa-qrcode"></i> Scanner avec Google Authenticator</div>
+              <img [src]="qrCodeDataUri" alt="QR Code 2FA" class="qr-image">
+              <div class="qr-hint">Ouvrez Google Authenticator → <strong>+</strong> → Scanner un QR code</div>
+            </div>
+          }
+          @if (qrCodeDataUri) {
+            <div class="totp-divider">
+              <span>puis entrez le code</span>
+            </div>
+          }
+          <div class="form-group">
+            <label for="totpCode"><i class="fas fa-key"></i> Code de vérification</label>
+            <input id="totpCode" type="text" class="form-control totp-input"
+              [(ngModel)]="totpCode" name="totpCode"
+              maxlength="6" pattern="\d{6}"
+              autocomplete="one-time-code"
+              placeholder="000 000" required autofocus>
+          </div>
+          @if (error) {
+            <div class="login-error">
+              <i class="fas fa-circle-exclamation"></i> {{ error }}
+            </div>
+          }
+          <button type="submit" class="btn-login" [disabled]="loading || totpCode.length !== 6">
+            @if (loading) {
+              <span class="login-spinner"></span>
+            }
+            @if (!loading) {
+              <span><i class="fas fa-check-circle"></i></span>
+            }
+            {{ loading ? 'Vérification…' : 'Confirmer' }}
+          </button>
+          <button type="button" class="btn-back" (click)="backToCredentials()">
+            <i class="fas fa-arrow-left"></i> Retour à la connexion
+          </button>
+        </form>
+      }
 
     </div>
   </div>

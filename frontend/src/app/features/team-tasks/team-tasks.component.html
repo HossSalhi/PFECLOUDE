@@ -1,214 +1,277 @@
 <div class="org-scope">
-<div class="org-page">
+  <div class="org-page">
 
-  <div class="page-header">
-    <div>
-      <h1 class="page-title"><i class="fas fa-list-check"></i> Tâches d'équipe</h1>
-      <p class="page-subtitle">Tâches organisationnelles et techniques confiées aux membres des équipes — distinctes de la gestion des incidents.</p>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-list-check"></i> Tâches d'équipe</h1>
+        <p class="page-subtitle">Tâches organisationnelles et techniques confiées aux membres des équipes — distinctes de la gestion des incidents.</p>
+      </div>
+      <div class="header-actions">
+        <a class="btn-secondary" routerLink="/teams" style="text-decoration:none"><i class="fas fa-users"></i> Équipes</a>
+        @if (canCreate) {
+          <button class="btn-primary" (click)="openCreate()"><i class="fas fa-plus"></i> Nouvelle tâche</button>
+        }
+      </div>
     </div>
-    <div class="header-actions">
-      <a class="btn-secondary" routerLink="/teams" style="text-decoration:none"><i class="fas fa-users"></i> Équipes</a>
-      <button *ngIf="canCreate" class="btn-primary" (click)="openCreate()"><i class="fas fa-plus"></i> Nouvelle tâche</button>
+
+    @if (success) {
+      <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+    }
+    @if (error) {
+      <div class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+    }
+
+    <!-- Avancement -->
+    @if (summary) {
+      <div class="stat-grid">
+        <div class="stat-tile"><div class="stat-label">Tâches</div><div class="stat-value">{{ summary.total }}</div></div>
+        <div class="stat-tile s-todo"><div class="stat-label">À faire</div><div class="stat-value">{{ summary.byStatus['TODO'] || 0 }}</div></div>
+        <div class="stat-tile s-progress"><div class="stat-label">En cours</div><div class="stat-value">{{ summary.byStatus['IN_PROGRESS'] || 0 }}</div></div>
+        <div class="stat-tile s-hold"><div class="stat-label">En attente</div><div class="stat-value">{{ summary.byStatus['ON_HOLD'] || 0 }}</div></div>
+        <div class="stat-tile s-done"><div class="stat-label">Terminées</div><div class="stat-value">{{ summary.byStatus['DONE'] || 0 }}</div></div>
+        <div class="stat-tile s-cancel"><div class="stat-label">Annulées</div><div class="stat-value">{{ summary.byStatus['CANCELLED'] || 0 }}</div></div>
+        <div class="stat-tile s-late"><div class="stat-label">En retard</div><div class="stat-value">{{ summary.overdue }}</div></div>
+        <div class="stat-tile"><div class="stat-label">Avancement</div><div class="stat-value">{{ summary.completionRate }}<span class="stat-unit">%</span></div></div>
+      </div>
+    }
+
+    <!-- Filtres -->
+    <div class="filters-bar">
+      <div class="search-wrap">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Rechercher un titre ou une description…" [(ngModel)]="filters.q" (keyup.enter)="load(true)">
+      </div>
+      <select class="filter-select" [(ngModel)]="filters.teamId" (ngModelChange)="load(true)">
+        <option [ngValue]="null">Toutes les équipes</option>
+        @for (t of teams; track t) {
+          <option [ngValue]="t.id">{{ t.name }}</option>
+        }
+      </select>
+      @if (users.length > 0) {
+        <select class="filter-select" [(ngModel)]="filters.assigneeId" (ngModelChange)="load(true)">
+          <option [ngValue]="null">Tous les responsables</option>
+          @for (u of users; track u) {
+            <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+          }
+        </select>
+      }
+      <select class="filter-select" [(ngModel)]="filters.status" (ngModelChange)="load(true)">
+        <option value="">Tous les statuts</option>
+        @for (s of statuses; track s) {
+          <option [value]="s">{{ statusLabels[s] }}</option>
+        }
+      </select>
+      <select class="filter-select" [(ngModel)]="filters.priority" (ngModelChange)="load(true)">
+        <option value="">Toutes les priorités</option>
+        @for (p of priorities; track p) {
+          <option [value]="p">{{ priorityLabels[p] }}</option>
+        }
+      </select>
+      <label class="filter-check"><input type="checkbox" [(ngModel)]="filters.overdue" (ngModelChange)="load(true)"> En retard</label>
+      <label class="filter-check"><input type="checkbox" [(ngModel)]="filters.mine" (ngModelChange)="load(true)"> Mes tâches</label>
+      <button class="btn-secondary" (click)="resetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
+      <span class="results-count">{{ total }} tâche(s)</span>
     </div>
-  </div>
 
-  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
-  <div *ngIf="error" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
-
-  <!-- Avancement -->
-  <div class="stat-grid" *ngIf="summary">
-    <div class="stat-tile"><div class="stat-label">Tâches</div><div class="stat-value">{{ summary.total }}</div></div>
-    <div class="stat-tile s-todo"><div class="stat-label">À faire</div><div class="stat-value">{{ summary.byStatus['TODO'] || 0 }}</div></div>
-    <div class="stat-tile s-progress"><div class="stat-label">En cours</div><div class="stat-value">{{ summary.byStatus['IN_PROGRESS'] || 0 }}</div></div>
-    <div class="stat-tile s-hold"><div class="stat-label">En attente</div><div class="stat-value">{{ summary.byStatus['ON_HOLD'] || 0 }}</div></div>
-    <div class="stat-tile s-done"><div class="stat-label">Terminées</div><div class="stat-value">{{ summary.byStatus['DONE'] || 0 }}</div></div>
-    <div class="stat-tile s-cancel"><div class="stat-label">Annulées</div><div class="stat-value">{{ summary.byStatus['CANCELLED'] || 0 }}</div></div>
-    <div class="stat-tile s-late"><div class="stat-label">En retard</div><div class="stat-value">{{ summary.overdue }}</div></div>
-    <div class="stat-tile"><div class="stat-label">Avancement</div><div class="stat-value">{{ summary.completionRate }}<span class="stat-unit">%</span></div></div>
-  </div>
-
-  <!-- Filtres -->
-  <div class="filters-bar">
-    <div class="search-wrap">
-      <i class="fas fa-search"></i>
-      <input type="text" placeholder="Rechercher un titre ou une description…" [(ngModel)]="filters.q" (keyup.enter)="load(true)">
-    </div>
-    <select class="filter-select" [(ngModel)]="filters.teamId" (ngModelChange)="load(true)">
-      <option [ngValue]="null">Toutes les équipes</option>
-      <option *ngFor="let t of teams" [ngValue]="t.id">{{ t.name }}</option>
-    </select>
-    <select *ngIf="users.length > 0" class="filter-select" [(ngModel)]="filters.assigneeId" (ngModelChange)="load(true)">
-      <option [ngValue]="null">Tous les responsables</option>
-      <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
-    </select>
-    <select class="filter-select" [(ngModel)]="filters.status" (ngModelChange)="load(true)">
-      <option value="">Tous les statuts</option>
-      <option *ngFor="let s of statuses" [value]="s">{{ statusLabels[s] }}</option>
-    </select>
-    <select class="filter-select" [(ngModel)]="filters.priority" (ngModelChange)="load(true)">
-      <option value="">Toutes les priorités</option>
-      <option *ngFor="let p of priorities" [value]="p">{{ priorityLabels[p] }}</option>
-    </select>
-    <label class="filter-check"><input type="checkbox" [(ngModel)]="filters.overdue" (ngModelChange)="load(true)"> En retard</label>
-    <label class="filter-check"><input type="checkbox" [(ngModel)]="filters.mine" (ngModelChange)="load(true)"> Mes tâches</label>
-    <button class="btn-secondary" (click)="resetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
-    <span class="results-count">{{ total }} tâche(s)</span>
-  </div>
-
-  <div class="table-card">
-    <div *ngIf="loading" class="table-loading"><div class="spinner"></div> Chargement…</div>
-    <table *ngIf="!loading" class="org-table">
-      <thead>
-        <tr><th>Tâche</th><th>Équipe</th><th>Responsable</th><th>Priorité</th><th>Échéance</th><th>Statut</th><th>Actions</th></tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let t of items" class="clickable" [class.row-muted]="t.status === 'CANCELLED'" (click)="selected = t">
-          <td><span class="text-strong">{{ t.title }}</span></td>
-          <td>{{ t.team ? t.team.name : '—' }}</td>
-          <td>{{ t.assignee ? t.assignee.displayName : 'Non affectée' }}</td>
-          <td><span class="badge" [ngClass]="'pr-' + t.priority.toLowerCase()">{{ priorityLabels[t.priority] }}</span></td>
-          <td>{{ fmtDate(t.dueDate) }}<div *ngIf="t.overdue" class="flag-late text-small">En retard</div></td>
-          <td (click)="$event.stopPropagation()">
-            <ng-container *ngIf="statusChoices(t).length > 0; else plainStatus">
-              <select class="filter-select" style="padding:4px 8px;font-size:12px" [disabled]="busy"
+    <div class="table-card">
+      @if (loading) {
+        <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+      }
+      @if (!loading) {
+        <table class="org-table">
+          <thead>
+            <tr><th>Tâche</th><th>Équipe</th><th>Responsable</th><th>Priorité</th><th>Échéance</th><th>Statut</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (t of items; track t) {
+              <tr class="clickable" [class.row-muted]="t.status === 'CANCELLED'" (click)="selected = t">
+                <td><span class="text-strong">{{ t.title }}</span></td>
+                <td>{{ t.team ? t.team.name : '—' }}</td>
+                <td>{{ t.assignee ? t.assignee.displayName : 'Non affectée' }}</td>
+                <td><span class="badge" [ngClass]="'pr-' + t.priority.toLowerCase()">{{ priorityLabels[t.priority] }}</span></td>
+                <td>{{ fmtDate(t.dueDate) }}@if (t.overdue) {
+                  <div class="flag-late text-small">En retard</div>
+                }</td>
+                <td (click)="$event.stopPropagation()">
+                  @if (statusChoices(t).length > 0) {
+                    <select class="filter-select" style="padding:4px 8px;font-size:12px" [disabled]="busy"
                       [title]="'Changer le statut'" (change)="changeStatus(t, $any($event.target).value)">
-                <option value="" selected>{{ statusLabels[t.status] }}</option>
-                <option *ngFor="let s of statusChoices(t)" [value]="s">→ {{ statusLabels[s] }}</option>
-              </select>
-            </ng-container>
-            <ng-template #plainStatus>
-              <span class="badge" [ngClass]="'st-' + t.status.toLowerCase()">{{ statusLabels[t.status] }}</span>
-            </ng-template>
-          </td>
-          <td class="actions-cell" (click)="$event.stopPropagation()">
-            <button class="btn-icon btn-view" title="Détail" (click)="selected = t"><i class="fas fa-eye"></i></button>
-            <button *ngIf="canUpdate && isOpen(t)" class="btn-icon btn-edit" title="Modifier" (click)="openEdit(t)"><i class="fas fa-pen"></i></button>
-            <button *ngIf="canAssign && isOpen(t) && t.team" class="btn-icon btn-warn" title="Affecter" (click)="openAssign(t)"><i class="fas fa-user-check"></i></button>
-          </td>
-        </tr>
-        <tr *ngIf="items.length === 0">
-          <td colspan="7" class="org-empty"><i class="fas fa-clipboard-list"></i><p>Aucune tâche ne correspond aux critères.</p></td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="pager" *ngIf="!loading && total > 0">
-      <span>Page {{ page + 1 }} / {{ totalPages }}</span>
-      <div class="pager-btns">
-        <button (click)="goTo(0)" [disabled]="page === 0">«</button>
-        <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
-        <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
-        <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+                      <option value="" selected>{{ statusLabels[t.status] }}</option>
+                      @for (s of statusChoices(t); track s) {
+                        <option [value]="s">→ {{ statusLabels[s] }}</option>
+                      }
+                    </select>
+                  } @else {
+                    <span class="badge" [ngClass]="'st-' + t.status.toLowerCase()">{{ statusLabels[t.status] }}</span>
+                  }
+                </td>
+                <td class="actions-cell" (click)="$event.stopPropagation()">
+                  <button class="btn-icon btn-view" title="Détail" (click)="selected = t"><i class="fas fa-eye"></i></button>
+                  @if (canUpdate && isOpen(t)) {
+                    <button class="btn-icon btn-edit" title="Modifier" (click)="openEdit(t)"><i class="fas fa-pen"></i></button>
+                  }
+                  @if (canAssign && isOpen(t) && t.team) {
+                    <button class="btn-icon btn-warn" title="Affecter" (click)="openAssign(t)"><i class="fas fa-user-check"></i></button>
+                  }
+                </td>
+              </tr>
+            }
+            @if (items.length === 0) {
+              <tr>
+                <td colspan="7" class="org-empty"><i class="fas fa-clipboard-list"></i><p>Aucune tâche ne correspond aux critères.</p></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+      @if (!loading && total > 0) {
+        <div class="pager">
+          <span>Page {{ page + 1 }} / {{ totalPages }}</span>
+          <div class="pager-btns">
+            <button (click)="goTo(0)" [disabled]="page === 0">«</button>
+            <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
+            <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
+            <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
+  @if (selected) {
+    <div class="modal-overlay" (click)="selected = null">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3><i class="fas fa-list-check"></i> {{ selected.title }}</h3>
+          <button class="modal-close" (click)="selected = null"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <dl class="detail-grid">
+            <dt>Statut</dt><dd><span class="badge" [ngClass]="'st-' + selected.status.toLowerCase()">{{ statusLabels[selected.status] }}</span></dd>
+            <dt>Priorité</dt><dd><span class="badge" [ngClass]="'pr-' + selected.priority.toLowerCase()">{{ priorityLabels[selected.priority] }}</span></dd>
+            <dt>Équipe</dt><dd>{{ selected.team ? selected.team.name : '—' }}</dd>
+            <dt>Responsable</dt><dd>{{ selected.assignee ? selected.assignee.displayName : 'Non affectée' }}</dd>
+            <dt>Créée par</dt><dd>{{ selected.creator ? selected.creator.displayName : '—' }} le {{ fmt(selected.createdAt) }}</dd>
+            <dt>Échéance</dt><dd>{{ fmtDate(selected.dueDate) }} @if (selected.overdue) {
+            <span class="flag-late">— en retard</span>
+          }</dd>
+          <dt>Terminée le</dt><dd>{{ fmt(selected.completedAt) }}</dd>
+          <dt>Dernière modification</dt><dd>{{ fmt(selected.updatedAt) }}</dd>
+          <dt>Description</dt><dd>{{ selected.description || '—' }}</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        @if (canUpdate && isOpen(selected)) {
+          <button class="btn-secondary" (click)="openEdit(selected)"><i class="fas fa-pen"></i> Modifier</button>
+        }
+        @if (canAssign && isOpen(selected) && selected.team) {
+          <button class="btn-secondary" (click)="openAssign(selected)"><i class="fas fa-user-check"></i> Affecter</button>
+        }
+        <button class="btn-secondary" (click)="selected = null">Fermer</button>
       </div>
     </div>
   </div>
-</div>
-
-<!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="selected" (click)="selected = null">
-  <div class="modal" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-list-check"></i> {{ selected.title }}</h3>
-      <button class="modal-close" (click)="selected = null"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <dl class="detail-grid">
-        <dt>Statut</dt><dd><span class="badge" [ngClass]="'st-' + selected.status.toLowerCase()">{{ statusLabels[selected.status] }}</span></dd>
-        <dt>Priorité</dt><dd><span class="badge" [ngClass]="'pr-' + selected.priority.toLowerCase()">{{ priorityLabels[selected.priority] }}</span></dd>
-        <dt>Équipe</dt><dd>{{ selected.team ? selected.team.name : '—' }}</dd>
-        <dt>Responsable</dt><dd>{{ selected.assignee ? selected.assignee.displayName : 'Non affectée' }}</dd>
-        <dt>Créée par</dt><dd>{{ selected.creator ? selected.creator.displayName : '—' }} le {{ fmt(selected.createdAt) }}</dd>
-        <dt>Échéance</dt><dd>{{ fmtDate(selected.dueDate) }} <span *ngIf="selected.overdue" class="flag-late">— en retard</span></dd>
-        <dt>Terminée le</dt><dd>{{ fmt(selected.completedAt) }}</dd>
-        <dt>Dernière modification</dt><dd>{{ fmt(selected.updatedAt) }}</dd>
-        <dt>Description</dt><dd>{{ selected.description || '—' }}</dd>
-      </dl>
-    </div>
-    <div class="modal-footer">
-      <button *ngIf="canUpdate && isOpen(selected)" class="btn-secondary" (click)="openEdit(selected)"><i class="fas fa-pen"></i> Modifier</button>
-      <button *ngIf="canAssign && isOpen(selected) && selected.team" class="btn-secondary" (click)="openAssign(selected)"><i class="fas fa-user-check"></i> Affecter</button>
-      <button class="btn-secondary" (click)="selected = null">Fermer</button>
-    </div>
-  </div>
-</div>
+}
 
 <!-- ══ Formulaire ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showForm" (click)="closeForm()">
-  <div class="modal modal-lg" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-plus'"></i> {{ editing ? 'Modifier la tâche' : 'Nouvelle tâche' }}</h3>
-      <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
+@if (showForm) {
+  <div class="modal-overlay" (click)="closeForm()">
+    <div class="modal modal-lg" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-plus'"></i> {{ editing ? 'Modifier la tâche' : 'Nouvelle tâche' }}</h3>
+        <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        @if (modalError) {
+          <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+        }
+        <div class="form-group">
+          <label>Titre <span class="required">*</span></label>
+          <input class="form-input" type="text" maxlength="200" [(ngModel)]="form.title" placeholder="Ex. Mettre à jour la documentation réseau">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Équipe</label>
+            <select class="form-input" [(ngModel)]="form.teamId" (ngModelChange)="onFormTeamChange()">
+              <option [ngValue]="null">— Aucune —</option>
+              @for (t of teams; track t) {
+                <option [ngValue]="t.id">{{ t.name }}</option>
+              }
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Responsable</label>
+            <select class="form-input" [(ngModel)]="form.assigneeId" [disabled]="membersLoading">
+              <option [ngValue]="null">— Non affectée —</option>
+              @for (c of assigneeChoices; track c) {
+                <option [ngValue]="c.id">{{ c.label }}</option>
+              }
+            </select>
+            @if (form.teamId !== null) {
+              <div class="hint">Seuls les membres de l'équipe peuvent se voir confier la tâche.</div>
+            }
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Priorité</label>
+            <select class="form-input" [(ngModel)]="form.priority">
+              @for (p of priorities; track p) {
+                <option [value]="p">{{ priorityLabels[p] }}</option>
+              }
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Échéance</label>
+            <input class="form-input" type="date" [min]="editing ? '' : today" [(ngModel)]="form.dueDate">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea class="form-input" rows="4" [(ngModel)]="form.description"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" (click)="closeForm()">Annuler</button>
+        <button class="btn-primary" (click)="submit()" [disabled]="saving">
+          @if (saving) {
+            <span class="btn-spinner"></span>
+            } {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Créer') }}
+          </button>
+        </div>
+      </div>
     </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <div class="form-group">
-        <label>Titre <span class="required">*</span></label>
-        <input class="form-input" type="text" maxlength="200" [(ngModel)]="form.title" placeholder="Ex. Mettre à jour la documentation réseau">
-      </div>
-      <div class="form-row-2">
-        <div class="form-group">
-          <label>Équipe</label>
-          <select class="form-input" [(ngModel)]="form.teamId" (ngModelChange)="onFormTeamChange()">
-            <option [ngValue]="null">— Aucune —</option>
-            <option *ngFor="let t of teams" [ngValue]="t.id">{{ t.name }}</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Responsable</label>
-          <select class="form-input" [(ngModel)]="form.assigneeId" [disabled]="membersLoading">
-            <option [ngValue]="null">— Non affectée —</option>
-            <option *ngFor="let c of assigneeChoices" [ngValue]="c.id">{{ c.label }}</option>
-          </select>
-          <div class="hint" *ngIf="form.teamId !== null">Seuls les membres de l'équipe peuvent se voir confier la tâche.</div>
-        </div>
-      </div>
-      <div class="form-row-2">
-        <div class="form-group">
-          <label>Priorité</label>
-          <select class="form-input" [(ngModel)]="form.priority">
-            <option *ngFor="let p of priorities" [value]="p">{{ priorityLabels[p] }}</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Échéance</label>
-          <input class="form-input" type="date" [min]="editing ? '' : today" [(ngModel)]="form.dueDate">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Description</label>
-        <textarea class="form-input" rows="4" [(ngModel)]="form.description"></textarea>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeForm()">Annuler</button>
-      <button class="btn-primary" (click)="submit()" [disabled]="saving">
-        <span *ngIf="saving" class="btn-spinner"></span> {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Créer') }}
-      </button>
-    </div>
-  </div>
-</div>
+  }
 
-<!-- ══ Affectation ══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showAssign && assignTarget" (click)="showAssign = false">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-user-check"></i> Affecter la tâche</h3>
-      <button class="modal-close" (click)="showAssign = false"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc"><strong>{{ assignTarget.title }}</strong> — équipe « {{ assignTarget.team?.name }} »</p>
-      <div class="form-group">
-        <label>Responsable</label>
-        <select class="form-input" [(ngModel)]="assigneeId">
-          <option [ngValue]="null">— Retirer l'affectation —</option>
-          <option *ngFor="let m of assignMembers" [ngValue]="m.userId">{{ m.displayName }} (&#64;{{ m.username }})</option>
-        </select>
+  <!-- ══ Affectation ══════════════════════════════════════════════════════════ -->
+  @if (showAssign && assignTarget) {
+    <div class="modal-overlay" (click)="showAssign = false">
+      <div class="modal modal-sm" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3><i class="fas fa-user-check"></i> Affecter la tâche</h3>
+          <button class="modal-close" (click)="showAssign = false"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          @if (modalError) {
+            <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+          }
+          <p class="modal-desc"><strong>{{ assignTarget.title }}</strong> — équipe « {{ assignTarget.team?.name }} »</p>
+          <div class="form-group">
+            <label>Responsable</label>
+            <select class="form-input" [(ngModel)]="assigneeId">
+              <option [ngValue]="null">— Retirer l'affectation —</option>
+              @for (m of assignMembers; track m) {
+                <option [ngValue]="m.userId">{{ m.displayName }} (&#64;{{ m.username }})</option>
+              }
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" (click)="showAssign = false">Annuler</button>
+          <button class="btn-primary" (click)="submitAssign()" [disabled]="busy">Enregistrer</button>
+        </div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="showAssign = false">Annuler</button>
-      <button class="btn-primary" (click)="submitAssign()" [disabled]="busy">Enregistrer</button>
-    </div>
-  </div>
-</div>
+  }
 </div>

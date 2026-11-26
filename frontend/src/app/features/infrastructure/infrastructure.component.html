@@ -10,11 +10,15 @@
     <div class="page-subtitle">État en temps réel des VMs et du cluster Kubernetes</div>
   </div>
   <div class="page-actions">
-    <span class="live-dot" *ngIf="!loading">Temps réel</span>
-    <span class="text-muted" *ngIf="lastRefresh" style="font-size:12px;">
-      <i class="fas fa-clock" style="color:var(--orange-primary);"></i>
-      Vérifié à {{ lastRefresh }}
-    </span>
+    @if (!loading) {
+      <span class="live-dot">Temps réel</span>
+    }
+    @if (lastRefresh) {
+      <span class="text-muted" style="font-size:12px;">
+        <i class="fas fa-clock" style="color:var(--orange-primary);"></i>
+        Vérifié à {{ lastRefresh }}
+      </span>
+    }
     <button class="btn btn-ghost btn-sm" (click)="refresh()" [disabled]="loading">
       <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i>
       Actualiser
@@ -23,9 +27,11 @@
 </div>
 
 <!-- ── Erreur de chargement (jamais de données périmées sans alerte) ── -->
-<div *ngIf="loadError" class="alert-banner critical mb-24" role="alert" style="padding:12px 16px;border-left:4px solid #dc2626;background:rgba(220,38,38,.08);">
-  <i class="fas fa-triangle-exclamation"></i> {{ loadError }}
-</div>
+@if (loadError) {
+  <div class="alert-banner critical mb-24" role="alert" style="padding:12px 16px;border-left:4px solid #dc2626;background:rgba(220,38,38,.08);">
+    <i class="fas fa-triangle-exclamation"></i> {{ loadError }}
+  </div>
+}
 
 <!-- ── KPI Cards ── -->
 <div class="grid-4 mb-24">
@@ -65,44 +71,51 @@
 </div>
 
 <!-- ── Loading ── -->
-<div *ngIf="loading" style="padding:60px;text-align:center;">
-  <div class="spinner-orange"></div>
-  <div class="text-muted" style="margin-top:14px;">Vérification de l'infrastructure en cours…</div>
-</div>
-
-<ng-container *ngIf="!loading">
-
-  <!-- ── Politique de redémarrage des VM (VM_DOWN 3+1) ── -->
-  <div class="card mb-24" *ngIf="vmPolicy.length > 0">
-    <div class="card-header">
-      <h3 class="card-title"><i class="fas fa-power-off"></i> Politique de redémarrage des VM</h3>
-    </div>
-    <div class="data-table-wrapper">
-      <table class="data-table">
-        <thead><tr><th>VM</th><th>Adresse</th><th>Alimentation</th><th>Politique</th></tr></thead>
-        <tbody>
-          <tr *ngFor="let v of vmPolicy">
-            <td>{{ v.name }}</td>
-            <td>{{ v.ip }}</td>
-            <td>
-              <span class="badge-status" [ngClass]="v.powerState === 'RUNNING' ? 'success' : (v.powerState === 'POWERED_OFF' ? 'critical' : 'running')">
-                {{ powerLabel(v.powerState) }}
-              </span>
-              <span class="text-muted" *ngIf="v.maintenance" style="font-size:11px;"> · maintenance</span>
-            </td>
-            <td>
-              <span class="badge-status" [ngClass]="v.mode === 'AUTO' ? 'success' : (v.mode === 'DETECT_ONLY' ? 'warning' : 'running')">
-                {{ modeLabel(v.mode) }}
-              </span>
-              <span class="text-muted" *ngIf="routeNote(v)" style="font-size:11px;"> · {{ routeNote(v) }}</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+@if (loading) {
+  <div style="padding:60px;text-align:center;">
+    <div class="spinner-orange"></div>
+    <div class="text-muted" style="margin-top:14px;">Vérification de l'infrastructure en cours…</div>
   </div>
+}
 
-
+@if (!loading) {
+  <!-- ── Politique de redémarrage des VM (VM_DOWN 3+1) ── -->
+  @if (vmPolicy.length > 0) {
+    <div class="card mb-24">
+      <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-power-off"></i> Politique de redémarrage des VM</h3>
+      </div>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead><tr><th>VM</th><th>Adresse</th><th>Alimentation</th><th>Politique</th></tr></thead>
+          <tbody>
+            @for (v of vmPolicy; track v) {
+              <tr>
+                <td>{{ v.name }}</td>
+                <td>{{ v.ip }}</td>
+                <td>
+                  <span class="badge-status" [ngClass]="v.powerState === 'RUNNING' ? 'success' : (v.powerState === 'POWERED_OFF' ? 'critical' : 'running')">
+                    {{ powerLabel(v.powerState) }}
+                  </span>
+                  @if (v.maintenance) {
+                    <span class="text-muted" style="font-size:11px;"> · maintenance</span>
+                  }
+                </td>
+                <td>
+                  <span class="badge-status" [ngClass]="v.mode === 'AUTO' ? 'success' : (v.mode === 'DETECT_ONLY' ? 'warning' : 'running')">
+                    {{ modeLabel(v.mode) }}
+                  </span>
+                  @if (routeNote(v)) {
+                    <span class="text-muted" style="font-size:11px;"> · {{ routeNote(v) }}</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
   <!-- ── VM Services Grid ── -->
   <div class="card mb-20">
     <div class="card-header">
@@ -111,60 +124,65 @@
         Services des VMs
       </div>
       <div style="display:flex;gap:8px;">
-        <span class="badge-status success" *ngIf="upCount > 0">
-          <i class="fas fa-circle-check"></i> {{ upCount }} UP
-        </span>
-        <span class="badge-status critical" *ngIf="downCount > 0">
-          <i class="fas fa-circle-xmark"></i> {{ downCount }} DOWN
-        </span>
+        @if (upCount > 0) {
+          <span class="badge-status success">
+            <i class="fas fa-circle-check"></i> {{ upCount }} UP
+          </span>
+        }
+        @if (downCount > 0) {
+          <span class="badge-status critical">
+            <i class="fas fa-circle-xmark"></i> {{ downCount }} DOWN
+          </span>
+        }
       </div>
     </div>
-
     <div class="card-body">
       <div class="grid-3">
-        <div *ngFor="let c of getVmComponents()"
-             class="vm-card"
-             [ngClass]="c.up ? 'healthy' : 'critical'">
-          <div class="vm-header">
-            <div>
-              <div class="vm-name">
-                <i class="fas fa-server" style="color:var(--orange-primary);margin-right:6px;font-size:13px;"></i>
-                {{ c.app }}
+        @for (c of getVmComponents(); track c) {
+          <div
+            class="vm-card"
+            [ngClass]="c.up ? 'healthy' : 'critical'">
+            <div class="vm-header">
+              <div>
+                <div class="vm-name">
+                  <i class="fas fa-server" style="color:var(--orange-primary);margin-right:6px;font-size:13px;"></i>
+                  {{ c.app }}
+                </div>
+                <div class="vm-ip">{{ getMeta(c.app).ip }} — {{ getMeta(c.app).role }}</div>
               </div>
-              <div class="vm-ip">{{ getMeta(c.app).ip }} — {{ getMeta(c.app).role }}</div>
+              <span class="badge-status" [ngClass]="c.up ? 'healthy' : 'down'">
+                {{ c.up ? 'UP' : 'DOWN' }}
+              </span>
             </div>
-            <span class="badge-status" [ngClass]="c.up ? 'healthy' : 'down'">
-              {{ c.up ? 'UP' : 'DOWN' }}
-            </span>
-          </div>
-
-          <div class="vm-metric">
-            <span class="metric-name">Statut</span>
-            <span class="metric-value" [style.color]="c.up ? 'var(--color-success)' : 'var(--color-danger)'">
-              {{ c.status }}
-            </span>
-          </div>
-          <div class="vm-metric">
-            <span class="metric-name">Détail</span>
-            <span class="metric-value" style="font-size:12px;max-width:140px;text-align:right;word-break:break-all;">{{ c.detail }}</span>
-          </div>
-
-          <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px;">
-            <span *ngFor="let svc of getMeta(c.app).services"
+            <div class="vm-metric">
+              <span class="metric-name">Statut</span>
+              <span class="metric-value" [style.color]="c.up ? 'var(--color-success)' : 'var(--color-danger)'">
+                {{ c.status }}
+              </span>
+            </div>
+            <div class="vm-metric">
+              <span class="metric-name">Détail</span>
+              <span class="metric-value" style="font-size:12px;max-width:140px;text-align:right;word-break:break-all;">{{ c.detail }}</span>
+            </div>
+            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px;">
+              @for (svc of getMeta(c.app).services; track svc) {
+                <span
                   style="background:var(--gray-100);color:var(--gray-700);font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;">
-              {{ svc }}
-            </span>
+                  {{ svc }}
+                </span>
+              }
+            </div>
           </div>
+        }
+      </div>
+      @if (getVmComponents().length === 0) {
+        <div class="empty-state">
+          <div class="empty-icon"><i class="fas fa-server"></i></div>
+          <div class="empty-title">Aucun composant VM</div>
         </div>
-      </div>
-
-      <div *ngIf="getVmComponents().length === 0" class="empty-state">
-        <div class="empty-icon"><i class="fas fa-server"></i></div>
-        <div class="empty-title">Aucun composant VM</div>
-      </div>
+      }
     </div>
   </div>
-
   <!-- ── K8s Nodes Table ── -->
   <div class="card">
     <div class="card-header">
@@ -174,42 +192,45 @@
       </div>
       <span class="badge-status running">{{ getK8sNodes().length }} nœuds</span>
     </div>
-
-    <div *ngIf="getK8sNodes().length === 0" class="empty-state">
-      <div class="empty-icon"><i class="fas fa-dharmachakra"></i></div>
-      <div class="empty-title">Nœuds non accessibles</div>
-      <div class="empty-text">Les nœuds K8s ne sont pas accessibles depuis l'extérieur du cluster.</div>
-    </div>
-
-    <div *ngIf="getK8sNodes().length > 0" class="data-table-wrapper">
-      <table class="orange-table">
-        <thead>
-          <tr>
-            <th>Nœud</th>
-            <th>Adresse IP</th>
-            <th>Statut</th>
-            <th>Détail</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let node of getK8sNodes()">
-            <td>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <i class="fas fa-dharmachakra" style="color:var(--color-info);"></i>
-                <span class="mono" style="font-weight:600;">{{ node.app }}</span>
-              </div>
-            </td>
-            <td><span class="mono" style="color:var(--gray-600);">{{ getMeta(node.app).ip }}</span></td>
-            <td>
-              <span class="badge-status" [ngClass]="node.up ? 'healthy' : 'down'">
-                {{ node.up ? 'Ready' : 'NotReady' }}
-              </span>
-            </td>
-            <td class="col-meta">{{ node.detail }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    @if (getK8sNodes().length === 0) {
+      <div class="empty-state">
+        <div class="empty-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div class="empty-title">Nœuds non accessibles</div>
+        <div class="empty-text">Les nœuds K8s ne sont pas accessibles depuis l'extérieur du cluster.</div>
+      </div>
+    }
+    @if (getK8sNodes().length > 0) {
+      <div class="data-table-wrapper">
+        <table class="orange-table">
+          <thead>
+            <tr>
+              <th>Nœud</th>
+              <th>Adresse IP</th>
+              <th>Statut</th>
+              <th>Détail</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (node of getK8sNodes(); track node) {
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-dharmachakra" style="color:var(--color-info);"></i>
+                    <span class="mono" style="font-weight:600;">{{ node.app }}</span>
+                  </div>
+                </td>
+                <td><span class="mono" style="color:var(--gray-600);">{{ getMeta(node.app).ip }}</span></td>
+                <td>
+                  <span class="badge-status" [ngClass]="node.up ? 'healthy' : 'down'">
+                    {{ node.up ? 'Ready' : 'NotReady' }}
+                  </span>
+                </td>
+                <td class="col-meta">{{ node.detail }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
   </div>
-
-</ng-container>
+}
