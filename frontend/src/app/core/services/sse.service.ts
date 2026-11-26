@@ -17,9 +17,6 @@ export class SseService implements OnDestroy {
 
   private incidentCreated$ = new Subject<any>();
   private incidentUpdated$ = new Subject<any>();
-  private finetuningLog$ = new Subject<string>();
-  private finetuningDone$ = new Subject<any>();
-  private finetuningStarted$ = new Subject<any>();
   private connected$ = new Subject<boolean>();
 
   constructor() {
@@ -69,28 +66,6 @@ export class SseService implements OnDestroy {
         }
       });
 
-      this.eventSource.addEventListener('finetuning_log', (event: MessageEvent) => {
-        this.finetuningLog$.next(event.data);
-      });
-
-      this.eventSource.addEventListener('finetuning_done', (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.finetuningDone$.next(data);
-        } catch {
-          this.finetuningDone$.next(event.data);
-        }
-      });
-
-      this.eventSource.addEventListener('finetuning_started', (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.finetuningStarted$.next(data);
-        } catch {
-          this.finetuningStarted$.next(event.data);
-        }
-      });
-
       this.eventSource.onmessage = (event: MessageEvent) => {
         // generic message handler
       };
@@ -118,18 +93,6 @@ export class SseService implements OnDestroy {
     return this.incidentUpdated$.asObservable();
   }
 
-  onFinetuningLog(): Observable<string> {
-    return this.finetuningLog$.asObservable();
-  }
-
-  onFinetuningDone(): Observable<any> {
-    return this.finetuningDone$.asObservable();
-  }
-
-  onFinetuningStarted(): Observable<any> {
-    return this.finetuningStarted$.asObservable();
-  }
-
   onConnected(): Observable<boolean> {
     return this.connected$.asObservable();
   }
@@ -143,9 +106,6 @@ export class SseService implements OnDestroy {
     }
     this.incidentCreated$.complete();
     this.incidentUpdated$.complete();
-    this.finetuningLog$.complete();
-    this.finetuningDone$.complete();
-    this.finetuningStarted$.complete();
     this.connected$.complete();
   }
 }

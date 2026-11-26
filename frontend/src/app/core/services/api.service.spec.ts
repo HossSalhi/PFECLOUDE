@@ -3,6 +3,12 @@ import { HttpClientTestingModule, HttpTestingController } from '@angular/common/
 import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { ApiService } from './api.service';
 import { AuthInterceptor } from '../interceptors/auth.interceptor';
+import { AuthService } from './auth.service';
+import { environment } from '../../../environments/environment';
+
+// Le service préfixe toutes les routes par environment.apiBaseUrl (config dev/prod volontaire).
+// Les assertions ci-dessous vérifient donc l'URL COMPLÈTE réellement émise (base + /api/...).
+const BASE = environment.apiBaseUrl;
 
 describe('ApiService', () => {
   let service: ApiService;
@@ -18,6 +24,9 @@ describe('ApiService', () => {
     });
     service = TestBed.inject(ApiService);
     httpMock = TestBed.inject(HttpTestingController);
+    // L'intercepteur n'ajoute `Authorization` que si un token existe : on simule un utilisateur
+    // authentifié pour vérifier réellement ce comportement (précondition manquante à l'origine).
+    spyOn(TestBed.inject(AuthService), 'getAccessToken').and.returnValue('test-token');
   });
 
   afterEach(() => httpMock.verify());
@@ -38,7 +47,7 @@ describe('ApiService', () => {
       expect(data.openIncidents).toBe(2);
     });
 
-    const req = httpMock.expectOne('/api/dashboard/summary');
+    const req = httpMock.expectOne(`${BASE}/api/dashboard/summary`);
     expect(req.request.method).toBe('GET');
     expect(req.request.headers.has('Authorization')).toBeTrue();
     req.flush(mockSummary);
@@ -47,7 +56,7 @@ describe('ApiService', () => {
   it('getIncidents should pass pagination params', () => {
     service.getIncidents(2, 10, 'OPEN').subscribe();
 
-    const req = httpMock.expectOne(r => r.url === '/api/incidents');
+    const req = httpMock.expectOne(r => r.url === `${BASE}/api/incidents`);
     expect(req.request.params.get('page')).toBe('2');
     expect(req.request.params.get('size')).toBe('10');
     expect(req.request.params.get('status')).toBe('OPEN');
@@ -57,7 +66,7 @@ describe('ApiService', () => {
   it('getIncidents should not pass status param when ALL', () => {
     service.getIncidents(0, 20, 'ALL').subscribe();
 
-    const req = httpMock.expectOne(r => r.url === '/api/incidents');
+    const req = httpMock.expectOne(r => r.url === `${BASE}/api/incidents`);
     expect(req.request.params.has('status')).toBeFalse();
     req.flush({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 20 });
   });
@@ -65,7 +74,7 @@ describe('ApiService', () => {
   it('updateIncidentStatus should use PUT method', () => {
     service.updateIncidentStatus(42, 'RESOLVED').subscribe();
 
-    const req = httpMock.expectOne('/api/incidents/42/status/RESOLVED');
+    const req = httpMock.expectOne(`${BASE}/api/incidents/42/status/RESOLVED`);
     expect(req.request.method).toBe('PUT');
     req.flush({ id: 42, status: 'RESOLVED' });
   });
@@ -73,7 +82,7 @@ describe('ApiService', () => {
   it('submitFeedback should POST with correct body', () => {
     service.submitFeedback(1, true, 'Correct decision').subscribe();
 
-    const req = httpMock.expectOne('/api/feedback/incident/1');
+    const req = httpMock.expectOne(`${BASE}/api/feedback/incident/1`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body.correct).toBeTrue();
     expect(req.request.body.comment).toBe('Correct decision');
@@ -88,7 +97,7 @@ describe('ApiService', () => {
       }
     });
 
-    const req = httpMock.expectOne('/api/incidents/999');
+    const req = httpMock.expectOne(`${BASE}/api/incidents/999`);
     req.flush('Not found', { status: 404, statusText: 'Not Found' });
   });
 });

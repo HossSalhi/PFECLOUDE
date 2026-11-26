@@ -11,7 +11,6 @@ import { InfrastructureComponent } from './features/infrastructure/infrastructur
 import { AiDecisionsComponent } from './features/ai-decisions/ai-decisions.component';
 import { RemediationComponent } from './features/remediation/remediation.component';
 import { HumanTasksComponent } from './features/human-tasks/human-tasks.component';
-import { FineTuningComponent } from './features/fine-tuning/fine-tuning.component';
 import { IncidentDetailComponent } from './features/incidents/incident-detail/incident-detail.component';
 import { NotFoundComponent } from './shared/not-found/not-found.component';
 import { RegisterComponent } from './features/register/register.component';
@@ -27,7 +26,6 @@ import { AuditTrailComponent } from './features/audit-trail/audit-trail.componen
 import { ReportsComponent } from './features/reports/reports.component';
 
 const ADMIN_ROLES  = ['ADMIN', 'SUPER_ADMIN'];
-const SUPER_ONLY   = ['SUPER_ADMIN'];
 
 const routes: Routes = [
   // Public — redirect to dashboard if already logged in
@@ -59,9 +57,6 @@ const routes: Routes = [
   { path: 'team-tasks',  component: TeamTasksComponent,   canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TASKS_VIEW'] } },
   { path: 'audit-trail', component: AuditTrailComponent,  canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL'] } },
   { path: 'reports',     component: ReportsComponent,     canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['REPORTS_VIEW'] } },
-
-  // SUPER_ADMIN only
-  { path: 'fine-tuning', component: FineTuningComponent, canActivate: [AuthGuard, RoleGuard], data: { roles: SUPER_ONLY } },
 
   { path: '404', component: NotFoundComponent },
   { path: '**',  component: NotFoundComponent }

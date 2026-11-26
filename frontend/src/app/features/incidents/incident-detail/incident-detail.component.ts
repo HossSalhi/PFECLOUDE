@@ -1,7 +1,8 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { ApiService, Incident, Action, WorkflowLogEntry } from '../../../core/services/api.service';
+import { ApiService, Incident, Action, WorkflowLogEntry, TerminalEvidence, IncidentVerification } from '../../../core/services/api.service';
+import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, REMEDIATION_CONFIG_VERSION } from '../../../core/config/remediation-scenarios';
 
 interface HistoryEntry {
   id: number;
@@ -19,8 +20,13 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
   history: HistoryEntry[] = [];
   actions: Action[] = [];
   workflowLogs: WorkflowLogEntry[] = [];
+  // LOT HELIOS-INCIDENT-IDENTITY-CARD-01 — preuves terminal AVANT/APRÈS + vérification finale
+  evidence: TerminalEvidence[] = [];
+  verification: IncidentVerification | null = null;
   loading = true;
   incidentId!: number;
+  // Version de la configuration déterministe affichée (mirroir du mapping backend).
+  configVersion = REMEDIATION_CONFIG_VERSION;
   private subs: Subscription[] = [];
 
   constructor(
@@ -55,10 +61,72 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
       next: logs => { this.workflowLogs = logs || []; },
       error: () => {}
     });
+    // Preuves terminal (BEFORE/AFTER) — vides tant qu'un mécanisme d'exécution ne les a pas fournies.
+    this.api.getIncidentEvidence(this.incidentId).subscribe({
+      next: ev => { this.evidence = ev || []; },
+      error: () => { this.evidence = []; }
+    });
+    // Vérification finale — null tant que non collectée (HTTP 204).
+    this.api.getIncidentVerification(this.incidentId).subscribe({
+      next: v => { this.verification = v || null; },
+      error: () => { this.verification = null; }
+    });
+  }
+
+  /** Preuves d'une phase donnée (BEFORE/AFTER). */
+  evidenceByPhase(phase: string): TerminalEvidence[] {
+    return this.evidence.filter(e => e.phase === phase);
+  }
+
+  /** true si la preuve est une donnée de TEST explicite (source = FIXTURE). */
+  isFixture(e: TerminalEvidence): boolean {
+    return (e.source || '').toUpperCase() === 'FIXTURE';
+  }
+
+  /** Paires clé/valeur des mesures extraites (JSON), ou [] si aucune. */
+  measurePairs(json: string | null): { k: string; v: any }[] {
+    if (!json) { return []; }
+    try {
+      const o = JSON.parse(json);
+      return Object.keys(o).map(k => ({ k, v: o[k] }));
+    } catch {
+      return [];
+    }
   }
 
   goBack(): void {
     this.router.navigate(['/incidents']);
+  }
+
+  /** Scénario métier déterministe (CPU / VM_DOWN / DISK) dérivé du type d'incident, ou null. */
+  scenario(): ScenarioRule | null {
+    return scenarioForIncidentType(this.incident?.incidentType);
+  }
+
+  /**
+   * VMDOWN-POLICY (consigne finale 2026-11-06) : .160 (k8s-monitoring, VM de supervision) est en DÉTECTION SEULE — elle
+   * n'est JAMAIS rallumée automatiquement ; incident et notifications d'interface seulement (aucun e-mail, aucune
+   * escalade Camunda). Noms exacts : aucun alias.
+   */
+  isSupervisionDetectionOnly(): boolean {
+    return this.incident?.namespace === 'infra' && this.incident?.app === 'k8s-monitoring';
+  }
+
+  /** Libellé lisible du niveau de validation d'un scénario. */
+  validationText(status: string): string {
+    return validationLabel(status as any);
+  }
+
+  /** Titre présenté sans terminologie héritée (la donnée persistée n'est jamais modifiée). */
+  displayTitle(t: string | null | undefined): string {
+    return neutralizeAiText(t);
+  }
+
+  /** Libellé NEUTRE de la source : les anciennes données de détection sont présentées sans jargon. */
+  sourceLabel(): string {
+    const s = (this.incident?.source || '').toUpperCase();
+    if (s === 'AI') { return 'DÉTECTION'; }
+    return this.incident?.source || '—';
   }
 
   getSeverityClass(s: string): string { return s?.toLowerCase() || ''; }
@@ -109,6 +177,28 @@ export class IncidentDetailComponent implements OnInit, OnDestroy {
   }
 
   hasStructuredExplanation(): boolean { return this.explanationSections().length > 0; }
+
+  /** Action RECOMMANDÉE par la détection/diagnostic, extraite de l'explication ("Recommended action: X"),
+   *  ou null. C'est une recommandation, PAS une preuve d'exécution. */
+  recommendedAction(): string | null {
+    const m = (this.incident?.explanation || '').match(/Recommended action:\s*([A-Za-z0-9_]+)/i);
+    return m ? m[1].trim() : null;
+  }
+
+  /** Cause racine issue des données ("root cause: …"), ou null → l'UI affiche « Cause racine non déterminée ». */
+  rootCause(): string | null {
+    const m = (this.incident?.explanation || '').match(/(?:K8s\s+)?root cause:\s*(.*?)(?:\.\s*Recommended action:|$)/i);
+    const v = m && m[1] ? m[1].trim().replace(/[.;]\s*$/, '') : '';
+    return v || null;
+  }
+
+  /** Actions RÉELLEMENT enregistrées = source d'autorité de ce qui a été exécuté / escaladé / échoué. */
+  hasExecutedActions(): boolean { return this.actions.length > 0; }
+
+  /** true si une action d'escalade a été enregistrée (aucune action technique exécutée sur la cible). */
+  isEscalationOnly(): boolean {
+    return this.actions.length > 0 && this.actions.every(a => (a.actionType || a.type || '').toUpperCase() === 'ESCALATION');
+  }
 
   ngOnDestroy(): void {
     this.subs.forEach(s => s.unsubscribe());

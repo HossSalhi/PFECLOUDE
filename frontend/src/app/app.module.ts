@@ -18,7 +18,6 @@ import { InfrastructureComponent } from './features/infrastructure/infrastructur
 import { AiDecisionsComponent } from './features/ai-decisions/ai-decisions.component';
 import { RemediationComponent } from './features/remediation/remediation.component';
 import { HumanTasksComponent } from './features/human-tasks/human-tasks.component';
-import { FineTuningComponent } from './features/fine-tuning/fine-tuning.component';
 import { IncidentDetailComponent } from './features/incidents/incident-detail/incident-detail.component';
 import { RegisterComponent } from './features/register/register.component';
 import { ForgotPasswordComponent } from './features/forgot-password/forgot-password.component';
@@ -43,7 +42,6 @@ import { ReportViewComponent } from './features/reports/report-view.component';
     AiDecisionsComponent,
     RemediationComponent,
     HumanTasksComponent,
-    FineTuningComponent,
     IncidentDetailComponent,
     RegisterComponent,
     ForgotPasswordComponent,

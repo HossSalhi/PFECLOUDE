@@ -76,7 +76,7 @@ export class AppComponent implements OnInit, OnDestroy {
     { label: 'Incidents',       icon: '🚨', route: '/incidents' },
     { label: 'Applications',    icon: '📱', route: '/applications' },
     { label: 'Infrastructure',  icon: '🖥️', route: '/infrastructure' },
-    { label: 'AI Decisions',    icon: '🤖', route: '/ai-decisions' },
+    { label: 'Décisions de remédiation', icon: '⚖️', route: '/ai-decisions' },
     { label: 'Remediation',     icon: '🔧', route: '/remediation' },
     { label: 'Human Tasks',     icon: '👤', route: '/tasks' },
   ];

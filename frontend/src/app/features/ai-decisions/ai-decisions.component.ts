@@ -3,7 +3,15 @@ import { Subscription } from 'rxjs';
 import { ApiService, Incident, PagedResponse } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { SseService } from '../../core/services/sse.service';
+import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, BusinessScenario } from '../../core/config/remediation-scenarios';
 
+/**
+ * Page « Décisions de remédiation » — DÉTERMINISTE.
+ *
+ * Pour chaque incident, affiche la RÈGLE déterministe réellement appliquée (scénario CPU / VM_DOWN /
+ * DISK) et l'ACTION configurée, dérivées du catalogue déterministe (miroir de bridge.py). Aucune
+ * notion de « confiance IA » : la décision ne dépend d'aucun modèle. Un type non couvert -> escalade.
+ */
 @Component({
   selector: 'app-ai-decisions',
   templateUrl: './ai-decisions.component.html'
@@ -12,28 +20,28 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
   incidents: Incident[] = [];
   filtered: Incident[] = [];
   loading = true;
-  confidenceFilter = 'ALL';
+  scenarioFilter: 'ALL' | BusinessScenario = 'ALL';
   expandedId: number | null = null;
   private subs: Subscription[] = [];
 
-  // Feedback state
+  // Retour opérateur (endpoint réel /api/feedback)
   feedbackIncidentId: number | null = null;
-  feedbackCorrect: boolean = true;
-  feedbackComment: string = '';
-  feedbackSuccess: string = '';
+  feedbackCorrect = true;
+  feedbackComment = '';
+  feedbackSuccess = '';
 
-  confidenceFilters = [
-    { label: 'All', value: 'ALL' },
-    { label: 'High (>0.7)', value: 'HIGH' },
-    { label: 'Medium (0.4-0.7)', value: 'MEDIUM' },
-    { label: 'Low (<0.4)', value: 'LOW' }
+  scenarioFilters: { label: string; value: 'ALL' | BusinessScenario }[] = [
+    { label: 'Tous', value: 'ALL' },
+    { label: 'CPU', value: 'CPU' },
+    { label: 'VM_DOWN', value: 'VM_DOWN' },
+    { label: 'DISK', value: 'DISK' }
   ];
 
   constructor(private api: ApiService, private auth: AuthService, private sse: SseService) {}
 
   ngOnInit(): void {
     this.load();
-    // Real-time: refresh when any incident is created or updated.
+    // Temps réel : rafraîchir à chaque création/mise à jour d'incident.
     this.subs.push(this.sse.onIncidentCreated().subscribe(() => this.load()));
     this.subs.push(this.sse.onIncidentUpdated().subscribe(() => this.load()));
   }
@@ -43,7 +51,7 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
     this.fetchPage(0, []);
   }
 
-  // Fetch ALL pages (the API caps size at 100) so every AI-analysed incident is shown.
+  // Récupère TOUTES les pages (l'API plafonne size à 100).
   private fetchPage(page: number, acc: Incident[]): void {
     this.api.getIncidents(page, 100).subscribe({
       next: (resp: PagedResponse<Incident>) => {
@@ -52,13 +60,13 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
         if (page + 1 < totalPages && page < 49) {
           this.fetchPage(page + 1, all);
         } else {
-          this.incidents = all.filter(i => i.source === 'AI' || i.confidence != null);
+          this.incidents = all;
           this.applyFilter();
           this.loading = false;
         }
       },
       error: () => {
-        this.incidents = acc.filter(i => i.source === 'AI' || i.confidence != null);
+        this.incidents = acc;
         this.applyFilter();
         this.loading = false;
       }
@@ -66,28 +74,34 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
   }
 
   applyFilter(): void {
-    if (this.confidenceFilter === 'ALL') {
+    if (this.scenarioFilter === 'ALL') {
       this.filtered = this.incidents;
-    } else if (this.confidenceFilter === 'HIGH') {
-      this.filtered = this.incidents.filter(i => (i.confidence || 0) > 0.7);
-    } else if (this.confidenceFilter === 'MEDIUM') {
-      this.filtered = this.incidents.filter(i => {
-        const c = i.confidence || 0;
-        return c >= 0.4 && c <= 0.7;
-      });
-    } else if (this.confidenceFilter === 'LOW') {
-      this.filtered = this.incidents.filter(i => (i.confidence || 0) < 0.4);
+    } else {
+      this.filtered = this.incidents.filter(i => this.scenarioOf(i)?.scenario === this.scenarioFilter);
     }
   }
 
-  setFilter(f: string): void {
-    this.confidenceFilter = f;
+  setFilter(f: 'ALL' | BusinessScenario): void {
+    this.scenarioFilter = f;
     this.applyFilter();
+  }
+
+  /** Règle déterministe (scénario) applicable à un incident, ou null (type non couvert -> escalade). */
+  scenarioOf(inc: Incident): ScenarioRule | null {
+    return scenarioForIncidentType(inc?.incidentType);
+  }
+
+  validationText(status: string): string {
+    return validationLabel(status as any);
+  }
+
+  /** Titre présenté sans terminologie héritée (la donnée persistée n'est jamais modifiée). */
+  displayTitle(t: string | null | undefined): string {
+    return neutralizeAiText(t);
   }
 
   toggleExpand(id: number): void {
     this.expandedId = this.expandedId === id ? null : id;
-    // Close feedback if expanding a different row
     if (this.feedbackIncidentId !== id) {
       this.feedbackIncidentId = null;
       this.feedbackSuccess = '';
@@ -111,27 +125,16 @@ export class AiDecisionsComponent implements OnInit, OnDestroy {
     this.api.submitFeedback(this.feedbackIncidentId, this.feedbackCorrect, this.feedbackComment, this.auth.getUsername() ?? 'operator')
       .subscribe({
         next: () => {
-          this.feedbackSuccess = 'Feedback envoyé avec succès !';
+          this.feedbackSuccess = 'Retour enregistré avec succès.';
           setTimeout(() => {
             this.feedbackIncidentId = null;
             this.feedbackSuccess = '';
           }, 2000);
         },
         error: () => {
-          this.feedbackSuccess = 'Erreur lors de l\'envoi du feedback.';
+          this.feedbackSuccess = 'Erreur lors de l\'envoi du retour.';
         }
       });
-  }
-
-  getConfidenceClass(c: number | undefined): string {
-    if (c === undefined || c === null) return 'medium';
-    if (c < 0.4) return 'low';
-    if (c <= 0.7) return 'medium';
-    return 'high';
-  }
-
-  getConfidencePct(c: number | undefined): number {
-    return Math.round((c || 0) * 100);
   }
 
   getSeverityClass(s: string): string { return s?.toLowerCase() || ''; }

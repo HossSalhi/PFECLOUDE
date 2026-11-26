@@ -8,7 +8,7 @@
       <app-orange-logo [size]="52" style="filter:drop-shadow(0 3px 12px rgba(255,121,0,.5));flex-shrink:0;"></app-orange-logo>
       <div class="brand-label">
         <div class="brand-name">HELIOS</div>
-        <div class="brand-sub">AIOps Platform</div>
+        <div class="brand-sub">Supervision &amp; Auto-remédiation</div>
       </div>
     </div>
 
@@ -49,14 +49,14 @@
         <span class="nav-label">Infrastructure</span>
       </a>
 
-      <!-- Intelligence IA -->
+      <!-- Remédiation déterministe -->
       <ng-container *ngIf="authService.isAtLeastAdmin()">
         <div class="nav-divider"></div>
-        <div class="nav-section-label">Intelligence IA</div>
+        <div class="nav-section-label">Remédiation déterministe</div>
 
         <a routerLink="/ai-decisions" class="nav-item" [class.active]="isActive('/ai-decisions')">
-          <i class="fas fa-brain nav-icon"></i>
-          <span class="nav-label">Décisions IA</span>
+          <i class="fas fa-scale-balanced nav-icon"></i>
+          <span class="nav-label">Décisions de remédiation</span>
         </a>
 
         <a routerLink="/remediation" class="nav-item" [class.active]="isActive('/remediation')">

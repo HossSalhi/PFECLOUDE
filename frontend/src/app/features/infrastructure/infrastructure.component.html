@@ -22,6 +22,11 @@
   </div>
 </div>
 
+<!-- ── Erreur de chargement (jamais de données périmées sans alerte) ── -->
+<div *ngIf="loadError" class="alert-banner critical mb-24" role="alert" style="padding:12px 16px;border-left:4px solid #dc2626;background:rgba(220,38,38,.08);">
+  <i class="fas fa-triangle-exclamation"></i> {{ loadError }}
+</div>
+
 <!-- ── KPI Cards ── -->
 <div class="grid-4 mb-24">
 
@@ -66,6 +71,37 @@
 </div>
 
 <ng-container *ngIf="!loading">
+
+  <!-- ── Politique de redémarrage des VM (VM_DOWN 3+1) ── -->
+  <div class="card mb-24" *ngIf="vmPolicy.length > 0">
+    <div class="card-header">
+      <h3 class="card-title"><i class="fas fa-power-off"></i> Politique de redémarrage des VM</h3>
+    </div>
+    <div class="data-table-wrapper">
+      <table class="data-table">
+        <thead><tr><th>VM</th><th>Adresse</th><th>Alimentation</th><th>Politique</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let v of vmPolicy">
+            <td>{{ v.name }}</td>
+            <td>{{ v.ip }}</td>
+            <td>
+              <span class="badge-status" [ngClass]="v.powerState === 'RUNNING' ? 'success' : (v.powerState === 'POWERED_OFF' ? 'critical' : 'running')">
+                {{ powerLabel(v.powerState) }}
+              </span>
+              <span class="text-muted" *ngIf="v.maintenance" style="font-size:11px;"> · maintenance</span>
+            </td>
+            <td>
+              <span class="badge-status" [ngClass]="v.mode === 'AUTO' ? 'success' : (v.mode === 'DETECT_ONLY' ? 'warning' : 'running')">
+                {{ modeLabel(v.mode) }}
+              </span>
+              <span class="text-muted" *ngIf="routeNote(v)" style="font-size:11px;"> · {{ routeNote(v) }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 
   <!-- ── VM Services Grid ── -->
   <div class="card mb-20">

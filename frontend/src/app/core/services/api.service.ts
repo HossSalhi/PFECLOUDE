@@ -88,13 +88,6 @@ export interface RemediationSummary {
   hoursWindow: number;
 }
 
-export interface FineTuningStatus {
-  running: boolean;
-  status: string;
-  startedAt: string | null;
-  lastLog: string | null;
-}
-
 export interface FaultState {
   [key: string]: boolean;
 }
@@ -129,6 +122,47 @@ export interface WorkflowLogEntry {
   id: number;
   message: string;
   createdAt: string;
+}
+
+// LOT HELIOS-INCIDENT-IDENTITY-CARD-01 — carte d'identité d'incident
+export interface TerminalEvidence {
+  id: number;
+  incidentId: number;
+  vm: string;
+  phase: 'BEFORE' | 'AFTER';
+  capturedAt: string;
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  measuresJson: string | null;
+  available: boolean;
+  source: string;
+}
+
+export interface IncidentVerification {
+  id: number;
+  incidentId: number;
+  criteria: string;
+  result: string;
+  measuresJson: string | null;
+  reason: string;
+  verifiedAt: string;
+  available: boolean;
+}
+
+export interface IncidentCard {
+  identity: any;
+  timeline: { id: number; status: string; comment: string; at: string }[];
+  evidenceBefore: TerminalEvidence[];
+  evidenceAfter: TerminalEvidence[];
+  verification: IncidentVerification | null;
+  completeness: {
+    hasTimeline: boolean;
+    hasEvidenceBefore: boolean;
+    hasEvidenceAfter: boolean;
+    hasVerification: boolean;
+  };
 }
 
 @Injectable({
@@ -222,6 +256,22 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  // LOT HELIOS-INCIDENT-IDENTITY-CARD-01 — carte d'identité : preuves terminal + vérification finale
+  getIncidentEvidence(id: number): Observable<TerminalEvidence[]> {
+    return this.http.get<TerminalEvidence[]>(`${this.baseUrl}/api/incidents/${id}/evidence`)
+      .pipe(catchError(this.handleError));
+  }
+
+  getIncidentVerification(id: number): Observable<IncidentVerification | null> {
+    return this.http.get<IncidentVerification | null>(`${this.baseUrl}/api/incidents/${id}/verification`)
+      .pipe(catchError(this.handleError));
+  }
+
+  getIncidentCard(id: number): Observable<IncidentCard> {
+    return this.http.get<IncidentCard>(`${this.baseUrl}/api/incidents/${id}/card`)
+      .pipe(catchError(this.handleError));
+  }
+
   getActionsHistory(page = 0, size = 20): Observable<PagedResponse<Action>> {
     const params = new HttpParams()
       .set('page', page.toString())
@@ -258,19 +308,6 @@ export class ApiService {
   getRemediationSummary(hours = 24): Observable<RemediationSummary> {
     const params = new HttpParams().set('hours', hours.toString());
     return this.http.get<RemediationSummary>(`${this.baseUrl}/api/operations/remediation/summary`, { params })
-      .pipe(catchError(this.handleError));
-  }
-
-  getFineTuningStatus(): Observable<FineTuningStatus> {
-    return this.http.get<FineTuningStatus>(`${this.baseUrl}/api/finetuning/status`)
-      .pipe(catchError(this.handleError));
-  }
-
-  triggerFineTuning(force = false, minIncidents = 20): Observable<any> {
-    const params = new HttpParams()
-      .set('force', force.toString())
-      .set('minIncidents', minIncidents.toString());
-    return this.http.post(`${this.baseUrl}/api/finetuning/trigger`, {}, { params })
       .pipe(catchError(this.handleError));
   }
 
