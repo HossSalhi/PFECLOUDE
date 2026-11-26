@@ -17,8 +17,9 @@ type Tab = 'reports' | 'stats' | 'schedules';
  * réelles ; cette page ne fabrique aucune donnée.
  */
 @Component({
-  selector: 'app-reports',
-  templateUrl: './reports.component.html'
+    selector: 'app-reports',
+    templateUrl: './reports.component.html',
+    standalone: false
 })
 export class ReportsComponent implements OnInit {
 

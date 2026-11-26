@@ -8,8 +8,9 @@ import { formatDate, toLocalIso } from '../../shared/date.util';
  * Réutilisé par la consultation d'un rapport enregistré et par les statistiques calculées à la demande.
  */
 @Component({
-  selector: 'app-report-view',
-  templateUrl: './report-view.component.html'
+    selector: 'app-report-view',
+    templateUrl: './report-view.component.html',
+    standalone: false
 })
 export class ReportViewComponent implements OnChanges {
 

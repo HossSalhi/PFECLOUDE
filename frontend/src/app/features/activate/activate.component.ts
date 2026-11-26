@@ -3,8 +3,9 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 
 @Component({
-  selector: 'app-activate',
-  templateUrl: './activate.component.html'
+    selector: 'app-activate',
+    templateUrl: './activate.component.html',
+    standalone: false
 })
 export class ActivateComponent implements OnInit {
   token = '';

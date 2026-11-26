@@ -20,8 +20,9 @@ const FIELD_LABELS: Record<string, string> = {
  * Une maintenance est une information de gestion : elle n'arrête ni la supervision ni les mécanismes de sécurité.
  */
 @Component({
-  selector: 'app-maintenance',
-  templateUrl: './maintenance.component.html'
+    selector: 'app-maintenance',
+    templateUrl: './maintenance.component.html',
+    standalone: false
 })
 export class MaintenanceComponent implements OnInit {
 

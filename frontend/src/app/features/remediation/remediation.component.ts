@@ -4,8 +4,9 @@ import { ApiService, Action, RemediationSummary, PagedResponse } from '../../cor
 import { SseService } from '../../core/services/sse.service';
 
 @Component({
-  selector: 'app-remediation',
-  templateUrl: './remediation.component.html'
+    selector: 'app-remediation',
+    templateUrl: './remediation.component.html',
+    standalone: false
 })
 export class RemediationComponent implements OnInit, OnDestroy {
   summary: RemediationSummary | null = null;

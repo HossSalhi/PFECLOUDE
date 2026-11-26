@@ -11,8 +11,9 @@ export interface MonitoredApp {
 }
 
 @Component({
-  selector: 'app-applications',
-  templateUrl: './applications.component.html'
+    selector: 'app-applications',
+    templateUrl: './applications.component.html',
+    standalone: false
 })
 export class ApplicationsComponent implements OnInit, OnDestroy {
   loading = true;

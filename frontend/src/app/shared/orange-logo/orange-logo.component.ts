@@ -1,8 +1,8 @@
 import { Component, Input, OnChanges } from '@angular/core';
 
 @Component({
-  selector: 'app-orange-logo',
-  template: `
+    selector: 'app-orange-logo',
+    template: `
     <div class="ol-box"
          [style.width.px]="size"
          [style.height.px]="size">
@@ -20,7 +20,7 @@ import { Component, Input, OnChanges } from '@angular/core';
             [style.right.px]="tmRight">™</span>
     </div>
   `,
-  styles: [`
+    styles: [`
     :host { display: inline-block; line-height: 0; }
 
     .ol-box {
@@ -55,7 +55,8 @@ import { Component, Input, OnChanges } from '@angular/core';
       line-height: 1;
       -webkit-font-smoothing: antialiased;
     }
-  `]
+  `],
+    standalone: false
 })
 export class OrangeLogoComponent implements OnChanges {
   @Input() size = 60;

@@ -11,8 +11,9 @@ import { errorMessage, formatDateTime } from '../../shared/date.util';
  * avancement des tâches de l'équipe. Les responsables et membres sont des utilisateurs HELIOS existants.
  */
 @Component({
-  selector: 'app-teams',
-  templateUrl: './teams.component.html'
+    selector: 'app-teams',
+    templateUrl: './teams.component.html',
+    standalone: false
 })
 export class TeamsComponent implements OnInit {
 

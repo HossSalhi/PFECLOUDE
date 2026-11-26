@@ -29,8 +29,9 @@ export interface VmPolicyEntry {
 }
 
 @Component({
-  selector: 'app-infrastructure',
-  templateUrl: './infrastructure.component.html'
+    selector: 'app-infrastructure',
+    templateUrl: './infrastructure.component.html',
+    standalone: false
 })
 export class InfrastructureComponent implements OnInit, OnDestroy {
   loading = true;

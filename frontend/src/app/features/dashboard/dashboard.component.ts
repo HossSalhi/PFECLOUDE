@@ -5,8 +5,9 @@ import { ApiService, DashboardSummary, Incident } from '../../core/services/api.
 import { SseService } from '../../core/services/sse.service';
 
 @Component({
-  selector: 'app-dashboard',
-  templateUrl: './dashboard.component.html'
+    selector: 'app-dashboard',
+    templateUrl: './dashboard.component.html',
+    standalone: false
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   summary: DashboardSummary | null = null;

@@ -13,8 +13,9 @@ import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRul
  * notion de « confiance IA » : la décision ne dépend d'aucun modèle. Un type non couvert -> escalade.
  */
 @Component({
-  selector: 'app-ai-decisions',
-  templateUrl: './ai-decisions.component.html'
+    selector: 'app-ai-decisions',
+    templateUrl: './ai-decisions.component.html',
+    standalone: false
 })
 export class AiDecisionsComponent implements OnInit, OnDestroy {
   incidents: Incident[] = [];

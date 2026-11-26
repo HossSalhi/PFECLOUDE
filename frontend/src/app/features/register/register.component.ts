@@ -3,8 +3,9 @@ import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 
 @Component({
-  selector: 'app-register',
-  templateUrl: './register.component.html'
+    selector: 'app-register',
+    templateUrl: './register.component.html',
+    standalone: false
 })
 export class RegisterComponent {
   firstName = '';

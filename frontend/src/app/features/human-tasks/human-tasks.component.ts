@@ -10,8 +10,9 @@ import { SseService } from '../../core/services/sse.service';
  * (hors HELIOS). Plus de tâches d'approbation (supprimées avec le mode autonome).
  */
 @Component({
-  selector: 'app-human-tasks',
-  templateUrl: './human-tasks.component.html'
+    selector: 'app-human-tasks',
+    templateUrl: './human-tasks.component.html',
+    standalone: false
 })
 export class HumanTasksComponent implements OnInit, OnDestroy {
   failedIncidents: Incident[] = [];

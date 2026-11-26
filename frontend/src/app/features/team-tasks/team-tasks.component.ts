@@ -17,8 +17,9 @@ import { allowedTransitions } from '../../shared/task-transitions.util';
  * aux gestionnaires — règles appliquées par le Backend, reprises ici pour n'afficher que les actions utiles.
  */
 @Component({
-  selector: 'app-team-tasks',
-  templateUrl: './team-tasks.component.html'
+    selector: 'app-team-tasks',
+    templateUrl: './team-tasks.component.html',
+    standalone: false
 })
 export class TeamTasksComponent implements OnInit {
 

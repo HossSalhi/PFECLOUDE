@@ -3,8 +3,9 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 
 @Component({
-  selector: 'app-reset-password',
-  templateUrl: './reset-password.component.html'
+    selector: 'app-reset-password',
+    templateUrl: './reset-password.component.html',
+    standalone: false
 })
 export class ResetPasswordComponent implements OnInit {
   token = '';

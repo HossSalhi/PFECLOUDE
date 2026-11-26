@@ -3,8 +3,9 @@ import { ApiService, UserData } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
-  selector: 'app-users',
-  templateUrl: './users.component.html'
+    selector: 'app-users',
+    templateUrl: './users.component.html',
+    standalone: false
 })
 export class UsersComponent implements OnInit {
   users: UserData[] = [];

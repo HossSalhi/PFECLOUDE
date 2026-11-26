@@ -12,8 +12,9 @@ interface HistoryEntry {
 }
 
 @Component({
-  selector: 'app-incident-detail',
-  templateUrl: './incident-detail.component.html'
+    selector: 'app-incident-detail',
+    templateUrl: './incident-detail.component.html',
+    standalone: false
 })
 export class IncidentDetailComponent implements OnInit, OnDestroy {
   incident: Incident | null = null;

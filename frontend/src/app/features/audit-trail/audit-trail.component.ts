@@ -20,8 +20,9 @@ const RESULT_LABELS: Record<string, string> = { SUCCESS: 'Succès', FAILURE: 'É
  * Un utilisateur sans droit global ne voit que sa propre activité (règle appliquée par le Backend).
  */
 @Component({
-  selector: 'app-audit-trail',
-  templateUrl: './audit-trail.component.html'
+    selector: 'app-audit-trail',
+    templateUrl: './audit-trail.component.html',
+    standalone: false
 })
 export class AuditTrailComponent implements OnInit {
 

@@ -5,8 +5,9 @@ import { ApiService, Incident, PagedResponse } from '../../core/services/api.ser
 import { SseService } from '../../core/services/sse.service';
 
 @Component({
-  selector: 'app-incidents',
-  templateUrl: './incidents.component.html'
+    selector: 'app-incidents',
+    templateUrl: './incidents.component.html',
+    standalone: false
 })
 export class IncidentsComponent implements OnInit, OnDestroy {
   incidents: Incident[] = [];
