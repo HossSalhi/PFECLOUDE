@@ -54,24 +54,23 @@ for port in 8000 8088 26500 9600; do
 done
 
 for cidr in 192.168.126.0/24 192.168.194.0/24; do
-  for port in 8000 8088 26500 9600; do
+  for port in 8088 26500 9600; do
     sudo ufw allow from "${cidr}" to any port "${port}" proto tcp || true
   done
 done
 
 sudo systemctl enable --now camunda8.service
 sudo systemctl enable --now camunda8-rest-proxy.service
-sudo systemctl enable --now pfe-ai-service.service
 
 echo
 echo "=== Route table ==="
 ip route | egrep '192.168.126.0|192.168.194.0' || true
 echo
 echo "=== Listening ports ==="
-ss -ltnp | egrep '(:8000|:8088|:26500|:9600)' || true
+ss -ltnp | egrep '(:8088|:26500|:9600)' || true
 echo
 echo "=== Service status ==="
-systemctl --no-pager --full status pfe-ai-service camunda8 camunda8-rest-proxy || true
+systemctl --no-pager --full status camunda8 camunda8-rest-proxy || true
 echo
 echo "=== Monitoring reachability ==="
 curl -s "http://${MONITORING_VM_IP}:9090/api/v1/query?query=up" | head -c 200 || true

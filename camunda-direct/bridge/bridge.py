@@ -20,9 +20,35 @@ Perimetre de securite :
   - cibles limitees a une table fixe (master / worker1 / worker2).
   - toute commande est journalisee dans /var/log/helios-ssh-bridge.log AVANT execution.
 """
-import json, os, re, smtplib, subprocess, threading, time
+import importlib.util as _ilu
+import json, os, re, shlex, smtplib, subprocess, threading, time
+import helios_incident_card_client as CARD
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# ------------------------------------------------------- CATALOGUE CANONIQUE (autorite)
+# helios_action_catalog.py est la SEULE autorite sur ce qui est executable. Il est depose
+# a cote de ce fichier par deploy_bridge.py.
+#
+# FAIL-CLOSED, volontairement brutal : si le catalogue est absent, illisible, ou si ses
+# controles d'integrite echouent, le bridge NE DEMARRE PAS. Un Policy Enforcement Point
+# sans politique n'a aucune raison de tourner, et tout repli silencieux serait exactement
+# la classe de faille que cette version supprime (audit du 2026-08-05).
+_CAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "helios_action_catalog.py")
+try:
+    _spec = _ilu.spec_from_file_location("helios_action_catalog", _CAT_PATH)
+    CAT = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(CAT)
+except Exception as _e:                                       # pragma: no cover
+    raise SystemExit(
+        "HELIOS FATAL : catalogue d'actions introuvable ou illisible (%s) : %s\n"
+        "Le bridge est un Policy Enforcement Point : sans catalogue, il ne demarre pas."
+        % (_CAT_PATH, _e))
+_PB_CAT = CAT.verifier()
+if _PB_CAT:                                                   # pragma: no cover
+    raise SystemExit("HELIOS FATAL : catalogue incoherent :\n  - "
+                     + "\n  - ".join(_PB_CAT))
 
 NOEUDS = {"master": "192.168.148.153", "worker1": "192.168.148.158", "worker2": "192.168.148.155",
           "monitoring": "192.168.148.160",   # .160 : detection (Prometheus/Loki/Grafana en local)
@@ -51,6 +77,19 @@ SUIVI = {}                       # (ns,cible) -> {type,action,resultat,ok,ts,ema
 _SUIVI_LOCK = threading.Lock()
 
 SUR = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}$")   # noms K8s : pas d'injection shell
+# Un ACTION_ID n'a jamais ete valide : il partait directement dans la deduction par
+# mots-cles. Il est desormais contraint AVANT toute consultation du catalogue.
+ACTION_SUR = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+# Metacaracteres shell. Servent a l'invariant structurel de _rendu_sans_injection().
+METACARACTERES = (";", "&&", "||", "|", "`", "$(", "${", ">", "<", "\n", "\r", "\\", "&")
+# Namespace conventionnel des incidents de scope NOEUD (detecter.py:152-160 : les modes
+# "noeud" et "hote" rendent {"ns": "k8s-nodes", "cible": n, "noeud": n}).
+NS_NOEUDS = ("k8s-nodes", "")
+# /exec expose une commande ARBITRAIRE : c'est une surface d'administration, pas une
+# brique du cycle self-healing (verifie : le BPMN n'appelle que /detecter, /action,
+# /trace). Le verrou permet de la fermer sans toucher au reste. Defaut = comportement
+# actuel preserve, pour ne pas casser la verification post-deploiement de deploy_bridge.py.
+EXEC_ACTIF = os.environ.get("HELIOS_EXEC_ENABLED", "1") not in ("0", "false", "no")
 
 
 def tracer(*parts):
@@ -63,28 +102,73 @@ def tracer(*parts):
     print(ligne, flush=True)
 
 
-def executer(noeud, commande):
+def executer(noeud, commande, stdin_data=None):
     ip = NOEUDS[noeud]
     tracer("EXEC", noeud, ip, "|", commande)
-    argv = ["sshpass", "-p", MDP, "ssh",
-            "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
-            "%s@%s" % (UTIL, ip), commande]
+
+    password_read_fd = None
+    password_write_fd = None
+
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=DELAI)
-        res = {"host": noeud, "ip": ip, "command": commande, "exitCode": p.returncode,
-               "stdout": p.stdout.strip()[:4000], "stderr": p.stderr.strip()[:2000],
-               "ok": p.returncode == 0}
+        # Descripteur distinct pour sshpass : le secret n'est pas dans argv.
+        password_read_fd, password_write_fd = os.pipe()
+        os.write(password_write_fd, (MDP + "\n").encode("utf-8"))
+        os.close(password_write_fd)
+        password_write_fd = None
+
+        argv = ["sshpass", "-d", str(password_read_fd), "ssh",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
+                "%s@%s" % (UTIL, ip), commande]
+
+        run_kwargs = {
+            "capture_output": True,
+            "text": True,
+            "timeout": DELAI,
+            "pass_fds": (password_read_fd,),
+        }
+        if stdin_data is not None:
+            run_kwargs["input"] = stdin_data
+
+        p = subprocess.run(argv, **run_kwargs)
+        res = {
+            "host": noeud, "ip": ip, "command": commande,
+            "exitCode": p.returncode,
+            "stdout": p.stdout.strip()[:4000],
+            "stderr": p.stderr.strip()[:2000],
+            "ok": p.returncode == 0,
+        }
     except subprocess.TimeoutExpired:
-        res = {"host": noeud, "ip": ip, "command": commande, "exitCode": 124,
-               "stdout": "", "stderr": "timeout apres %ds" % DELAI, "ok": False}
-    # Resume HONNETE : en cas d'echec on remonte stderr, jamais une chaine vide qui
-    # se lirait comme un succes dans la trace.
+        res = {
+            "host": noeud, "ip": ip, "command": commande,
+            "exitCode": 124, "stdout": "",
+            "stderr": "timeout apres %ds" % DELAI,
+            "ok": False,
+        }
+    except (OSError, ValueError) as exc:
+        res = {
+            "host": noeud, "ip": ip, "command": commande,
+            "exitCode": 126, "stdout": "",
+            "stderr": "echec local de lancement SSH (%s)" % type(exc).__name__,
+            "ok": False,
+        }
+    finally:
+        for fd in (password_write_fd, password_read_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    # Resume HONNETE : en cas d'echec, remonter l'erreur sans exposer le secret.
     if res["ok"]:
-        res["resume"] = res["stdout"][:300].replace("\n", " ") or "commande executee"
+        res["resume"] = res["stdout"][:300].replace("\\n", " ") or "commande executee"
     else:
-        res["resume"] = "ECHEC(exit=%s) %s" % (res["exitCode"],
-                        (res["stderr"] or res["stdout"] or "aucune sortie")[:250].replace("\n", " "))
+        res["resume"] = "ECHEC(exit=%s) %s" % (
+            res["exitCode"],
+            (res["stderr"] or res["stdout"] or "aucune sortie")[:250].replace("\\n", " ")
+        )
     tracer("RES ", noeud, "exit=%s" % res["exitCode"], "|", res["resume"][:130])
     return res
 
@@ -170,14 +254,25 @@ def executer_kubectl(commande):
 # le bridge ne les executera JAMAIS, il alertera un humain.
 ACTION_PAR_TYPE_MESURE = {
     # --- reparables sans risque ---
-    "NODE_HIGH_CPU":            "RESTART_POD_TO_REBALANCE_LOAD",
+    "NODE_HIGH_CPU":            "HOST_SERVICE_CPU_QUOTA",
+    "NODE_CPU_SATURATION":      "HOST_SERVICE_CPU_QUOTA",
     "NODE_HIGH_MEMORY":         "RESTART_POD_TO_RECLAIM_MEMORY",
-    "NODE_DISK_FULL":           "HOST_IMAGE_GC",
+    "NODE_DISK_FULL":           "HOST_RECLAIM_DISK",
     "NODE_INODES_FULL":         "HOST_CLEAN_INODES",
     "NODE_TIME_DRIFT":          "HOST_SYNC_TIME",
     "NODE_CORDONED":            "UNCORDON_NODE",
-    "NODE_DISK_PRESSURE":       "NODE_DISK_PRESSURE",
-    "NODE_NOT_READY":           "RESTART_NODE_VM",
+    # P1 corrige le 2026-08-05 : l'action "NODE_DISK_PRESSURE" lancait
+    # `journalctl --vacuum-size=150M; crictl rmi --prune || true`. Or `--prune` supprime
+    # TOUTE image non referencee par un conteneur en cours — donc pfe-backend pendant un
+    # rollout ou apres un scale-to-zero — sur un cluster AIR-GAP ou rien n'est
+    # re-telechargeable => ImagePullBackOff. Le commentaire l.213-214 de ce meme fichier
+    # l'interdisait deja explicitement ; le code le faisait quand meme.
+    # HOST_RECLAIM_DISK libere plus d'espace par des voies sures (journaux, logs tournes,
+    # /tmp) et ne touche a aucune image.
+    "NODE_DISK_PRESSURE":       "HOST_RECLAIM_DISK",
+    "NODE_NOT_READY":           "HOST_RESTART_KUBELET",
+    "VM_POWERED_OFF":           "RESTART_NODE_VM",
+    "VM_DOWN":                  "RESTART_NODE_VM",
     "PVC_NOT_BOUND":            "RESTART_STORAGE_PROVISIONER",
     # --- ESCALADE VOLONTAIRE : jamais d'action automatique ---
     # etcd : une mauvaise manipulation detruit le cluster (perte de donnees irreversible).
@@ -199,109 +294,137 @@ ACTION_PAR_TYPE_MESURE = {
 }
 
 
-# ---------------------------------------------------------------- catalogue
-# K = commande kubectl lancee sur un NOEUD CLUSTER VIVANT (kubeconfig admin, aucune limite RBAC)
-# N = commande systeme lancee sur le NOEUD concerne
-# V = rallumage par l'hyperviseur (watchdog hote) : seule voie si la VM est ETEINTE
-def catalogue(action, ns, cible, noeud):
-    d = {"ns": ns, "c": cible}
-    nk = noeud_kubectl()          # resolu UNE fois par appel (et non par entree du dict)
-    K = lambda cmd: (nk, cmd)
-    N = lambda cmd: (noeud, "echo %s | sudo -S -p '' bash -c '%s'" % (MDP, cmd))
-    # commandes HOST (SSH sur la VM) reutilisees par les noms de TYPE (detecteur) ET d'ACTION (catalogue IA)
-    # PAS de `crictl rmi --prune` : ce cluster est AIR-GAP (images locales sans registre) -> le prune
-    # supprimerait des images non re-telechargeables (ex. pfe-backend) => ImagePullBackOff. Uniquement
-    # journaux/logs/temp (sur). `crictl rmi --prune` serait sur seulement avec un vrai registre.
-    _DISK = 'journalctl --vacuum-size=200M >/dev/null 2>&1; rm -f /tmp/inc* /tmp/fill* /root/incfill /root/bigfile 2>/dev/null; find /var/log -type f -name "*.gz" -delete 2>/dev/null; find /var/log -type f -name "*.[0-9]" -delete 2>/dev/null; df -h / | tail -1'
-    _CPU  = 'pkill -9 -x yes 2>/dev/null; pkill -9 stress 2>/dev/null; pkill -9 cpuburn 2>/dev/null; pkill -9 -x dd 2>/dev/null; uptime'
-    _MEM  = 'sync; echo 3 > /proc/sys/vm/drop_caches; pkill -9 stress 2>/dev/null; pkill -9 cpuburn 2>/dev/null; free -h | head -2'
-    _TIME = 'timedatectl set-ntp true 2>/dev/null; systemctl restart systemd-timesyncd 2>/dev/null; chronyc makestep 2>/dev/null; timedatectl 2>/dev/null | grep -iE "synchro|NTP"'
-    # Inodes satures : ce sont les PETITS fichiers qui comptent, pas leur taille. On vise les
-    # endroits qui en accumulent des milliers (journaux tournes, caches, /tmp).
-    _INODES = ('journalctl --vacuum-files=3 >/dev/null 2>&1; '
-               'find /var/log -type f \\( -name "*.gz" -o -name "*.[0-9]" \\) -delete 2>/dev/null; '
-               'find /tmp /var/tmp -type f -mtime +1 -delete 2>/dev/null; '
-               'find /var/lib/containerd -type f -name "*.tmp" -delete 2>/dev/null; '
-               'df -i / | tail -1')
+# ------------------------------------------------- RESOLUTION D'ACTION (Policy Enforcement)
+# CE BLOC EST LE POINT D'APPLICATION DE LA POLITIQUE DE SECURITE.
+# Il n'existe plus de table locale, plus de repli, plus de second systeme de decision :
+# une commande ne peut provenir QUE d'un gabarit fige de helios_action_catalog.py.
+#
+# SUPPRIME le 2026-08-05 (audit P0/P1) :
+#   - la table locale de 44 entrees, dont 3 lancaient `kubectl delete networkpolicy
+#     -n {ns} --all` (REMOVE_NETWORK_POLICY, FIX_NETWORK_POLICY, NETWORK_POLICY_BLOCKING) ;
+#   - "ESCALATE_NODE_OUTAGE_AND_REBALANCE": `systemctl restart kubelet` — un identifiant
+#     prefixe ESCALATE_ qui executait une remediation ;
+#   - "NODE_DISK_PRESSURE": `crictl rmi --prune` — interdit sur ce cluster air-gap par le
+#     commentaire de ce fichier lui-meme ;
+#   - le REPLI PAR FAMILLE (`"NETWORK" in a`, `"ROLLBACK" in a`, `"RESTART" in a`, ...) :
+#     tout identifiant contenant un sous-mot devenait une commande. Mesure du 2026-08-05 :
+#     `FOO_POLICY_BAR` effacait toutes les NetworkPolicies du namespace, et
+#     `PLEASE_DO_NOT_RESTART` redemarrait le deploiement.
 
-    table = {
-        # --- pods ---
-        "RESTART_POD":                 K("kubectl delete pod -n {ns} -l app={c} --ignore-not-found"),
-        "DELETE_CRASHLOOPING_PODS":    K("kubectl delete pod -n {ns} -l app={c} --ignore-not-found"),
-        "DELETE_MALICIOUS_POD":        K("kubectl delete pod -n {ns} -l app={c} --force --grace-period=0 --ignore-not-found"),
-        "FORCE_DELETE_POD":            K("kubectl delete pod -n {ns} -l app={c} --force --grace-period=0 --ignore-not-found"),
-        "POD_STUCK_TERMINATING":       K("for p in $(kubectl get pod -n {ns} -l app={c} -o name); do kubectl patch $p -n {ns} -p '{{\"metadata\":{{\"finalizers\":null}}}}' --type=merge; done"),
-        # --- deploiements ---
-        "ROLLBACK_DEPLOYMENT":         K("kubectl rollout undo deployment/{c} -n {ns}"),
-        "DEPLOYMENT_ROLLBACK_REQUIRED":K("kubectl rollout undo deployment/{c} -n {ns}"),
-        "ROLLBACK_TO_PULLABLE_IMAGE":  K("kubectl rollout undo deployment/{c} -n {ns}"),
-        "ROLLBACK_LAST_RELEASE_AND_RESTART": K("kubectl rollout undo deployment/{c} -n {ns}; kubectl rollout restart deployment/{c} -n {ns}"),
-        "FORCE_RECREATE_DEPLOYMENT":   K("kubectl rollout restart deployment/{c} -n {ns}"),
-        "RESTART_SERVICE":             K("kubectl rollout restart deployment/{c} -n {ns}"),
-        # --- capacite ---
-        "SCALE_DEPLOYMENT":            K("kubectl scale deployment/{c} -n {ns} --replicas=2"),
-        "SCALE_UP_AND_REBALANCE_LOAD": K("kubectl scale deployment/{c} -n {ns} --replicas=2"),
-        "SCALE_DOWN":                  K("kubectl scale deployment/{c} -n {ns} --replicas=1"),
-        "INCREASE_CPU":                K("kubectl set resources deployment/{c} -n {ns} --limits=cpu=1 --requests=cpu=200m"),
-        # --- reseau ---
-        "REMOVE_NETWORK_POLICY":       K("kubectl delete networkpolicy -n {ns} --all --ignore-not-found"),
-        "FIX_NETWORK_POLICY":          K("kubectl delete networkpolicy -n {ns} --all --ignore-not-found"),
-        "NETWORK_POLICY_BLOCKING":     K("kubectl delete networkpolicy -n {ns} --all --ignore-not-found"),
-        # --- configuration ---
-        "RECREATE_CONFIGMAP":          K("kubectl rollout restart deployment/{c} -n {ns}"),
-        "RECREATE_SECRET":             K("kubectl rollout restart deployment/{c} -n {ns}"),
-        # --- noeuds : cluster ---
-        "CORDON_NODE":                 K("kubectl cordon {c}"),
-        "CORDON_AND_ISOLATE":          K("kubectl cordon {c}"),
-        "DRAIN_NODE":                  K("kubectl drain {c} --ignore-daemonsets --delete-emptydir-data --force --timeout=60s"),
-        # --- noeuds : systeme (SSH sur la VM concernee) ---
-        "RESTART_KUBELET":             N("systemctl restart kubelet"),
-        "RESTART_CONTAINERD":          N("systemctl restart containerd && systemctl restart kubelet"),
-        "NODE_DISK_PRESSURE":          N("journalctl --vacuum-size=150M; crictl rmi --prune || true"),
-        "ESCALATE_NODE_OUTAGE_AND_REBALANCE": N("systemctl restart kubelet"),
-        "NODE_NOT_READY":              N("systemctl restart kubelet"),
-        # --- HOTE : liberer les ressources BRUTES de la VM (SSH). ALIGNE : chaque incident host repond
-        # a la fois par son NOM DE TYPE (detecteur) ET par le NOM D'ACTION recommande par l'IA (catalogue),
-        # pour que "l'IA recommande -> Camunda execute" marche de bout en bout. pkill par NOM (pas -f) sinon auto-kill.
-        "NODE_DISK_FULL":    N(_DISK), "HOST_IMAGE_GC":                 N(_DISK),
-        "NODE_HIGH_CPU":     N(_CPU),  "RESTART_POD_TO_REBALANCE_LOAD": N(_CPU), "NODE_CPU_SATURATION":  N(_CPU),
-        "NODE_HIGH_MEMORY":  N(_MEM),  "RESTART_POD_TO_RECLAIM_MEMORY": N(_MEM), "NODE_MEMORY_PRESSURE": N(_MEM),
-        "NODE_TIME_DRIFT":   N(_TIME), "HOST_SYNC_TIME":                N(_TIME),
-        # --- incidents host ajoutes le 01/08 : REPARABLES sans risque ---
-        "NODE_INODES_FULL":  N(_INODES), "HOST_CLEAN_INODES":           N(_INODES),
-        # un noeud laisse en cordon apres une maintenance : le remettre en service est sans danger
-        "NODE_CORDONED":     K("kubectl uncordon {c}"), "UNCORDON_NODE": K("kubectl uncordon {c}"),
-        # PVC non lie : c'est le provisionneur de stockage qui est coince, on le relance
-        "PVC_NOT_BOUND":     K("kubectl -n local-path-storage rollout restart deployment/local-path-provisioner"),
-        "RESTART_STORAGE_PROVISIONER": K("kubectl -n local-path-storage rollout restart deployment/local-path-provisioner"),
-    }
-    if action in table:
-        h, cmd = table[action]
-        return h, cmd.format(**d)
-    # rallumage d'une VM eteinte : hors SSH, seul l'hyperviseur peut le faire
-    if action in ("RESTART_VM", "RESTART_NODE_VM", "VM_DOWN"):
-        return "__watchdog__", noeud
-    # REPLI PAR FAMILLE : l'IA renvoie parfois une VARIANTE de nom absente de la table
-    # (ex. ROLLBACK_LAST_REVISION_AND_RESTART vs ..._RELEASE_...). Plutot que de ne RIEN
-    # faire, on deduit la commande du mot-cle. Une escalade explicite n'est jamais executee.
-    a = action.upper()
-    if "ESCALATE" in a or "HUMAN" in a or "MANUAL" in a:
+
+def _rendu_sans_injection(gabarit, commande):
+    """INVARIANT STRUCTUREL, independant de toute expression reguliere.
+
+    Substituer {ns}/{c}/{n} ne doit INTRODUIRE aucun metacaractere shell absent du
+    gabarit. Si un parametre contenait `;`, `$(`, `&&`, un saut de ligne..., le rendu
+    en porterait davantage que le gabarit d'origine.
+
+    C'est une SECONDE barriere, de nature differente de SUR : elle ne suppose rien du
+    contenu des parametres, elle compare l'AVANT et l'APRES. Elle tient donc meme si
+    SUR etait un jour affaiblie, remplacee, ou contournee par un appelant.
+    """
+    for m in METACARACTERES:
+        if commande.count(m) != gabarit.count(m):
+            return False
+    return True
+
+
+def _scope_coherent(scope, ns, cible):
+    """Une action de scope NOEUD ne doit pas recevoir une cible applicative, et
+    reciproquement.
+
+    Fonde sur une mesure, pas sur une convention supposee : detecter.py:152-160 emet
+    les incidents de scope noeud avec ns="k8s-nodes" et cible = nom du noeud, et les
+    incidents applicatifs avec le namespace reel et cible = nom du deploiement.
+    """
+    if scope == CAT.SCOPE_NODE:
+        return ns in NS_NOEUDS and bool(cible)
+    if scope == CAT.SCOPE_WORKLOAD:
+        return ns not in NS_NOEUDS and bool(cible)
+    return True          # cluster / vm / none : aucune contrainte de cible
+
+
+def resoudre_action(action, ns, cible, noeud):
+    """ACTION_ID -> decision. SEUL chemin du systeme vers une commande.
+
+    decision : REJECTED | ESCALADE | WATCHDOG | AUCUNE | EXECUTE
+    Aucune branche ne fabrique de commande : `cmd` provient toujours d'un gabarit fige
+    du catalogue, rendu puis controle.
+    """
+    def _r(decision, motif, host=None, cmd=None, canon=None, spec=None):
+        return {"decision": decision, "motif": motif, "host": host, "cmd": cmd,
+                "action": canon or action, "spec": spec}
+
+    if not isinstance(action, str) or not ACTION_SUR.match(action.strip().upper()):
+        return _r("REJECTED", "identifiant d'action malforme")
+    spec = CAT.spec_for(action)
+    if spec is None:
+        return _r("REJECTED", "action absente du catalogue canonique")
+    canon, executor = spec["action_id"], spec["executor"]
+
+    if executor == CAT.EXEC_ESCALATE:
+        diag = spec.get("diagnostic") or ""
+        if diag:
+            # Rendu TEXTUEL uniquement, transmis a l'operateur dans la reponse.
+            # Le bridge ne l'execute JAMAIS : une escalade informe, elle n'agit pas.
+            try:
+                diag = diag.format(ns=ns, c=cible, n=cible)
+            except Exception:
+                diag = spec.get("diagnostic") or ""
+        return _r("ESCALADE", spec.get("effet", ""), canon=canon,
+                  spec=dict(spec, diagnostic=diag))
+    if executor == CAT.EXEC_NONE:
+        return _r("AUCUNE", spec.get("effet", ""), canon=canon, spec=spec)
+    if executor == CAT.EXEC_WATCHDOG:
+        return _r("WATCHDOG", spec.get("effet", ""), host="__watchdog__", cmd=noeud,
+                  canon=canon, spec=spec)
+
+    # ---- executables : TOUTE la validation a lieu AVANT le rendu ----------------
+    if not _scope_coherent(spec["scope"], ns, cible):
+        return _r("REJECTED", "scope %s incompatible avec ns=%r cible=%r"
+                  % (spec["scope"], ns, cible), canon=canon, spec=spec)
+    for nom, val in (("ns", ns), ("cible", cible), ("noeud", noeud)):
+        if val and not SUR.match(str(val)):
+            return _r("REJECTED", "parametre %s invalide" % nom, canon=canon, spec=spec)
+    gabarit = spec["template"]
+    # Une valeur VIDE passait le garde `if v and not SUR.match(v)` et produisait une
+    # commande tronquee. Un champ requis par le gabarit doit etre renseigne.
+    for champ, val in (("{ns}", ns), ("{c}", cible), ("{n}", cible)):
+        if champ in gabarit and not val:
+            return _r("REJECTED", "parametre %s requis et vide" % champ,
+                      canon=canon, spec=spec)
+
+    _canon, _ex, cmd = CAT.render(canon, ns=ns, cible=cible, noeud=cible)
+    if cmd is None:
+        return _r("REJECTED", "le catalogue n'a produit aucune commande",
+                  canon=canon, spec=spec)
+    if not _rendu_sans_injection(gabarit, cmd):
+        tracer("INJECTION REFUSEE |", canon, "| ns=%r cible=%r" % (ns, cible))
+        return _r("REJECTED", "metacaractere shell introduit par un parametre",
+                  canon=canon, spec=spec)
+
+    if executor == CAT.EXEC_KUBECTL:
+        return _r("EXECUTE", spec.get("effet", ""), host=noeud_kubectl(), cmd=cmd,
+                  canon=canon, spec=spec)
+    if executor == CAT.EXEC_NODE_SSH:
+        return _r("EXECUTE", spec.get("effet", ""), host=noeud,
+                  cmd="sudo -S -p '' bash -c " + shlex.quote(cmd),
+                  canon=canon, spec=spec)
+    return _r("REJECTED", "executeur inconnu : %s" % executor, canon=canon, spec=spec)
+
+
+def catalogue(action, ns, cible, noeud):
+    """Compatibilite historique : (host, commande).
+
+    (None, None) = REJETE : aucune commande n'a ete produite, rien ne sera execute.
+    """
+    r = resoudre_action(action, ns, cible, noeud)
+    if r["decision"] == "EXECUTE":
+        return r["host"], r["cmd"]
+    if r["decision"] == "ESCALADE":
         return "__escalade__", None
-    fam = None
-    if "ROLLBACK" in a:
-        fam = "kubectl rollout undo deployment/{c} -n {ns}"
-    elif "RECREATE" in a or "ROLLING" in a or ("RESTART" in a and "KUBELET" not in a and "CONTAINERD" not in a):
-        fam = "kubectl rollout restart deployment/{c} -n {ns}"
-    elif "SCALE" in a and "DOWN" in a:
-        fam = "kubectl scale deployment/{c} -n {ns} --replicas=1"
-    elif "SCALE" in a or "AUTOSCAL" in a:
-        fam = "kubectl scale deployment/{c} -n {ns} --replicas=2"
-    elif "NETWORK" in a or "NETPOL" in a or "POLICY" in a:
-        fam = "kubectl delete networkpolicy -n {ns} --all --ignore-not-found"
-    elif "DELETE" in a and "POD" in a:
-        fam = "kubectl delete pod -n {ns} -l app={c} --ignore-not-found"
-    if fam:
-        return nk, fam.format(**d)
+    if r["decision"] == "WATCHDOG":
+        return "__watchdog__", r["cmd"]
     return None, None
 
 
@@ -382,6 +505,75 @@ def sante_deploiement(ns, cible):
     return ok, etat or "?"
 
 
+
+# LOT Incident Card : activ? uniquement par configuration explicite.
+_CARD_INTEGRATION_ENABLED = (
+    os.environ.get("HELIOS_CARD_INTEGRATION_ENABLED", "0").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+
+_CARD_SCENARIOS_BY_TYPE = {
+    "NODE_HIGH_CPU": "CPU",
+    "NODE_CPU_SATURATION": "CPU",
+    "NODE_DISK_FULL": "DISK",
+    "NODE_DISK_PRESSURE": "DISK",
+    "VM_DOWN": "VM_DOWN",
+    "VM_POWERED_OFF": "VM_DOWN",
+}
+
+
+def _card_target(cible, noeud):
+    raw = str(cible or "").strip()
+    alias = raw[4:] if raw.startswith("k8s-") else raw
+    if alias not in NOEUDS:
+        alias = str(noeud or "").replace("k8s-", "").strip()
+    if alias not in NOEUDS:
+        raise ValueError("cible de carte hors liste de n?uds")
+    return "k8s-" + alias
+
+
+def _card_capture_outputs(scenario, target):
+    alias = target[4:]
+    if alias not in NOEUDS:
+        raise ValueError("alias de n?ud non autoris?")
+
+    if scenario == "CPU":
+        commands = [
+            "date -Is",
+            "uptime",
+            "cat /proc/loadavg",
+            "systemctl is-active helios-cpuload.service",
+            "cat /sys/fs/cgroup/system.slice/helios-cpuload.service/cpu.max",
+        ]
+        runner = lambda cmd: executer(alias, cmd)
+    elif scenario == "DISK":
+        commands = ["date -Is", "df -B1 /", "df -i /"]
+        runner = lambda cmd: executer(alias, cmd)
+    elif scenario == "VM_DOWN":
+        commands = ["kubectl get node " + target + " -o wide"]
+        runner = executer_kubectl
+    else:
+        raise ValueError("sc?nario non autoris?")
+
+    outputs = []
+    for command in commands:
+        result = runner(command)
+        if not isinstance(result, dict):
+            result = {}
+        try:
+            exit_code = int(result.get("exitCode", 1))
+        except (TypeError, ValueError):
+            exit_code = 1
+        outputs.append({
+            "command": command,
+            "exitCode": exit_code,
+            "stdout": str(result.get("stdout") or ""),
+            "stderr": str(result.get("stderr") or ""),
+            "capturedAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+    return outputs
+
+
 def verifier_suivi():
     """Appele a chaque /detecter : re-teste les remediations recentes, email si echec persistant."""
     maintenant = time.time()
@@ -440,11 +632,26 @@ class Handler(BaseHTTPRequestHandler):
             return self.repondre(400, {"erreur": "corps JSON invalide: %s" % e})
 
         if self.path == "/exec":
+            # SURFACE D'ADMINISTRATION, PAS UNE BRIQUE DU CYCLE SELF-HEALING.
+            # Verifie le 2026-08-05 : le BPMN n'appelle que /detecter, /action et /trace.
+            # Les seuls appelants de /exec sont deploy_bridge.py (verification
+            # post-deploiement sur les 3 noeuds) et test_action.py.
+            # Cet endpoint execute une commande ARBITRAIRE : il ne passe donc PAS par le
+            # catalogue, par conception. HELIOS_EXEC_ENABLED=0 le ferme completement, ce
+            # qui rend le bridge integralement gouverne par le catalogue.
+            # Defaut = 1 : ne pas casser la verification post-deploiement existante.
+            if not EXEC_ACTIF:
+                tracer("REFUS /exec desactive (HELIOS_EXEC_ENABLED=0) depuis",
+                       self.client_address[0])
+                return self.repondre(403, {
+                    "erreur": "/exec desactive",
+                    "detail": "execution arbitraire fermee ; utiliser /action (catalogue)"})
             noeud, commande = str(d.get("host", "")).strip(), str(d.get("command", "")).strip()
             if noeud not in NOEUDS:
                 return self.repondre(400, {"erreur": "noeud inconnu", "attendus": sorted(NOEUDS)})
             if not commande:
                 return self.repondre(400, {"erreur": "commande vide"})
+            tracer("EXEC-ARBITRAIRE (hors catalogue) depuis", self.client_address[0])
             return self.repondre(200, executer(noeud, commande))
 
         if self.path == "/detecter":
@@ -522,29 +729,174 @@ class Handler(BaseHTTPRequestHandler):
                     tracer("CATALOGUE", typ, "| action IA:", action or "(vide)",
                            "-> action deterministe:", deterministe)
                 action = deterministe
-            h, cmd = catalogue(action, ns, cible, noeud)
-            if h is None:
-                tracer("INCONNU action", action, "-> aucune commande")
-                return self.repondre(200, {"action": action, "execute": False, "ok": False,
-                                           "exitCode": -1, "stdout": "",
-                                           "stderr": "action hors catalogue : %s" % action})
-            if h == "__escalade__":
-                # L'IA demande explicitement une escalade humaine : on ne traduit RIEN
-                # au hasard, on le dit. (Securite / control-plane = jamais d'auto-action.)
-                tracer("ESCALADE", action, "-> aucune action automatique (operateur humain)")
-                return self.repondre(200, {"action": action, "execute": False, "ok": False,
-                                           "escalade": True, "exitCode": -1, "stdout": "",
-                                           "stderr": "escalade humaine : aucune action deterministe"})
-            if h == "__watchdog__":
-                r = rallumer(cmd)
-            elif cmd.startswith("kubectl"):
-                # commande cluster : passe par le selecteur (bascule si le noeud tombe)
-                r = executer_kubectl(cmd)
+            # SEUL point de decision. Aucune commande ne peut naitre ailleurs.
+            dec = resoudre_action(action, ns, cible, noeud)
+            etat, canon = dec["decision"], dec["action"]
+
+            # La carte et les preuves initiales doivent exister avant l'action.
+            card_id = None
+            card_scenario = _CARD_SCENARIOS_BY_TYPE.get(typ)
+            card_target = None
+            if (_CARD_INTEGRATION_ENABLED and card_scenario
+                    and etat in ("EXECUTE", "WATCHDOG")):
+                try:
+                    card_target = _card_target(cible, noeud)
+                    registered = CARD.ingest_host_incident(
+                        incident_type=typ,
+                        target=card_target,
+                        namespace="k8s-nodes",
+                        severity=d.get("severity")
+                            if isinstance(d.get("severity"), str) else None,
+                        detail=d.get("detail")
+                            if isinstance(d.get("detail"), str)
+                            else "Incident mesur? re?u par le Bridge",
+                        episode_key=d.get("episodeKey")
+                            if isinstance(d.get("episodeKey"), str) else None,
+                    )
+                    card_id = int(registered.get("incidentId") or 0)
+                    if card_id <= 0:
+                        raise RuntimeError("incidentId manquant")
+
+                    CARD.record_execution_event(
+                        card_id, "SELECTED", action=canon,
+                        detail="Action s?lectionn?e par le catalogue d?terministe",
+                    )
+                    before = _card_capture_outputs(card_scenario, card_target)
+                    CARD.collect_evidence(
+                        card_id, vm=card_target, phase="BEFORE",
+                        scenario=card_scenario, outputs=before, source="BRIDGE",
+                    )
+                except Exception as exc:
+                    tracer("INCIDENT_CARD_PRE_ACTION_KO", typ, type(exc).__name__)
+                    return self.repondre(503, {
+                        "action": canon, "execute": False, "ok": False,
+                        "exitCode": -1, "incidentId": card_id,
+                        "cardTracking": "FAILED",
+                        "stderr": "Carte ou preuves initiales indisponibles ; action non ex?cut?e.",
+                    })
+
+            if etat == "REJECTED":
+                # Refus EXPLICITE et trace. Aucune commande n'a ete produite : ni SSH,
+                # ni kubectl, ni modification d'infrastructure.
+                tracer("REJECTED", action, "|", dec["motif"])
+                return self.repondre(200, {
+                    "action": action, "execute": False, "ok": False, "rejected": True,
+                    "exitCode": -1, "stdout": "",
+                    "motif": dec["motif"],
+                    "stderr": "REJECTED : %s -> %s. Aucune commande produite."
+                              % (action or "(vide)", dec["motif"])})
+
+            if etat == "ESCALADE":
+                # Une escalade INFORME, elle n'agit pas. `diagnostic` est une commande
+                # lecture seule transmise a l'operateur : le bridge ne l'execute PAS.
+                spec = dec.get("spec") or {}
+                tracer("ESCALADE", canon, "-> operateur humain | diag:",
+                       spec.get("diagnostic") or "(aucun)")
+                return self.repondre(200, {
+                    "action": canon, "execute": False, "ok": False, "escalade": True,
+                    "exitCode": -1, "stdout": "",
+                    "motif": dec["motif"],
+                    "diagnostic": spec.get("diagnostic") or "",
+                    "diagnosticExecute": False,
+                    "stderr": "escalade humaine : aucune action automatique"})
+
+            if etat == "AUCUNE":
+                tracer("AUCUNE ACTION", canon, "|", dec["motif"])
+                return self.repondre(200, {
+                    "action": canon, "execute": False, "ok": True,
+                    "exitCode": 0, "stdout": "", "stderr": "",
+                    "motif": dec["motif"]})
+
+            if card_id is not None:
+                try:
+                    CARD.record_execution_event(
+                        card_id, "REQUESTED", action=canon,
+                        detail="Action demand?e au m?canisme d'ex?cution",
+                    )
+                    # Pour VM_DOWN, le watchdog ne garantit pas que le d?marrage a commenc?.
+                    if etat != "WATCHDOG":
+                        CARD.record_execution_event(
+                            card_id, "STARTED", action=canon,
+                            detail="Ex?cution commenc?e c?t? Bridge",
+                        )
+                except Exception as exc:
+                    tracer("INCIDENT_CARD_START_KO", card_id, type(exc).__name__)
+                    return self.repondre(503, {
+                        "action": canon, "execute": False, "ok": False,
+                        "exitCode": -1, "incidentId": card_id,
+                        "cardTracking": "FAILED",
+                        "stderr": "?v?nement pr?alable non enregistr? ; action non ex?cut?e.",
+                    })
+
+            if etat == "WATCHDOG":
+                r = rallumer(dec["cmd"])
+            elif dec["host"] == noeud and not dec["cmd"].startswith("kubectl"):
+                # commande HOST : doit s'executer sur CETTE VM precise
+                r = executer(dec["host"], dec["cmd"], stdin_data=(MDP + "\n") if dec.get("spec", {}).get("executor") == CAT.EXEC_NODE_SSH else None)
             else:
-                # commande HOST (systemctl/pkill...) : doit s'executer sur CETTE VM precise
-                r = executer(h, cmd)
-            r["action"] = action
+                # commande cluster : passe par le selecteur (bascule si le noeud tombe)
+                r = executer_kubectl(dec["cmd"])
+            if card_id is not None:
+                try:
+                    try:
+                        exit_code = int(r.get("exitCode", 1))
+                    except (TypeError, ValueError):
+                        exit_code = 1
+                    step_ok = r.get("ok") is True and exit_code == 0
+
+                    if card_scenario == "VM_DOWN":
+                        if step_ok:
+                            # Accept? ne signifie pas VM revenue ni n?ud Ready.
+                            CARD.record_execution_event(
+                                card_id, "ACCEPTED", action=canon,
+                                detail=(
+                                    "Watchdog a accept? la demande ; "
+                                    "v?rification du d?marrage encore n?cessaire."
+                                ),
+                            )
+                        else:
+                            CARD.record_execution_event(
+                                card_id, "FAILED", action=canon,
+                                detail="La demande au watchdog a ?chou?.",
+                                success=False,
+                            )
+                        # Ne pas capturer pr?matur?ment la preuve AFTER :
+                        # la VM peut encore ?tre en cours de d?marrage.
+                        r["verificationStatus"] = "PENDING"
+                        r["cardTracking"] = "RECORDED"
+                    else:
+                        if step_ok:
+                            CARD.record_execution_event(
+                                card_id, "COMPLETED", action=canon,
+                                detail="Commande termin?e ; r?cup?ration fonctionnelle ? v?rifier.",
+                                success=True,
+                            )
+                        else:
+                            CARD.record_execution_event(
+                                card_id, "FAILED", action=canon,
+                                detail="Commande ?chou?e ; consulter les sorties enregistr?es.",
+                                success=False,
+                            )
+
+                        after = _card_capture_outputs(card_scenario, card_target)
+                        CARD.collect_evidence(
+                            card_id, vm=card_target, phase="AFTER",
+                            scenario=card_scenario, outputs=after, source="BRIDGE",
+                        )
+                        r["verificationStatus"] = "PENDING"
+                        r["cardTracking"] = "RECORDED"
+                    r["incidentId"] = card_id
+                except Exception as exc:
+                    # L'action a d?j? ?t? tent?e : aucune relance automatique.
+                    tracer("INCIDENT_CARD_POST_ACTION_KO", card_id, type(exc).__name__)
+                    r["incidentId"] = card_id
+                    r["cardTracking"] = "INCOMPLETE"
+                    r["verificationStatus"] = "PENDING"
+
+            r["action"] = canon
+            r["actionDemandee"] = action
             r["execute"] = True
+            r["risque"] = (dec.get("spec") or {}).get("risk", "")
             return self.repondre(200, r)
 
         self.repondre(404, {"erreur": "chemin inconnu"})
@@ -553,12 +905,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-_NOMS = []
+# Vocabulaire expose par GET /actions. Vient du catalogue, seule autorite — et il est
+# desormais peuple a l'IMPORT et non plus sous `if __name__ == "__main__"`, ou il restait
+# vide quand le module etait importe (GET /actions rendait []).
+_NOMS = CAT.catalogue_ids()
+
 if __name__ == "__main__":
-    # liste des actions couvertes, pour /actions
-    import inspect
-    src = inspect.getsource(catalogue)
-    _NOMS = re.findall(r'"([A-Z][A-Z_]+)":', src) + ["RESTART_VM", "RESTART_NODE_VM", "VM_DOWN"]
     tracer("DEMARRAGE bridge 127.0.0.1:8099 | jeton:", "oui" if JETON else "NON",
-           "| actions couvertes:", len(_NOMS))
+           "| catalogue:", len(CAT.ACTIONS), "actions canoniques,",
+           len(CAT.ALIASES), "alias |",
+           "/exec:", "ACTIF (execution arbitraire)" if EXEC_ACTIF else "ferme")
+    if not JETON:
+        tracer("AVERTISSEMENT : HELIOS_BRIDGE_TOKEN vide -> AUCUNE authentification")
+    if EXEC_ACTIF:
+        tracer("AVERTISSEMENT : /exec accepte une commande arbitraire "
+               "(HELIOS_EXEC_ENABLED=0 pour le fermer)")
     HTTPServer(("127.0.0.1", 8099), Handler).serve_forever()

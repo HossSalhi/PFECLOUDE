@@ -1,3 +1,6 @@
+# OBSOLÈTE (11 nov. 2026) — retrait de l'IA : ce script attend une « prédiction éligible » renvoyée par
+# POST /api/ai/predict. Cet endpoint (et le service IA qui le nourrissait) a été SUPPRIMÉ ; le script ne peut plus
+# aboutir tel quel. Conservé pour l'historique des campagnes. Archive de sécurité : helios-state\snapshots\ai-removal-20261106.
 param(
     [string]$KubeconfigPath = "",
     [string]$Namespace = "pfe",

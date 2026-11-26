@@ -12,11 +12,10 @@ data:
   SPRING_DATASOURCE_USERNAME: "appuser"
   SPRING_DEVTOOLS_RESTART_ENABLED: "false"
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
-  AIOPS_SERVICE_BASE_URL: "http://192.168.148.161:8000"
   CAMUNDA_ENABLED: "true"
-  # Pipeline de détection : "camunda" = Camunda est l'intermédiaire monitoring -> IA (le backend
-  # lève l'alarme brute, puis le process Camunda incident-detection appelle l'IA via le worker
-  # ai-classify). "backend" = historique (le backend appelle l'IA directement). Flag réversible.
+  # Pipeline de détection : "camunda" = Camunda est l'intermédiaire monitoring -> classification déterministe (le backend
+  # lève l'alarme brute, puis le process Camunda incident-detection appelle le worker ai-classify, nom historique,
+  # qui n'utilise plus aucune IA depuis le 11 nov. 2026). "backend" = historique (détection directe). Flag réversible.
   HELIOS_DETECTION_PIPELINE: "camunda"
   CAMUNDA_AUTO_DEPLOY_BPMN: "true"
   CAMUNDA_PROCESS_ID: "incident-remediation"
@@ -31,7 +30,6 @@ data:
   REMEDIATION_ALLOWED_ACTIONS: "RESTART_POD,SCALE_DEPLOYMENT,DELETE_CRASHLOOPING_PODS,FORCE_RECREATE_DEPLOYMENT"
   REMEDIATION_RESTART_CONFIDENCE_THRESHOLD: "0.45"
   REMEDIATION_SCALE_CONFIDENCE_THRESHOLD: "0.44"
-  REMEDIATION_VERIFICATION_INCIDENT_CONFIDENCE_THRESHOLD: "0.55"
   REMEDIATION_COOLDOWN_MINUTES: "2"
   REMEDIATION_VERIFY_DELAY_SECONDS: "25"
   REMEDIATION_VERIFICATION_WINDOW_MINUTES: "1"
@@ -48,8 +46,7 @@ data:
   AIOPS_POLLING_ENABLED: "true"
   AIOPS_POLLING_INTERVAL_MILLIS: "30000"
   AIOPS_POLLING_NAMESPACE: "pfe"
-  AIOPS_CLIENT_READ_TIMEOUT_MS: "30000"
-  # HELIOS ne surveille PAS sa propre stack (backend/frontend/ai-service...).
+  # HELIOS ne surveille PAS sa propre stack (backend/frontend...).
   # On poll explicitement les 7 apps demo dediees (1 type de panne distinct chacune).
   # podinfo est EXCLU (baseline chaos a l'historique de revisions pollue -> rollbacks
   # imprevisibles + bruit MEMORY_STRESS) : retire de la liste ET label helios.io/monitor=false.
@@ -69,9 +66,7 @@ data:
   INFRA_HEALTH_PROMETHEUS_URL: "http://192.168.148.160:9090"
   INFRA_HEALTH_LOKI_URL: "http://192.168.148.160:3100"
   INFRA_HEALTH_GRAFANA_URL: "http://192.168.148.160:3000"
-  INFRA_HEALTH_AI_SERVICE_URL: "http://192.168.148.161:8000"
   INFRA_HEALTH_CAMUNDA_URL: "http://192.168.148.161:8080"
-  INFRA_HEALTH_OLLAMA_URL: "http://192.168.148.161:11434"
   # Point d'entree = LB nginx sur .160 (Ingress). Le VIP keepalived .150 a ete SUPPRIME
   # (voir infra/README.md) ; l'endpoint HA de l'API est desormais HAProxy sur .160:6443.
   # Meme origine frontend/API donc CORS peu sollicite,

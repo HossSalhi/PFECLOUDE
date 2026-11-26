@@ -7,6 +7,9 @@ Wants=network-online.target
 Type=simple
 # LB actif publié par le DNS : .162 en tête (écart E12). Retour à l'ordre historique : HELIOS_DNS_ORDER=160,162 (ops/p2b_primary.py --primary 160)
 Environment=HELIOS_DNS_ORDER=162,160
+# Option B (22 nov. 2026) : bascule du DNS en ~4 s au lieu de ~11 s (sondes toutes les secondes, expiration 1 s ; FALL 3, RISE 5, HOLD 60 s inchanges).
+Environment=HELIOS_DNS_PERIOD=1
+Environment=HELIOS_DNS_TIMEOUT=1
 ExecStart=/usr/bin/python3 /usr/local/bin/helios-dns-health.py
 Restart=always
 RestartSec=2

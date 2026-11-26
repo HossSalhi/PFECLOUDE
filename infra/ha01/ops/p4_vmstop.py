@@ -69,8 +69,12 @@ def vm_running(vm):
     return vmx_of(vm).lower() in out.lower()
 
 
-def helios(action):
-    r = subprocess.run(["powershell", "-NoProfile", "-File", PAUSE, "-Action", action], capture_output=True, text=True, timeout=120,
+def helios(action, vm=None):
+    """VMDOWN-POLICY-20261105 : pause/reprise = drapeau de MAINTENANCE de la VM visee (plus l'agent :9999, retire)."""
+    cmd = ["powershell", "-NoProfile", "-File", PAUSE, "-Action", action]
+    if vm is not None:
+        cmd += ["-Vm", str(vm)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                        encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -303,8 +307,8 @@ def preflight(a, vm, say, dry):
     add("VM .%s identifiée par SSH (hostname -I contient 192.168.148.%s)" % (vm, vm), ("192.168.148.%s" % vm) in out, out)
     rc, out = O.ssh("153", "kubectl --request-timeout=20s get --raw=/readyz", timeout=40)
     add("kubectl utilisable depuis .153 (flux des journaux de canaris)", out.strip() == "ok", out[:60])
-    rc, out = helios("status")
-    add("agent hôte HELIOS :9999 (état avant pause consigné)", rc == 0, out.replace("\n", " | ")[:150])
+    rc, out = helios("status", vm)
+    add("redémarrage automatique : drapeaux de maintenance consignés, agent :9999 retiré", rc == 0 and "REPOND (a retirer" not in out, out.replace("\n", " | ")[:150])
     return chk
 
 
@@ -454,16 +458,16 @@ def main():
     vm_stopped = False
     t_stop = t_vm_start = None
     abort = None
-    rc_p, out_p = helios("pause")
-    say("HELIOS (D7) : pause de l'agent hôte -> rc=%s %s" % (rc_p, out_p.replace("\n", " | ")[:140]))
+    rc_p, out_p = helios("pause", vm)
+    say("HELIOS : maintenance de la VM visée (plus aucun redémarrage automatique) -> rc=%s %s" % (rc_p, out_p.replace("\n", " | ")[:140]))
     if rc_p != 0:
-        say("STOP: la pause de l'agent hôte n'est pas effective — AUCUNE VM éteinte.")
-        helios("resume")
+        say("STOP: la maintenance de la VM n'est pas effective (ou l'agent :9999 répond encore) — AUCUNE VM éteinte.")
+        helios("resume", vm)
         return 3
     revive_pid = spawn_revive(vm, a.observe + 900, stopfile, revive_log)
     if not revive_pid or not pid_alive(revive_pid):
         say("STOP: filet de survie (vm_revive.ps1) NON armé — AUCUNE VM éteinte.")
-        helios("resume")
+        helios("resume", vm)
         return 4
     say("filet de survie armé (PID %s) : la VM sera rallumée automatiquement dans %d s si ce script disparaît" % (revive_pid, a.observe + 900))
     total = a.observe + a.stabilize + 1500
@@ -643,8 +647,8 @@ def main():
         if vm_running(vm):
             open(stopfile, "w").write("désarmé après relance confirmée %s\n" % O.iso())
             say("filet de survie désarmé (VM en marche)")
-            rc_r, out_r = helios("resume")        # HELIOS actif pendant la stabilisation : on mesure le système tel qu'il tournera
-            say("HELIOS : agent hôte rétabli -> rc=%s %s" % (rc_r, out_r.replace("\n", " | ")[:120]))
+            rc_r, out_r = helios("resume", vm)        # HELIOS actif pendant la stabilisation : on mesure le système tel qu'il tournera
+            say("HELIOS : maintenance levée -> rc=%s %s" % (rc_r, out_r.replace("\n", " | ")[:120]))
         t_s0 = time.time()
         say("STABILISATION %d s (lecture seule)" % a.stabilize)
         while time.time() - t_s0 < a.stabilize:
@@ -674,8 +678,8 @@ def main():
                 open(stopfile, "w").write("désarmé en fin d'exécution %s\n" % O.iso())
             except OSError:
                 pass
-        rc_r, out_r = helios("resume")
-        say("HELIOS : agent hôte rétabli -> rc=%s %s" % (rc_r, out_r.replace("\n", " | ")[:120]))
+        rc_r, out_r = helios("resume", vm)
+        say("HELIOS : maintenance levée -> rc=%s %s" % (rc_r, out_r.replace("\n", " | ")[:120]))
         if det:
             det.stop()
         if dns:

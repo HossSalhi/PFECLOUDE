@@ -13,13 +13,25 @@ récupération que l'IA/Camunda ne peut pas faire (pas d'accès hyperviseur).
 - Cooldown par nœud (évite de spammer).
 - Ne fait QUE 'start' (jamais stop) -> sûr (ne peut que récupérer).
 """
-import subprocess, json, time, logging, socket, threading
+import subprocess, json, time, logging, socket, threading, os
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 try:
     import paramiko  # pour /host-exec (SSH dans les VMs : systemctl restart kubelet/containerd, etc.)
 except Exception:
     paramiko = None
+try:
+    # Profils de diagnostic LECTURE SEULE (LOT WATCHDOG-READONLY-DIAGNOSTICS-01) — logique pure, testable,
+    # sans effet de bord. Si absent -> /host-diag se comporte en fail-closed (indisponible).
+    import helios_diag_profiles as diagprof
+except Exception:
+    diagprof = None
+try:
+    # Transport SSH du diagnostic PAR CLÉ UNIQUEMENT (LOT WATCHDOG-DIAG-KEYONLY-ROUTE-AUDIT-01) —
+    # importable sans effet de bord, paramiko injectable. Si absent -> /host-diag fail-closed.
+    import helios_diag_ssh as diagssh
+except Exception:
+    diagssh = None
 
 LOG_FILE = r"C:\Users\houss\helios-autoheal.log"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [AUTOHEAL] %(message)s", datefmt="%H:%M:%S",
@@ -223,6 +235,57 @@ def host_exec(node, op):
         return False, str(e)
 
 
+# ── HOST-DIAG : diagnostic LECTURE SEULE (LOT WATCHDOG-READONLY-DIAGNOSTICS-01) ───
+# Canal NOUVEAU et SÉPARÉ de /host-exec (destructif). Garanties :
+#   - profils FERMÉS (helios_diag_profiles) : identifiants fixes, AUCUNE commande libre depuis HTTP ;
+#   - cibles en allowlist (DIAG_NODES = NODE_IPS) ;
+#   - jeton OBLIGATOIRE (fail-closed : pas de jeton configuré => refus ; jamais journalisé) ;
+#   - timeout borné par commande, sortie tronquée (helios_diag_profiles.truncate) ;
+#   - SANS sudo (ces commandes sont lisibles par un utilisateur normal) -> aucun privilège élevé.
+# NB: diag_exec OUVRE une session SSH vers la VM. Il n'est APPELÉ que par la route /host-diag.
+#     Dans le lot de création, cette route n'est JAMAIS sollicitée (aucun déploiement, aucun appel) :
+#     la fonction reste dormante et AUCUNE commande n'est exécutée sur une VM.
+DIAG_NODES = set(NODE_IPS)          # mêmes cibles connues que /host-exec
+DIAG_CMD_TIMEOUT = 15               # timeout par commande (s)
+# Fichier known_hosts CONTRÔLÉ servant d'ancre de confiance pour vérifier l'identité SSH (RejectPolicy).
+# Variable d'env prioritaire, défaut = known_hosts de l'hôte. SANS ancre lisible -> diag refusé (fail-closed).
+DIAG_KNOWN_HOSTS = os.environ.get("HELIOS_KNOWN_HOSTS", r"C:\Users\houss\.ssh\known_hosts")
+
+
+def _diag_expected_token():
+    """Jeton attendu pour /host-diag : variable d'env HELIOS_WATCHDOG_TOKEN puis fichier.
+    JAMAIS journalisé. Chaîne vide si absent -> auth_ok renvoie False (fail-closed)."""
+    tok = os.environ.get("HELIOS_WATCHDOG_TOKEN", "")
+    if tok.strip():
+        return tok.strip()
+    try:
+        with open(r"C:\Users\houss\.helios-watchdog-token", "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def diag_exec(node, profile):
+    """Exécuteur injecté dans handle_host_diag. Diagnostic SSH LECTURE SEULE, PAR CLÉ UNIQUEMENT :
+    délègue au transport testable helios_diag_ssh.run_diagnostic. AUCUN repli par mot de passe sur ce
+    chemin ; known_hosts contrôlé + RejectPolicy (fail-closed) ; erreurs explicites SANS secret.
+    Retourne (ok, evidence|erreur). (Le repli par mot de passe n'existe plus ici ; réservé à host_exec.)"""
+    if diagprof is None:
+        return False, "module diag indisponible"
+    if diagssh is None:
+        return False, "module diag ssh indisponible"
+    if paramiko is None:
+        return False, "paramiko indisponible sur l'hôte"
+    return diagssh.run_diagnostic(
+        node, profile,
+        ip=NODE_IPS.get(node), ssh_user=SSH_USER, ssh_key_path=SSH_KEY,
+        known_hosts_path=DIAG_KNOWN_HOSTS,
+        profile_commands=diagprof.profile_commands,
+        build_evidence=diagprof.build_evidence,
+        ssh_identity_source=diagprof.ssh_identity_source,
+        cmd_timeout=DIAG_CMD_TIMEOUT, paramiko_mod=paramiko, logger=log)
+
+
 def force_leader_reelection():
     """Quand un nœud tombe, le pod backend LEADER peut être dessus → la détection
     nœud (réservée au leader) est en pause jusqu'au TTL du lease (300s) → l'incident
@@ -287,6 +350,22 @@ class WatchdogHTTP(BaseHTTPRequestHandler):
                 self._json(200 if ok else 500, {"node": node, "op": op, "ok": ok, "result": res[:400]})
             else:
                 self._json(400, {"error": "usage: POST /host-exec/<node>/<op>"})
+        elif self.path.startswith("/host-diag/"):
+            # LECTURE SEULE, profils fermés, jeton OBLIGATOIRE, allowlist. Canal distinct de /host-exec.
+            # Décision ENTIÈREMENT déléguée à diagprof.handle_host_diag (pure, testée) avec diag_exec comme
+            # exécuteur injecté : diag_exec (SSH) n'est atteint QUE si l'autorisation vaut 200 ; toute
+            # requête refusée (400/401/404/503) retourne AVANT et ne peut pas l'atteindre.
+            if diagprof is None:
+                self._json(503, {"error": "module diag indisponible"})
+                return
+            code, body = diagprof.handle_host_diag(
+                self.path, self.headers.get("X-Helios-Token", ""), _diag_expected_token(),
+                DIAG_NODES, diag_exec)
+            if code == 401:
+                log.warning("HTTP /host-diag refuse: authentification invalide")  # jamais le jeton ni le noeud
+            elif code in (200, 500):
+                log.info(f"HTTP /host-diag -> {body.get('node')}/{body.get('profile')} ok={body.get('ok')}")
+            self._json(code, body)
         else:
             self._json(404, {"error": "not found"})
 

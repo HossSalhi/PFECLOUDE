@@ -21,8 +21,6 @@ resources:
   - frontend-pdb.yaml
   - postgres-pdb.yaml
   - prometheus-rules.yaml
-  # ChromaDB runs on VM .161 in persistent mode (/data/chroma) — NOT in K8s.
-  # The chromadb-* files are archived in infra/k8s/archive/ for reference only.
 
 images:
   - name: pfe-backend
@@ -31,4 +29,3 @@ images:
   - name: pfe-frontend
     newName: pfe-frontend
     newTag: "1.0.2"
-  # pfe-ai-service runs on VM iacamunda — no K8s image needed

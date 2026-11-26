@@ -1,6 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Installe le service helios-ssh-bridge sur .161 et le teste sur les 3 noeuds."""
-import paramiko, sys, os, time, json, secrets
+"""OBSOLETE ET NEUTRALISE (6 nov. 2026) - NE PAS UTILISER.
+
+Ce script installait l'ANCIEN Bridge (camunda-direct/bridge/bridge.py). Cette version contient rallumer() = appel du watchdog
+hote :9099 (mise sous tension autonome d'une VM), un mot de passe SSH en clair (HELIOS_SSH_PASS=kube), le jeton du Bridge dans
+l'unite systemd, et elle AFFICHE ce jeton. L'executer ecraserait le Bridge de production (infra/helios-sot/bridge/, sans aucune
+capacite de mise sous tension). Un seul acteur demarre une VM : le backend, via le watchdog hote :9099.
+
+Bridge de production : infra/helios-sot/bridge/ ; deploiement : infra/helios-sot/tools/deploy_bridge_target.sh ;
+controle : infra/helios-sot/tools/check_bridge_no_poweron.sh. Original conserve : helios-state/snapshots/prechange-20261106/.
+Le code historique ci-dessous est conserve pour memoire et n'est JAMAIS execute (arret inconditionnel).
+"""
+import sys
+sys.stderr.write("deploy_bridge.py est OBSOLETE et NEUTRALISE : il installerait l'ancien Bridge (capacite de mise sous tension, "
+                 "mot de passe en clair). Utiliser infra/helios-sot/tools/deploy_bridge_target.sh.\n")
+raise SystemExit(3)
+
+import paramiko, sys, os, time, json, secrets   # noqa: E402 - code historique, jamais atteint
 def out(s): sys.stdout.buffer.write((str(s)+"\n").encode("utf-8","replace")); sys.stdout.flush()
 def sec(t): out("\n" + "="*74 + "\n  " + t + "\n" + "="*74)
 SP = os.path.dirname(__file__)

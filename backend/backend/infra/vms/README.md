@@ -84,8 +84,6 @@ If you want to minimize the Kubernetes and monitoring nodes, keep those near the
 - The monitoring VM depends on these repo-managed cluster services:
   - Prometheus NodePort on `30090`
   - Loki gateway NodePort on `31080`
-- To switch an existing AI VM to the monitoring VM endpoints, run:
-  - [reconfigure-ai-telemetry.sh](/c:/Users/houss/IdeaProjects/PFE-Orange/backend/backend/infra/vms/scripts/reconfigure-ai-telemetry.sh)
 
 ## What Still Must Be Done Manually
 

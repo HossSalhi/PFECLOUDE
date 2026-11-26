@@ -46,7 +46,7 @@ PERIOD = float(os.environ.get("HELIOS_DNS_PERIOD", "3"))
 FALL = int(os.environ.get("HELIOS_DNS_FALL", "3"))
 RISE = int(os.environ.get("HELIOS_DNS_RISE", "5"))
 HOLD_DOWN_S = float(os.environ.get("HELIOS_DNS_HOLD", "60"))
-TIMEOUT = 2.0
+TIMEOUT = float(os.environ.get("HELIOS_DNS_TIMEOUT", "2"))
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False

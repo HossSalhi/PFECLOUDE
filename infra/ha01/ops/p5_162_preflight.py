@@ -277,7 +277,9 @@ def sec_garde_fous():
         if o.split() != ["0", "0"]:
             bad.append((h, o.replace("\n", "/")))
     add(s, "aucune règle iptables ha01-* ni minuterie ha01-p* résiduelle sur les 6 VM", not bad, bad or "6/6 propres")
-    add(s, "agent hôte HELIOS :9999 répond (p4_vmstop le mettra en pause puis le rétablira)", ps("(Test-NetConnection 127.0.0.1 -Port 9999 -WarningAction SilentlyContinue).TcpTestSucceeded").strip().lower() == "true", "")
+    # VMDOWN-POLICY-20261105 : l'agent legacy :9999 est retiré ; la « pause » de p4_vmstop = drapeau de maintenance de la VM visée.
+    add(s, "mécanisme de maintenance disponible (dossier helios-maintenance présent, aucun drapeau actif)",
+        ps(r"if (Test-Path 'C:\Users\houss\helios-maintenance') { (Get-ChildItem 'C:\Users\houss\helios-maintenance' -Filter *.flag -ErrorAction SilentlyContinue | Measure-Object).Count } else { 'ABSENT' }").strip() == "0", "")
     rc, o = O.ssh("153", "awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo", timeout=20)
     add(s, ".153 (non touchée) : Ready et MemAvailable >= 500 Mo", o.strip().isdigit() and int(o) >= 500, o)
     ns = argparse.Namespace(confirmed=False)

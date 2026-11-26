@@ -55,10 +55,10 @@ En production, un namespace applicatif dédié serait verrouillé (default-deny 
 `.153/.155/.158`, 825 j) :
 - **Secret TLS `helios-tls`** (ns `pfe`) + bloc `tls:` sur l'objet `helios-ingress` (TLS natif K8s),
   annotation `ssl-redirect: "false"`.
-- **Terminaison TLS par l'ingress**, pas par le LB : HAProxy (`.160`/`.162`, `infra/haproxy-apps-lb.cfg`)
-  écoute `:443` en **mode tcp** (simple relais, aucune clé privée sur le LB) vers le NodePort https
-  (`:31411`) ; c'est `ingress-nginx` qui termine réellement le TLS avec le Secret `helios-tls`. `:80`
-  reste servi en mode http (frontend `apps_http`, relais vers NodePort `:31756`).
+- **Terminaison TLS par l'ingress** : MetalLB attribue une IP au Service ingress-nginx
+  (type LoadBalancer), le trafic arrive directement sur `ingress-nginx` qui termine le TLS
+  avec le Secret `helios-tls`. Plus de HAProxy externe pour les apps (remplacé par MetalLB
+  K8s-natif). HAProxy sur `.160` ne gère plus que le control-plane kubeadm (`:6443`).
 - Prod : remplacer l'auto-signé par Let's Encrypt / CA d'entreprise (le navigateur avertit sinon).
 
 ## 6. Backups de la base — APPLIQUÉ

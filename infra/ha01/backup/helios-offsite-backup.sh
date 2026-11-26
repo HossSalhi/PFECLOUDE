@@ -5,7 +5,8 @@
 #   2. dump SQL gzip de pfe_db pris sur le PRIMAIRE courant   -> offsite/pg/        (validé gzip -t + taille)
 #   3. snapshot etcd FRAIS pris sur ce nœud puis copié          -> offsite/etcd/      (taille + sha256)
 #   4. copie (ajout seulement) des dumps du CronJob A si .158 est vivant -> offsite/cronjob-a/
-#   5. rétention : ne supprime QUE les fichiers de pg/ et etcd/ créés par ce script au-delà des 30 derniers
+#   5. rétention SÛRE : ne supprime QUE les fichiers de pg/ et etcd/ créés par ce script, au-delà des 30 derniers, jamais ceux de .protected,
+#      et seulement si les 5 plus récents sont sains (sinon rétention annulée et journalisée)
 # Ne supprime JAMAIS rien d'autre ; n'écrit rien sur les nœuds hormis un snapshot etcd horodaté ha01-offsite-*.
 # Code retour 0 = tout OK ; 1 = au moins une étape en échec (journalisé) ; 2 = aucun nœud joignable.
 set -uo pipefail
@@ -66,8 +67,34 @@ else
   log "info: .158 injoignable, dumps CronJob A non synchronises cette fois"
 fi
 
-# --- 5. retention (uniquement nos fichiers pg/ et etcd/)
-ls -1t "$BASE"/pg/pfe_db-*.sql.gz 2>/dev/null | tail -n +31 | xargs -r rm -f
-ls -1t "$BASE"/etcd/etcd-*.db 2>/dev/null | tail -n +31 | while read -r f; do rm -f "$f" "$f.sha256"; done
+# --- 5. retention SURE (6 nov. 2026) : jamais de suppression « aveugle » (uniquement nos fichiers pg/ et etcd/) ---
+# On ne supprime que les fichiers AU-DELA des 30 plus recents, jamais ceux listes dans <dossier>/.protected (restauration validee),
+# et seulement si les 5 plus recents viennent de passer leur controle d'integrite (gzip -t pour pg/, sha256sum -c pour etcd/).
+# Sinon : retention annulee et journalisee. Les fichiers .partial et .sha256 des fichiers conserves ne sont jamais touches.
+KEEP=${HELIOS_OFFSITE_KEEP:-30}; NEED=5
+retention_pg() {
+  local good=0 f b
+  for f in $(ls -1t "$BASE"/pg/pfe_db-*.sql.gz 2>/dev/null | head -n "$NEED"); do gzip -t "$f" 2>/dev/null && good=$((good + 1)); done
+  if [ "$good" -lt "$NEED" ]; then log "retention pg ANNULEE: $good/$NEED dumps recents verifies"; return 0; fi
+  ls -1t "$BASE"/pg/pfe_db-*.sql.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r f; do
+    b=$(basename "$f")
+    if grep -qxF "$b" "$BASE/pg/.protected" 2>/dev/null; then log "retention pg: protege, conserve $b"; continue; fi
+    log "retention pg: suppression de $b"; rm -f -- "$f"
+  done
+}
+retention_etcd() {
+  local good=0 f b
+  for f in $(ls -1t "$BASE"/etcd/etcd-*.db 2>/dev/null | head -n "$NEED"); do
+    ( cd "$BASE/etcd" && sha256sum -c "$(basename "$f").sha256" >/dev/null 2>&1 ) && good=$((good + 1))
+  done
+  if [ "$good" -lt "$NEED" ]; then log "retention etcd ANNULEE: $good/$NEED snapshots recents verifies"; return 0; fi
+  ls -1t "$BASE"/etcd/etcd-*.db 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r f; do
+    b=$(basename "$f")
+    if grep -qxF "$b" "$BASE/etcd/.protected" 2>/dev/null; then log "retention etcd: protege, conserve $b"; continue; fi
+    log "retention etcd: suppression de $b"; rm -f -- "$f" "$f.sha256"
+  done
+}
+retention_pg
+retention_etcd
 log "terminé rc=$RC"
 exit $RC

@@ -117,11 +117,6 @@ scrape_configs:
           - '192.168.148.160:9100'
           - '192.168.148.161:9100'
 
-  - job_name: ai-service
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['192.168.148.161:8000']
-
   - job_name: camunda
     metrics_path: /actuator/prometheus
     static_configs:

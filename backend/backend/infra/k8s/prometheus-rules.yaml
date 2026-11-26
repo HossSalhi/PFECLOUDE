@@ -3,8 +3,8 @@
 # Apply with: kubectl apply -f prometheus-rules.yaml -n monitoring
 #
 # These rules fire when HELIOS components are unreachable so the team is
-# alerted even if the AI service itself (on .161) is the one that is down
-# (in that case, the AI cannot self-report the outage).
+# alerted even if the component itself is the one that is down.
+# Retrait de l'IA (11 nov. 2026) : le groupe d'alertes du service IA a été retiré.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -15,43 +15,6 @@ metadata:
     app: helios-aiops
 spec:
   groups:
-
-    # ── AI service availability (VM .161) ─────────────────────────────────
-    - name: helios.ai-service
-      interval: 30s
-      rules:
-        - alert: HeliosAIServiceDown
-          expr: |
-            absent(up{job="ai-service"} == 1)
-            or
-            up{job="ai-service"} == 0
-          for: 5m
-          labels:
-            severity: critical
-            component: ai-service
-            zone: iacamunda
-          annotations:
-            summary: "HELIOS AI service unreachable (VM .161)"
-            description: >
-              The AI service on 192.168.148.161:8000 (job=ai-service) has been
-              unreachable for > 5 minutes. Autonomous incident detection is STOPPED.
-              Check: ssh root@192.168.148.161 'systemctl status helios-ai' or
-              'docker ps | grep ai-service'.
-
-        - alert: HeliosAIServiceHighErrorRate
-          expr: |
-            rate(http_server_requests_seconds_count{job="ai-service", status=~"5.."}[5m])
-            /
-            rate(http_server_requests_seconds_count{job="ai-service"}[5m]) > 0.10
-          for: 3m
-          labels:
-            severity: warning
-            component: ai-service
-          annotations:
-            summary: "HELIOS AI service error rate > 10%"
-            description: >
-              The AI service is returning > 10% HTTP 5xx responses.
-              Incident detection quality may be degraded.
 
     # ── Backend availability (K8s) ────────────────────────────────────────
     - name: helios.backend

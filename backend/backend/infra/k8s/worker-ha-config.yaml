@@ -108,19 +108,6 @@ data:
         topologyKey: kubernetes.io/hostname
 
 ---
-# PDB for Chromadb
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: chromadb-pdb
-  namespace: pfe
-spec:
-  minAvailable: 0
-  selector:
-    matchLabels:
-      app: chromadb
-
----
 # PDB for Loki
 apiVersion: policy/v1
 kind: PodDisruptionBudget

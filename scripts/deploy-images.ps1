@@ -66,7 +66,7 @@ foreach ($n in $nodes) { Deploy-Tar $n $feTar (Split-Path -Leaf $feTar) }
 # ── Apply manifests if requested ─────────────────────────────────────────
 if ($ApplyManifests) {
     Write-Step "Applying updated K8s manifests"
-    foreach ($f in @('backend-deployment.yaml','ai-service-deployment.yaml','backend-hpa.yaml','chromadb-deployment.yaml','chromadb-service.yaml','chromadb-pvc.yaml','frontend-deployment.yaml')) {
+    foreach ($f in @('backend-deployment.yaml','backend-hpa.yaml','frontend-deployment.yaml')) {
         $local = "$k8sDir\$f"
         if (-not (Test-Path $local)) { Write-Host "    skip (not found): $f" -ForegroundColor DarkGray; continue }
         $sftp = New-SFTPSession -ComputerName '192.168.148.153' -Credential $cred -AcceptKey

@@ -11,10 +11,9 @@ The target runtime is now the offline 5-VM lab:
 
 - Kubernetes cluster on `k8s-master`, `k8s-worker1`, and `k8s-worker2`
 - Monitoring stack on a dedicated monitoring VM
-- AI service and Camunda on a dedicated `ai-camunda` VM
+- Camunda on a dedicated `ai-camunda` VM (the VM name is historical)
 
-Because of that, the default `kustomization.yaml` no longer deploys the AI service inside Kubernetes.
-The `ai-service` manifests are kept in the repo only as a legacy fallback, and the monitoring kustomization no longer scrapes that legacy deployment by default.
+The AI service, Ollama and ChromaDB were removed from the repository on 2026-11-11 (safety archive: `helios-state\snapshots\ai-removal-20261106`).
 
 ## Image Tag Policy
 - Do not use mutable `latest` tags in production-like environments.
@@ -22,15 +21,6 @@ The `ai-service` manifests are kept in the repo only as a legacy fallback, and t
 ## Apply (manual)
 ```bash
 kubectl apply -k infra/k8s
-```
-
-## Optional Legacy Pieces
-If you still want to run the AI service inside Kubernetes for a temporary lab run:
-```bash
-kubectl -n pfe set image deployment/ai-service ai-service=pfe-ai-service:<tag>
-kubectl apply -f infra/k8s/ai-service-configmap.yaml
-kubectl apply -f infra/k8s/ai-service-service.yaml
-kubectl apply -f infra/k8s/ai-service-deployment.yaml
 ```
 
 ## Basic Verification

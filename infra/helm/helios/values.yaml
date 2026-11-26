@@ -1,5 +1,10 @@
 # Valeurs par defaut du chart HELIOS. Reflete l'etat deploye (backend 0.2.150, frontend 1.1.6).
 # Surcharger par environnement : helm install helios ./helios -f values-prod.yaml
+#
+# Load Balancing K8s-natif :
+#   - MetalLB attribue une IP (pool .200-.210) au Service ingress-nginx (type LoadBalancer)
+#   - ingress-nginx route le trafic HTTP/HTTPS vers les Services applicatifs
+#   - Pas de HAProxy externe / Keepalived VIP pour les apps (supprime)
 
 namespace: pfe
 
@@ -59,9 +64,8 @@ frontend:
     allowPrivilegeEscalation: false
     capabilities: { drop: [ALL] }
   service:
-    type: NodePort
+    type: ClusterIP              # plus de NodePort : le trafic passe par Ingress (MetalLB -> ingress-nginx -> ClusterIP)
     port: 80
-    nodePort: 30880
 
 ingress:
   enabled: true

@@ -1,8 +1,14 @@
-# MetalLB — pool d'adresses pour les services type=LoadBalancer (bare-metal).
-# Installé au prealable : kubectl apply -f \
-#   https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
-# NOTE : sur ce reseau VMware NAT, l'annonce L2 (ARP) n'est pas joignable de l'exterieur ;
-# l'acces reel aux apps passe par nginx sur .160 (voir nginx-apps-lb.conf).
+# =============================================================================
+# MetalLB — LoadBalancer K8s-natif pour bare-metal
+# =============================================================================
+# Remplace le HAProxy externe + Keepalived VIP pour le trafic APPLICATIF.
+# MetalLB attribue des IP du pool aux Services type=LoadBalancer (ingress-nginx).
+#
+# Chaine K8s-native :
+#   Client -> MetalLB IP (.200) -> ingress-nginx -> Service -> Pods
+#
+# Install MetalLB : kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+# Appliquer ce fichier : kubectl apply -f metallb-pool.yaml
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:

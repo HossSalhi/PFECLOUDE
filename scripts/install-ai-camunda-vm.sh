@@ -2,16 +2,11 @@
 set -euo pipefail
 
 CAMUNDA_RUN_VERSION="${CAMUNDA_RUN_VERSION:-8.9.0}"
-MONITORING_VM_IP="${MONITORING_VM_IP:-192.168.148.160}"
-TELEMETRY_PROMETHEUS_HOST="${TELEMETRY_PROMETHEUS_HOST:-${MONITORING_VM_IP}}"
-TELEMETRY_PROMETHEUS_PORT="${TELEMETRY_PROMETHEUS_PORT:-9090}"
-TELEMETRY_LOKI_HOST="${TELEMETRY_LOKI_HOST:-${MONITORING_VM_IP}}"
-TELEMETRY_LOKI_PORT="${TELEMETRY_LOKI_PORT:-3101}"
 MASTER_IP="${MASTER_IP:-192.168.148.153}"
 WORKER1_IP="${WORKER1_IP:-192.168.148.158}"
 WORKER2_IP="${WORKER2_IP:-192.168.148.155}"
-AI_SERVICE_DIR="${AI_SERVICE_DIR:-/opt/pfe-ai-service}"
 CAMUNDA_DIR="${CAMUNDA_DIR:-/opt/camunda/c8run}"
+# Retrait de l'IA (11 nov. 2026) : ce script n'installe plus que Camunda (le service IA et l'utilisateur aiops ont été retirés).
 
 sudo apt-get update
 sudo apt-get install -y curl unzip tar openjdk-21-jre-headless python3-venv python3-pip socat
@@ -19,11 +14,8 @@ sudo apt-get install -y curl unzip tar openjdk-21-jre-headless python3-venv pyth
 if ! id -u camunda >/dev/null 2>&1; then
   sudo useradd --system --home /opt/camunda --shell /usr/sbin/nologin camunda
 fi
-if ! id -u aiops >/dev/null 2>&1; then
-  sudo useradd --system --home "${AI_SERVICE_DIR}" --shell /usr/sbin/nologin aiops
-fi
 
-sudo mkdir -p /opt/camunda /opt/pfe-ai-service
+sudo mkdir -p /opt/camunda
 
 installed_camunda_version=""
 if [ -f "${CAMUNDA_DIR}/.env" ]; then
@@ -41,7 +33,6 @@ if [ ! -x "${CAMUNDA_DIR}/c8run" ] || [ "${installed_camunda_version}" != "${CAM
 fi
 
 sudo chown -R camunda:camunda /opt/camunda
-sudo chown -R aiops:aiops /opt/pfe-ai-service
 
 cat <<EOF | sudo tee /usr/local/bin/pfe-configure-pod-routes.sh >/dev/null
 #!/usr/bin/env bash
@@ -105,31 +96,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-cat <<EOF | sudo tee /etc/systemd/system/pfe-ai-service.service >/dev/null
-[Unit]
-Description=PFE AI Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=aiops
-Group=aiops
-WorkingDirectory=${AI_SERVICE_DIR}
-Environment=PATH=${AI_SERVICE_DIR}/.venv/bin:/usr/bin:/bin
-Environment=AIOPS_LOG_LEVEL=INFO
-Environment=AIOPS_ENABLE_UPSTREAM_QUERIES=true
-Environment=AIOPS_LOKI_BASE_URL=http://${TELEMETRY_LOKI_HOST}:${TELEMETRY_LOKI_PORT}
-Environment=AIOPS_PROMETHEUS_BASE_URL=http://${TELEMETRY_PROMETHEUS_HOST}:${TELEMETRY_PROMETHEUS_PORT}
-Environment=AIOPS_MODEL_PATH=${AI_SERVICE_DIR}/model_artifacts/model.joblib
-ExecStart=${AI_SERVICE_DIR}/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-for port in 8000 8088 26500 9600; do
+for port in 8088 26500 9600; do
   sudo ufw allow "${port}/tcp" || true
 done
 
@@ -137,4 +104,3 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now pfe-pod-routes.service
 sudo systemctl enable --now camunda8.service
 sudo systemctl enable --now camunda8-rest-proxy.service
-sudo systemctl enable --now pfe-ai-service.service

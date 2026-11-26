@@ -1,36 +1,13 @@
 ---
-# Namespace pour les services externes AIOps (iacamunda VM)
+# Namespace pour les services externes (VM iacamunda / Camunda)
+# Retrait de l'IA (11 nov. 2026) : les Services « ai-service » (:8000) et « ollama » (:11434) ont été retirés ;
+# il ne reste que Camunda. Archive de sécurité : helios-state\snapshots\ai-removal-20261106.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: aiops
   labels:
     kubernetes.io/metadata.name: aiops
----
-# AI Service (XGBoost + proactive monitor)
-# http://ai-service.aiops.svc.cluster.local:8000
-apiVersion: v1
-kind: Service
-metadata:
-  name: ai-service
-  namespace: aiops
-spec:
-  ports:
-    - name: http
-      port: 8000
-      targetPort: 8000
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: ai-service
-  namespace: aiops
-subsets:
-  - addresses:
-      - ip: 192.168.148.161
-    ports:
-      - name: http
-        port: 8000
 ---
 # Camunda BPM
 # http://camunda.aiops.svc.cluster.local:8080
@@ -56,28 +33,3 @@ subsets:
     ports:
       - name: http
         port: 8080
----
-# Ollama LLM
-# http://ollama.aiops.svc.cluster.local:11434
-apiVersion: v1
-kind: Service
-metadata:
-  name: ollama
-  namespace: aiops
-spec:
-  ports:
-    - name: http
-      port: 11434
-      targetPort: 11434
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: ollama
-  namespace: aiops
-subsets:
-  - addresses:
-      - ip: 192.168.148.161
-    ports:
-      - name: http
-        port: 11434

@@ -1,5 +1,9 @@
 # Camunda en accès direct — un seul process, tous les namespaces
 
+> **Mise à jour du 11 nov. 2026 — retrait de l'IA.** La stack IA (service `:8000`, Ollama, collecteur ML, pilote de campagne ML) a été retirée du dépôt
+> (archive de sécurité : `helios-state\snapshots\ai-removal-20261106`). Les passages ci-dessous qui décrivent des décisions ou des diagnostics « de l'IA »
+> sont **historiques** : la chaîne actuelle est déterministe (détecteur → politique → Bridge/watchdog → vérification). Le BPMN n'a pas été modifié.
+
 Ce dossier contient le processus BPMN par lequel **Camunda seul** réalise la chaîne complète,
 sans passer par le job-worker du backend :
 

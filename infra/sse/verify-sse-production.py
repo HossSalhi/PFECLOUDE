@@ -25,7 +25,9 @@ hdr=r.stdout.split('\r\n\r\n')[0]; sc=re.search(r'(?im)^set-cookie:\s*(helios_ss
 chk('ticket via ingress HTTPS : 200',' 200' in hdr.split('\r\n')[0])
 chk('cookie : HttpOnly',bool(re.search(r'HttpOnly',sc))); chk('cookie : SameSite=Strict','SameSite=Strict' in sc); chk('cookie : Secure (chaîne ingress → nginx → backend)',bool(re.search(r';\s*Secure',sc))); chk('cookie : Path limité au flux','Path=/api/events/stream' in sc)
 ticket=re.search(r'helios_sse=([^;]+)',sc).group(1) if sc else ''
-chk('le ticket n\'est pas dans le corps de la réponse',ticket not in r.stdout.split('\r\n\r\n',1)[-1])
+raw=r.stdout.replace('\r\n','\n'); body=raw.split('\n\n',1)[1] if '\n\n' in raw else ''   # corps = apres la PREMIERE ligne vide (en-tetes exclus)
+print('corps de la réponse du ticket (sans secret) :',body.strip()[:80])
+chk('le ticket n\'est pas dans le corps de la réponse',bool(ticket) and ticket not in body,'(ticket vide : analyse impossible)' if not ticket else '')
 # 3) flux via ingress avec ce ticket
 f=tempfile.mktemp(); p=subprocess.Popen(['curl','-sk','-N','-m','6','--resolve',res,'-H','Cookie: helios_sse='+ticket,ing+'/api/events/stream','-o',f]); p.wait()
 chk('flux SSE via ingress avec ticket : événement connected reçu','connected' in open(f).read() if os.path.exists(f) else False)
