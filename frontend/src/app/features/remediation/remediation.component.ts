@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Action, RemediationSummary, PagedResponse } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
@@ -6,6 +6,7 @@ import { SseService } from '../../core/services/sse.service';
 @Component({
     selector: 'app-remediation',
     templateUrl: './remediation.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class RemediationComponent implements OnInit, OnDestroy {

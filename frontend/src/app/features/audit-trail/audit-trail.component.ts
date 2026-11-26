@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { AuditTrailService } from '../../core/services/audit-trail.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import { AuditEntry, AuditMeta, AuditQuery, AUDIT_ACTION_LABELS, AUDIT_MODULE_LABELS } from '../../core/models/org.models';
@@ -22,6 +22,7 @@ const RESULT_LABELS: Record<string, string> = { SUCCESS: 'Succès', FAILURE: 'É
 @Component({
     selector: 'app-audit-trail',
     templateUrl: './audit-trail.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class AuditTrailComponent implements OnInit {

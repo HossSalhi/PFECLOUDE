@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
@@ -12,6 +12,7 @@ import { SseService } from '../../core/services/sse.service';
 @Component({
     selector: 'app-human-tasks',
     templateUrl: './human-tasks.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class HumanTasksComponent implements OnInit, OnDestroy {

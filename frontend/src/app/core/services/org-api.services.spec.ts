@@ -6,7 +6,7 @@ import { TeamService } from './team.service';
 import { AuditTrailService } from './audit-trail.service';
 import { ReportService } from './report.service';
 import { MaintenanceRequest } from '../models/org.models';
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
 
 const base = environment.apiBaseUrl;
 
@@ -14,7 +14,7 @@ describe('Services des modules « organisation » (URL, méthode, paramètres, c
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [], providers: [provideHttpClient(withInterceptorsFromDi()), provideHttpClientTesting()] });
+    TestBed.configureTestingModule({ imports: [], providers: [provideHttpClient(withXhr(), withInterceptorsFromDi()), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
   });
 

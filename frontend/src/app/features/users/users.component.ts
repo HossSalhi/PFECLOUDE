@@ -1,10 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
     selector: 'app-users',
     templateUrl: './users.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class UsersComponent implements OnInit {

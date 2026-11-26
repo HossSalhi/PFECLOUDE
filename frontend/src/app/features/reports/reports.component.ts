@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ReportService } from '../../core/services/report.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import {
@@ -19,6 +19,7 @@ type Tab = 'reports' | 'stats' | 'schedules';
 @Component({
     selector: 'app-reports',
     templateUrl: './reports.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class ReportsComponent implements OnInit {

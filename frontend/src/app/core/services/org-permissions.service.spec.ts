@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { environment } from '../../../environments/environment';
 import { AuthService } from './auth.service';
 import { OrgPermissionsService } from './org-permissions.service';
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
 
 class FakeAuth {
   logged = true;
@@ -23,7 +23,7 @@ describe('OrgPermissionsService', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
     imports: [],
-    providers: [{ provide: AuthService, useClass: FakeAuth }, provideHttpClient(withInterceptorsFromDi()), provideHttpClientTesting()]
+    providers: [{ provide: AuthService, useClass: FakeAuth }, provideHttpClient(withXhr(), withInterceptorsFromDi()), provideHttpClientTesting()]
 });
     service = TestBed.inject(OrgPermissionsService);
     http = TestBed.inject(HttpTestingController);

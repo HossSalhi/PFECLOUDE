@@ -1,10 +1,11 @@
-import { Component } from '@angular/core';
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 
 @Component({
     selector: 'app-forgot-password',
     templateUrl: './forgot-password.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class ForgotPasswordComponent {

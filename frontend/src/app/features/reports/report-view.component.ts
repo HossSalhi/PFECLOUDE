@@ -1,4 +1,4 @@
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, Input, OnChanges, ChangeDetectionStrategy } from '@angular/core';
 import { ReportContent, ReportMetric } from '../../core/models/org.models';
 import { buildChartViews, ChartView, formatNumber } from '../../shared/chart.util';
 import { formatDate, toLocalIso } from '../../shared/date.util';
@@ -10,6 +10,7 @@ import { formatDate, toLocalIso } from '../../shared/date.util';
 @Component({
     selector: 'app-report-view',
     templateUrl: './report-view.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class ReportViewComponent implements OnChanges {

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { Router } from '@angular/router';
 import { ApiService, Incident, PagedResponse } from '../../core/services/api.service';
@@ -7,6 +7,7 @@ import { SseService } from '../../core/services/sse.service';
 @Component({
     selector: 'app-incidents',
     templateUrl: './incidents.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class IncidentsComponent implements OnInit, OnDestroy {

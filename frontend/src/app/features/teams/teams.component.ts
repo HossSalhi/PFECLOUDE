@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { Observable } from 'rxjs';
 import { TeamService } from '../../core/services/team.service';
 import { ApiService, UserData } from '../../core/services/api.service';
@@ -13,6 +13,7 @@ import { errorMessage, formatDateTime } from '../../shared/date.util';
 @Component({
     selector: 'app-teams',
     templateUrl: './teams.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class TeamsComponent implements OnInit {

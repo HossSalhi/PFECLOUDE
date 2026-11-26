@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { interval, Subscription } from 'rxjs';
 import { switchMap, startWith } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
@@ -13,6 +13,7 @@ export interface MonitoredApp {
 @Component({
     selector: 'app-applications',
     templateUrl: './applications.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class ApplicationsComponent implements OnInit, OnDestroy {

@@ -1,4 +1,4 @@
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, Input, OnChanges, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
     selector: 'app-orange-logo',
@@ -56,6 +56,7 @@ import { Component, Input, OnChanges } from '@angular/core';
       -webkit-font-smoothing: antialiased;
     }
   `],
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class OrangeLogoComponent implements OnChanges {

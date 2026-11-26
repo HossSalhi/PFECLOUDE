@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, PagedResponse } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -15,6 +15,7 @@ import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRul
 @Component({
     selector: 'app-ai-decisions',
     templateUrl: './ai-decisions.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class AiDecisionsComponent implements OnInit, OnDestroy {

@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { SseService } from './sse.service';
 import { AuthService } from './auth.service';
-import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -20,7 +20,7 @@ describe('SseService (accès par ticket)', () => {
   function create(): SseService {
     TestBed.configureTestingModule({
     imports: [],
-    providers: [{ provide: AuthService, useValue: { isLoggedIn: () => loggedIn } }, provideHttpClient(withInterceptorsFromDi()), provideHttpClientTesting()]
+    providers: [{ provide: AuthService, useValue: { isLoggedIn: () => loggedIn } }, provideHttpClient(withXhr(), withInterceptorsFromDi()), provideHttpClientTesting()]
 });
     http = TestBed.inject(HttpTestingController);
     return TestBed.inject(SseService);

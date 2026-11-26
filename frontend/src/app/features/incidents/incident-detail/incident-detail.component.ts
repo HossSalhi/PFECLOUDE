@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, Action, WorkflowLogEntry, TerminalEvidence, IncidentVerification } from '../../../core/services/api.service';
@@ -14,6 +14,7 @@ interface HistoryEntry {
 @Component({
     selector: 'app-incident-detail',
     templateUrl: './incident-detail.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class IncidentDetailComponent implements OnInit, OnDestroy {

@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { MaintenanceService } from '../../core/services/maintenance.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
@@ -22,6 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
 @Component({
     selector: 'app-maintenance',
     templateUrl: './maintenance.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class MaintenanceComponent implements OnInit {

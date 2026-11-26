@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { TeamService } from '../../core/services/team.service';
 import { ApiService, UserData } from '../../core/services/api.service';
@@ -19,6 +19,7 @@ import { allowedTransitions } from '../../shared/task-transitions.util';
 @Component({
     selector: 'app-team-tasks',
     templateUrl: './team-tasks.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
     standalone: false
 })
 export class TeamTasksComponent implements OnInit {
