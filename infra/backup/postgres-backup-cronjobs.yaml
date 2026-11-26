@@ -1,0 +1,266 @@
+# HELIOS - CronJobs de sauvegarde PostgreSQL DURCIS (26 nov. 2026).
+# Source de verite : ce fichier (les anciens manifestes infra/postgres-backup.yaml et infra/ha01/k8s/postgres-backup-b.yaml sont anterieurs
+# a la rotation sure et au durcissement). Aucun secret : PGUSER/PGPASSWORD viennent du Secret postgres-app (secretKeyRef).
+# Durcissement : attente bornee de DNS+PostgreSQL (600 s), pg_dump en erreur => echec, marqueur de fin de dump obligatoire (sinon dump partiel
+# refuse), gzip -t, taille minimale, SHA-256, .last-success, nettoyage du .partial, rattrapage jusqu'a 6 h apres un arret du cluster
+# (startingDeadlineSeconds), duree maximale 30 min (activeDeadlineSeconds), pas de sauvegardes concurrentes (concurrencyPolicy: Forbid).
+# Le PVC postgres-backups / postgres-backups-b et la rotation sure (protection .protected, >= 30 dumps) sont inchanges.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: pfe
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      creationTimestamp: null
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            app: postgres-backup
+            helios.io/monitor: 'false'
+        spec:
+          containers:
+          - args:
+            - |
+              set -euo pipefail
+              # --- HELIOS durcissement (26 nov. 2026) : paramètres surchargeables (essais isolés) ---
+              BK_DIR="${BK_DIR:-/backups}"; PGHOST="${PGHOST:-postgres-rw.pfe.svc.cluster.local}"; PGPORT="${PGPORT:-5432}"; PGDB="${PGDB:-pfe_db}"
+              WAIT_MAX_SECONDS="${WAIT_MAX_SECONDS:-600}"; WAIT_STEP_SECONDS="${WAIT_STEP_SECONDS:-10}"
+              # 1) Attendre DNS ET PostgreSQL (démarrage juste après un redémarrage de VM) : bornes dures, échec explicite sinon.
+              START_EPOCH=$(date +%s)
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -t 5 -q; do
+                if [ $(( $(date +%s) - START_EPOCH )) -ge "$WAIT_MAX_SECONDS" ]; then
+                  echo "[backup] ECHEC : PostgreSQL ($PGHOST:$PGPORT) indisponible apres ${WAIT_MAX_SECONDS}s : aucune sauvegarde produite"; exit 1
+                fi
+                echo "[backup] attente de DNS/PostgreSQL ($PGHOST)..."; sleep "$WAIT_STEP_SECONDS"
+              done
+              TS=$(date +%Y%m%d-%H%M%S)
+              F="$BK_DIR/pfe_db-$TS.sql.gz"
+              T=$F.partial
+              trap 'rm -f "$T"' EXIT ERR
+              echo "[backup] demarrage $TS"
+              pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges | gzip > "$T"
+              gzip -t "$T"
+              [ "$(stat -c %s "$T")" -gt 10240 ] || { echo "[backup] dump anormalement petit"; exit 1; }
+              # 2) Un dump complet se termine par ce marqueur : sinon il est PARTIEL, même si gzip est valide et la taille plausible.
+              zcat "$T" | tail -n 5 | grep -q 'PostgreSQL database dump complete' || { echo "[backup] ECHEC : dump incomplet (marqueur de fin absent)"; exit 1; }
+              mv "$T" "$F"
+              ( cd "$BK_DIR" && sha256sum "pfe_db-$TS.sql.gz" > "pfe_db-$TS.sql.gz.sha256" )
+              echo "$(date -u +%FT%TZ) $(basename "$F") $(stat -c %s "$F")" > "$BK_DIR/.last-success"
+              echo "[backup] OK: $(du -h "$F" | cut -f1)"
+              # ---- ROTATION SÛRE (protect_backups.py, 6 nov. 2026) : jamais de suppression « aveugle » ----
+              BK_DIR="${BK_DIR:-/backups}"; KEEP_MIN="${KEEP_MIN:-30}"; HIGH_PCT="${HIGH_PCT:-90}"; WARN_PCT="${WARN_PCT:-80}"; GOOD_NEWER_MIN="${GOOD_NEWER_MIN:-5}"
+              USED="${BK_USED_OVERRIDE:-$(df -P "$BK_DIR" | awk 'NR==2 {gsub("%","",$5); print $5}')}"
+              case "$USED" in ''|*[!0-9]*) USED=0 ;; esac
+              NFILES=$({ ls -1 "$BK_DIR"/pfe_db-*.sql.gz 2>/dev/null || true; } | wc -l)
+              if [ "$USED" -ge "$WARN_PCT" ]; then echo "[backup] ALERTE: systeme de fichiers du volume occupe a ${USED}%"; fi
+              if [ "$USED" -ge "$HIGH_PCT" ] && [ "$NFILES" -gt "$KEEP_MIN" ]; then
+                GOOD=0
+                for f in $(ls -1t "$BK_DIR"/pfe_db-*.sql.gz | head -n "$GOOD_NEWER_MIN"); do
+                  if gzip -t "$f" 2>/dev/null; then GOOD=$((GOOD + 1)); fi
+                done
+                if [ "$GOOD" -ge "$GOOD_NEWER_MIN" ]; then
+                  ls -1t "$BK_DIR"/pfe_db-*.sql.gz | tail -n +"$((KEEP_MIN + 1))" | while read -r f; do
+                    b=$(basename "$f")
+                    if grep -qxF "$b" "$BK_DIR/.protected" 2>/dev/null; then echo "[backup] protege (restauration validee), conserve: $b"; continue; fi
+                    echo "[backup] ROTATION (volume a ${USED}%): suppression de $b"; rm -f -- "$f" "$f.sha256"
+                  done
+                else
+                  echo "[backup] rotation ANNULEE: seulement $GOOD/$GOOD_NEWER_MIN dumps recents verifies"
+                fi
+              else
+                echo "[backup] aucune suppression (volume a ${USED}%, $NFILES dumps ; suppression possible seulement si >= ${HIGH_PCT}% ET > ${KEEP_MIN} dumps)"
+              fi
+              # ---- fin de la rotation sûre ----
+              echo "[backup] fichiers:"; ls -lh "$BK_DIR"/pfe_db-*.sql.gz
+            command:
+            - /bin/bash
+            - -c
+            env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: postgres-app
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: postgres-app
+            image: ghcr.io/cloudnative-pg/postgresql:16
+            imagePullPolicy: IfNotPresent
+            name: dump
+            resources:
+              limits:
+                cpu: 250m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            volumeMounts:
+            - mountPath: /backups
+              name: backups
+          dnsPolicy: ClusterFirst
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext:
+            fsGroup: 26
+            runAsNonRoot: true
+            runAsUser: 26
+            seccompProfile:
+              type: RuntimeDefault
+          terminationGracePeriodSeconds: 30
+          volumes:
+          - name: backups
+            persistentVolumeClaim:
+              claimName: postgres-backups
+      activeDeadlineSeconds: 1800
+  schedule: 0 2 * * *
+  successfulJobsHistoryLimit: 3
+  suspend: false
+  startingDeadlineSeconds: 21600
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup-b
+  namespace: pfe
+  labels:
+    ha01/role: backup-b
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      creationTimestamp: null
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            app: postgres-backup-b
+            helios.io/monitor: 'false'
+        spec:
+          containers:
+          - args:
+            - |
+              set -euo pipefail
+              # --- HELIOS durcissement (26 nov. 2026) : paramètres surchargeables (essais isolés) ---
+              BK_DIR="${BK_DIR:-/backups}"; PGHOST="${PGHOST:-postgres-rw.pfe.svc.cluster.local}"; PGPORT="${PGPORT:-5432}"; PGDB="${PGDB:-pfe_db}"
+              WAIT_MAX_SECONDS="${WAIT_MAX_SECONDS:-600}"; WAIT_STEP_SECONDS="${WAIT_STEP_SECONDS:-10}"
+              # 1) Attendre DNS ET PostgreSQL (démarrage juste après un redémarrage de VM) : bornes dures, échec explicite sinon.
+              START_EPOCH=$(date +%s)
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -t 5 -q; do
+                if [ $(( $(date +%s) - START_EPOCH )) -ge "$WAIT_MAX_SECONDS" ]; then
+                  echo "[backup-b] ECHEC : PostgreSQL ($PGHOST:$PGPORT) indisponible apres ${WAIT_MAX_SECONDS}s : aucune sauvegarde produite"; exit 1
+                fi
+                echo "[backup-b] attente de DNS/PostgreSQL ($PGHOST)..."; sleep "$WAIT_STEP_SECONDS"
+              done
+              TS=$(date +%Y%m%d-%H%M%S)
+              F="$BK_DIR/pfe_db-$TS.sql.gz"
+              T=$F.partial
+              trap 'rm -f "$T"' EXIT ERR
+              echo "[backup-b] demarrage $TS"
+              pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" --no-owner --no-privileges | gzip > "$T"
+              gzip -t "$T"
+              [ "$(stat -c %s "$T")" -gt 10240 ] || { echo "[backup-b] dump anormalement petit"; exit 1; }
+              # 2) Un dump complet se termine par ce marqueur : sinon il est PARTIEL, même si gzip est valide et la taille plausible.
+              zcat "$T" | tail -n 5 | grep -q 'PostgreSQL database dump complete' || { echo "[backup-b] ECHEC : dump incomplet (marqueur de fin absent)"; exit 1; }
+              mv "$T" "$F"
+              ( cd "$BK_DIR" && sha256sum "pfe_db-$TS.sql.gz" > "pfe_db-$TS.sql.gz.sha256" )
+              echo "$(date -u +%FT%TZ) $(basename "$F") $(stat -c %s "$F")" > "$BK_DIR/.last-success"
+              echo "[backup-b] OK: $(du -h "$F" | cut -f1)"
+              # ---- ROTATION SÛRE (protect_backups.py, 6 nov. 2026) : jamais de suppression « aveugle » ----
+              BK_DIR="${BK_DIR:-/backups}"; KEEP_MIN="${KEEP_MIN:-30}"; HIGH_PCT="${HIGH_PCT:-90}"; WARN_PCT="${WARN_PCT:-80}"; GOOD_NEWER_MIN="${GOOD_NEWER_MIN:-5}"
+              USED="${BK_USED_OVERRIDE:-$(df -P "$BK_DIR" | awk 'NR==2 {gsub("%","",$5); print $5}')}"
+              case "$USED" in ''|*[!0-9]*) USED=0 ;; esac
+              NFILES=$({ ls -1 "$BK_DIR"/pfe_db-*.sql.gz 2>/dev/null || true; } | wc -l)
+              if [ "$USED" -ge "$WARN_PCT" ]; then echo "[backup-b] ALERTE: systeme de fichiers du volume occupe a ${USED}%"; fi
+              if [ "$USED" -ge "$HIGH_PCT" ] && [ "$NFILES" -gt "$KEEP_MIN" ]; then
+                GOOD=0
+                for f in $(ls -1t "$BK_DIR"/pfe_db-*.sql.gz | head -n "$GOOD_NEWER_MIN"); do
+                  if gzip -t "$f" 2>/dev/null; then GOOD=$((GOOD + 1)); fi
+                done
+                if [ "$GOOD" -ge "$GOOD_NEWER_MIN" ]; then
+                  ls -1t "$BK_DIR"/pfe_db-*.sql.gz | tail -n +"$((KEEP_MIN + 1))" | while read -r f; do
+                    b=$(basename "$f")
+                    if grep -qxF "$b" "$BK_DIR/.protected" 2>/dev/null; then echo "[backup-b] protege (restauration validee), conserve: $b"; continue; fi
+                    echo "[backup-b] ROTATION (volume a ${USED}%): suppression de $b"; rm -f -- "$f" "$f.sha256"
+                  done
+                else
+                  echo "[backup-b] rotation ANNULEE: seulement $GOOD/$GOOD_NEWER_MIN dumps recents verifies"
+                fi
+              else
+                echo "[backup-b] aucune suppression (volume a ${USED}%, $NFILES dumps ; suppression possible seulement si >= ${HIGH_PCT}% ET > ${KEEP_MIN} dumps)"
+              fi
+              # ---- fin de la rotation sûre ----
+              echo "[backup-b] fichiers:"; ls -lh "$BK_DIR"/pfe_db-*.sql.gz
+            command:
+            - /bin/bash
+            - -c
+            env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: postgres-app
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: password
+                  name: postgres-app
+            image: ghcr.io/cloudnative-pg/postgresql:16
+            imagePullPolicy: IfNotPresent
+            name: dump
+            resources:
+              limits:
+                cpu: 250m
+                memory: 256Mi
+              requests:
+                cpu: 50m
+                memory: 64Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            volumeMounts:
+            - mountPath: /backups
+              name: backups
+          dnsPolicy: ClusterFirst
+          nodeSelector:
+            kubernetes.io/hostname: k8s-worker2
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext:
+            fsGroup: 26
+            runAsNonRoot: true
+            runAsUser: 26
+            seccompProfile:
+              type: RuntimeDefault
+          terminationGracePeriodSeconds: 30
+          volumes:
+          - name: backups
+            persistentVolumeClaim:
+              claimName: postgres-backups-b
+      activeDeadlineSeconds: 1800
+  schedule: 30 2 * * *
+  startingDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 3
+  suspend: false

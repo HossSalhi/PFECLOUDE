@@ -1,0 +1,17 @@
+groups:
+  - name: helios_surveillance
+    interval: 60s
+    rules:
+      # Aucune annotation "incident" et source != helios : ces alertes ne créent PAS d'incident HELIOS (pas de remédiation automatique).
+      - alert: HeliosSauvegardePostgresObsolete
+        expr: time() - kube_cronjob_status_last_successful_time{namespace="pfe",cronjob=~"postgres-backup(-b)?"} > 93600
+        for: 10m
+        labels: {severity: warning, source: surveillance}
+        annotations:
+          summary: "Sauvegarde PostgreSQL {{ $labels.cronjob }} : aucun succes depuis plus de 26 h"
+      - alert: HeliosCamundaArrete
+        expr: up{job="camunda"} == 0
+        for: 2m
+        labels: {severity: critical, source: surveillance}
+        annotations:
+          summary: "Camunda (.161) ne repond plus : les workflows de remediation sont a l'arret"
