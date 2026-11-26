@@ -1,0 +1,8 @@
+[Unit]
+Description=HELIOS - controle de sante de Camunda 8 Run (relance prudente)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/helios-camunda-watchdog.sh
+Nice=10
