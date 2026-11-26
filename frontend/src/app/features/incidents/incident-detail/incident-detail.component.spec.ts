@@ -86,7 +86,7 @@ describe('IncidentDetailComponent — rendu de la carte (TestBed, HTTP mocké)',
     ]
 });
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();   // déclenche ngOnInit -> loadAll -> rendu
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)   // déclenche ngOnInit -> loadAll -> rendu
   }
 
   afterEach(() => TestBed.resetTestingModule());
@@ -181,7 +181,7 @@ describe('IncidentDetailComponent — décision déterministe & neutralité IA (
     ]
 });
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();   // ngOnInit -> loadAll -> rendu
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)   // ngOnInit -> loadAll -> rendu
     return (fixture.nativeElement as HTMLElement).textContent || '';
   }
 
@@ -259,7 +259,7 @@ describe('IncidentDetailComponent — cohérence configuré vs recommandé vs ex
     ]
 });
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)
     return (fixture.nativeElement as HTMLElement).textContent || '';
   }
 

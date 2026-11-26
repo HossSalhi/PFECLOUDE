@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { TeamService } from '../../core/services/team.service';
@@ -48,6 +49,7 @@ describe('TeamsComponent', () => {
     imports: [FormsModule, TeamsComponent],
     schemas: [NO_ERRORS_SCHEMA],
     providers: [
+        provideRouter([]),
         { provide: TeamService, useValue: service },
         { provide: ApiService, useValue: api },
         { provide: OrgPermissionsService, useValue: perms }
