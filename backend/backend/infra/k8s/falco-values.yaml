@@ -51,3 +51,17 @@ falcosidekick:
       address: "http://backend.pfe.svc.cluster.local:8080/api/webhooks/falco"
       method: POST
       minimumpriority: notice
+    # AUTHENTIFICATION DU WEBHOOK (HELIOS L08+) : le backend refuse (401) toute requete sans l'en-tete X-Helios-Falco-Token.
+    # Le jeton n'est JAMAIS dans ce fichier ni dans le Secret genere par le chart (ecrase a chaque `helm upgrade`) : il vit dans le Secret
+    # falco/falcosidekick-helios-webhook (cle WEBHOOK_CUSTOMHEADERS, valeur « X-Helios-Falco-Token:<jeton> », UN seul « : », sans « , »),
+    # reference ci-dessous. `env` l'emporte sur `envFrom` : le parametrage survit donc a un upgrade. Chart falcosidekick 0.12.x :
+    # `config.extraEnv` est ajoute a la liste `env` du conteneur. Creation du Secret (hors Git) :
+    #   kubectl -n falco create secret generic falcosidekick-helios-webhook --from-literal=WEBHOOK_CUSTOMHEADERS="X-Helios-Falco-Token:$TOKEN"
+    # avec $TOKEN = la valeur de HELIOS_FALCO_WEBHOOK_TOKEN du Secret pfe/backend-secret. Format verifie dans le code 2.32.0 (config.go) :
+    # WEBHOOK_CUSTOMHEADERS = "Nom:valeur,Nom2:valeur2".
+    extraEnv:
+      - name: WEBHOOK_CUSTOMHEADERS
+        valueFrom:
+          secretKeyRef:
+            name: falcosidekick-helios-webhook
+            key: WEBHOOK_CUSTOMHEADERS
