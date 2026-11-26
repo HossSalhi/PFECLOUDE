@@ -87,7 +87,7 @@ class SecurityEndpointAccessTest {
         when(tickets.consume("bon")).thenReturn(Optional.of("alice")).thenReturn(Optional.empty());
         var alice = user(com.orange.pfe.backend.model.user.UserRole.ADMIN, java.util.Set.of());
         when(appUserRepository.findByUsername("alice")).thenReturn(Optional.of(alice));
-        when(sseEventService.subscribe(org.mockito.ArgumentMatchers.anySet())).thenReturn(new SseEmitter());
+        when(sseEventService.subscribe(org.mockito.ArgumentMatchers.anySet(), org.mockito.ArgumentMatchers.any())).thenReturn(new SseEmitter());
         var r = mvc.perform(stream("bon")).andReturn().getResponse();
         assertThat(r.getStatus()).isEqualTo(200);
         var reuse = mvc.perform(stream("bon")).andReturn().getResponse();
@@ -98,9 +98,9 @@ class SecurityEndpointAccessTest {
         when(tickets.consume("r")).thenReturn(Optional.of("bob"));
         var bob = user(com.orange.pfe.backend.model.user.UserRole.USER, java.util.Set.of("ns-a"));
         when(appUserRepository.findByUsername("bob")).thenReturn(Optional.of(bob));
-        when(sseEventService.subscribe(org.mockito.ArgumentMatchers.anySet())).thenReturn(new SseEmitter());
+        when(sseEventService.subscribe(org.mockito.ArgumentMatchers.anySet(), org.mockito.ArgumentMatchers.any())).thenReturn(new SseEmitter());
         assertThat(status(stream("r"))).isEqualTo(200);
-        org.mockito.Mockito.verify(sseEventService).subscribe(java.util.Set.of("ns-a"));
+        org.mockito.Mockito.verify(sseEventService).subscribe(java.util.Set.of("ns-a"), null);
     }
     @Test void sse_disabledOrMissingUser_refused() throws Exception {
         when(tickets.consume("x")).thenReturn(Optional.of("fantome"));

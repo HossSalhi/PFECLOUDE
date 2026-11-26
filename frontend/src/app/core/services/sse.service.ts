@@ -16,6 +16,7 @@ export class SseService implements OnDestroy {
   private baseUrl = environment.apiBaseUrl;
   private eventSource: EventSource | null = null;
   private reconnectTimer: any = null;
+  private lastEventId: string | null = null;
 
   private incidentCreated$ = new Subject<any>();
   private incidentUpdated$ = new Subject<any>();
@@ -46,7 +47,7 @@ export class SseService implements OnDestroy {
   }
 
   private openStream(): void {
-    const url = `${this.baseUrl}/api/events/stream`;
+    const url = `${this.baseUrl}/api/events/stream` + (this.lastEventId ? `?lastEventId=${encodeURIComponent(this.lastEventId)}` : '');
 
     try {
       this.eventSource = new EventSource(url, { withCredentials: true });
@@ -67,6 +68,7 @@ export class SseService implements OnDestroy {
       };
 
       this.eventSource.addEventListener('incident_created', (event: MessageEvent) => {
+        this.remember(event);
         try {
           const data = JSON.parse(event.data);
           this.incidentCreated$.next(data);
@@ -76,6 +78,7 @@ export class SseService implements OnDestroy {
       });
 
       this.eventSource.addEventListener('incident_updated', (event: MessageEvent) => {
+        this.remember(event);
         try {
           const data = JSON.parse(event.data);
           this.incidentUpdated$.next(data);
@@ -92,6 +95,11 @@ export class SseService implements OnDestroy {
       console.error('SSE connection error:', error);
       this.scheduleReconnect();
     }
+  }
+
+  /** Mémorise l'id du dernier évènement reçu : après une déconnexion, le serveur rejoue les évènements manqués. */
+  private remember(event: MessageEvent): void {
+    if (event.lastEventId) { this.lastEventId = event.lastEventId; }
   }
 
   private scheduleReconnect(): void {
