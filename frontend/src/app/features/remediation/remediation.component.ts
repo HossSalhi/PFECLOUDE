@@ -1,11 +1,14 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Action, RemediationSummary, PagedResponse } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
+import { NgClass, DatePipe } from '@angular/common';
 
 @Component({
-  selector: 'app-remediation',
-  templateUrl: './remediation.component.html'
+    selector: 'app-remediation',
+    templateUrl: './remediation.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgClass, DatePipe]
 })
 export class RemediationComponent implements OnInit, OnDestroy {
   summary: RemediationSummary | null = null;

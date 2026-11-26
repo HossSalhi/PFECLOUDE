@@ -27,14 +27,13 @@ describe('AiDecisionsComponent — déterministe & neutralité IA (TestBed)', ()
     const auth: any = { getUsername: () => 'op' };
     const sse: any = { onIncidentCreated: () => of(), onIncidentUpdated: () => of() };
     TestBed.configureTestingModule({
-      declarations: [AiDecisionsComponent],
-      imports: [CommonModule, FormsModule],
-      providers: [
+    imports: [CommonModule, FormsModule, AiDecisionsComponent],
+    providers: [
         { provide: ApiService, useValue: api },
         { provide: AuthService, useValue: auth },
         { provide: SseService, useValue: sse }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(AiDecisionsComponent);
     fixture.detectChanges();
     return (fixture.nativeElement as HTMLElement).textContent || '';

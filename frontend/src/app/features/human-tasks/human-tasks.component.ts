@@ -1,7 +1,9 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
+import { NgClass, DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 
 /**
  * "Remédiations Échouées" — dans le modèle 100% autonome, l'humain n'intervient QUE
@@ -10,8 +12,10 @@ import { SseService } from '../../core/services/sse.service';
  * (hors HELIOS). Plus de tâches d'approbation (supprimées avec le mode autonome).
  */
 @Component({
-  selector: 'app-human-tasks',
-  templateUrl: './human-tasks.component.html'
+    selector: 'app-human-tasks',
+    templateUrl: './human-tasks.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgClass, RouterLink, DatePipe]
 })
 export class HumanTasksComponent implements OnInit, OnDestroy {
   failedIncidents: Incident[] = [];

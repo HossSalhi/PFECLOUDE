@@ -1,10 +1,13 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
+import { FormsModule } from '@angular/forms';
 
 @Component({
-  selector: 'app-activate',
-  templateUrl: './activate.component.html'
+    selector: 'app-activate',
+    templateUrl: './activate.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [FormsModule]
 })
 export class ActivateComponent implements OnInit {
   token = '';

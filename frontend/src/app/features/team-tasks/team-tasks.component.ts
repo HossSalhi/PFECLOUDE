@@ -1,5 +1,5 @@
-import { Component, OnInit } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TeamService } from '../../core/services/team.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
@@ -9,6 +9,8 @@ import {
 } from '../../core/models/org.models';
 import { errorMessage, formatDate, formatDateTime, toDateValue } from '../../shared/date.util';
 import { allowedTransitions } from '../../shared/task-transitions.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 /**
  * Tâches d'équipe : liste filtrable, avancement, création / modification, affectation et changement de statut.
@@ -17,8 +19,10 @@ import { allowedTransitions } from '../../shared/task-transitions.util';
  * aux gestionnaires — règles appliquées par le Backend, reprises ici pour n'afficher que les actions utiles.
  */
 @Component({
-  selector: 'app-team-tasks',
-  templateUrl: './team-tasks.component.html'
+    selector: 'app-team-tasks',
+    templateUrl: './team-tasks.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [RouterLink, FormsModule, NgClass]
 })
 export class TeamTasksComponent implements OnInit {
 

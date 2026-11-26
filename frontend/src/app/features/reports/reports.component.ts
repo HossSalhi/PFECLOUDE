@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ReportService } from '../../core/services/report.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import {
@@ -7,6 +7,9 @@ import {
 import { errorMessage, formatDateTime } from '../../shared/date.util';
 import { saveBlob } from '../../shared/download.util';
 import { PERIOD_PRESET_LABELS, PeriodPreset, presetRange, toBackendPeriod, validatePeriod } from '../../shared/period.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
+import { ReportViewComponent } from './report-view.component';
 
 type Tab = 'reports' | 'stats' | 'schedules';
 
@@ -17,8 +20,10 @@ type Tab = 'reports' | 'stats' | 'schedules';
  * réelles ; cette page ne fabrique aucune donnée.
  */
 @Component({
-  selector: 'app-reports',
-  templateUrl: './reports.component.html'
+    selector: 'app-reports',
+    templateUrl: './reports.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [FormsModule, NgClass, ReportViewComponent]
 })
 export class ReportsComponent implements OnInit {
 

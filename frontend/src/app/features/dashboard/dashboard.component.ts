@@ -1,12 +1,17 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription, interval } from 'rxjs';
 import { ChartConfiguration, ChartData } from 'chart.js';
 import { ApiService, DashboardSummary, Incident } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
+import { NgChartsModule } from 'ng2-charts';
+import { NgClass, DecimalPipe, DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 
 @Component({
-  selector: 'app-dashboard',
-  templateUrl: './dashboard.component.html'
+    selector: 'app-dashboard',
+    templateUrl: './dashboard.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgChartsModule, NgClass, RouterLink, DecimalPipe, DatePipe]
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   summary: DashboardSummary | null = null;

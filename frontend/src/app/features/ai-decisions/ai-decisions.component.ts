@@ -1,9 +1,11 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, PagedResponse } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { SseService } from '../../core/services/sse.service';
 import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, BusinessScenario } from '../../core/config/remediation-scenarios';
+import { NgClass, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 
 /**
  * Page « Décisions de remédiation » — DÉTERMINISTE.
@@ -13,8 +15,10 @@ import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRul
  * notion de « confiance IA » : la décision ne dépend d'aucun modèle. Un type non couvert -> escalade.
  */
 @Component({
-  selector: 'app-ai-decisions',
-  templateUrl: './ai-decisions.component.html'
+    selector: 'app-ai-decisions',
+    templateUrl: './ai-decisions.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgClass, FormsModule, DatePipe]
 })
 export class AiDecisionsComponent implements OnInit, OnDestroy {
   incidents: Incident[] = [];

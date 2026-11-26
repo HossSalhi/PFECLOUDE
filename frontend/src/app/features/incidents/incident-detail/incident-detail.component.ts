@@ -1,8 +1,9 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, Action, WorkflowLogEntry, TerminalEvidence, IncidentVerification } from '../../../core/services/api.service';
 import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, REMEDIATION_CONFIG_VERSION } from '../../../core/config/remediation-scenarios';
+import { NgClass, DatePipe } from '@angular/common';
 
 interface HistoryEntry {
   id: number;
@@ -12,8 +13,10 @@ interface HistoryEntry {
 }
 
 @Component({
-  selector: 'app-incident-detail',
-  templateUrl: './incident-detail.component.html'
+    selector: 'app-incident-detail',
+    templateUrl: './incident-detail.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgClass, DatePipe]
 })
 export class IncidentDetailComponent implements OnInit, OnDestroy {
   incident: Incident | null = null;

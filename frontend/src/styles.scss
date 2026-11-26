@@ -1753,3 +1753,6 @@ select.form-control  { cursor: pointer; }
 // ── 25. Modules « organisation » (maintenance, équipes, tâches, audit, rapports) ──
 // Feuille globale préfixée par .org-scope (voir app/shared/_org-ui.scss) : aucune incidence sur les autres pages.
 @import 'app/shared/org-ui';
+
+@import 'styles/login-page';
+@import 'styles/users-page';

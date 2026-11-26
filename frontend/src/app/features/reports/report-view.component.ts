@@ -1,15 +1,18 @@
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, Input, OnChanges, ChangeDetectionStrategy } from '@angular/core';
 import { ReportContent, ReportMetric } from '../../core/models/org.models';
 import { buildChartViews, ChartView, formatNumber } from '../../shared/chart.util';
 import { formatDate, toLocalIso } from '../../shared/date.util';
+import { NgChartsModule } from 'ng2-charts';
 
 /**
  * Affichage d'un rapport (indicateurs, comparaison avec la période précédente, graphiques, tableaux).
  * Réutilisé par la consultation d'un rapport enregistré et par les statistiques calculées à la demande.
  */
 @Component({
-  selector: 'app-report-view',
-  templateUrl: './report-view.component.html'
+    selector: 'app-report-view',
+    templateUrl: './report-view.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgChartsModule]
 })
 export class ReportViewComponent implements OnChanges {
 

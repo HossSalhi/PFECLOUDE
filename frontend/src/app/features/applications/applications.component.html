@@ -10,8 +10,12 @@
     <div class="page-subtitle">Découverte automatique des workloads Kubernetes</div>
   </div>
   <div class="page-actions">
-    <span class="live-dot" *ngIf="!loading">Auto-Discovery actif</span>
-    <span class="text-muted" *ngIf="lastRefresh" style="font-size:12px;">{{ lastRefresh }}</span>
+    @if (!loading) {
+      <span class="live-dot">Auto-Discovery actif</span>
+    }
+    @if (lastRefresh) {
+      <span class="text-muted" style="font-size:12px;">{{ lastRefresh }}</span>
+    }
     <button class="btn btn-ghost btn-sm" (click)="refresh()" [disabled]="loading">
       <i class="fas fa-rotate-right" [class.fa-spin]="loading"></i>
       Actualiser
@@ -59,13 +63,14 @@
 </div>
 
 <!-- ── Loading ── -->
-<div *ngIf="loading" style="padding:60px;text-align:center;">
-  <div class="spinner-orange"></div>
-  <div class="text-muted" style="margin-top:14px;">Découverte des applications en cours…</div>
-</div>
+@if (loading) {
+  <div style="padding:60px;text-align:center;">
+    <div class="spinner-orange"></div>
+    <div class="text-muted" style="margin-top:14px;">Découverte des applications en cours…</div>
+  </div>
+}
 
-<ng-container *ngIf="!loading">
-
+@if (!loading) {
   <!-- ── K8s Deployments ── -->
   <div class="card mb-20">
     <div class="card-header">
@@ -76,44 +81,47 @@
       </div>
       <span class="live-dot" style="font-size:12px;">Watch API actif</span>
     </div>
-
-    <div *ngIf="getK8sApps().length === 0" class="empty-state">
-      <div class="empty-icon"><i class="fas fa-dharmachakra"></i></div>
-      <div class="empty-title">Aucun Deployment détecté</div>
-      <div class="empty-text">Aucun Deployment Kubernetes n'a encore été découvert.</div>
-    </div>
-
-    <div *ngIf="getK8sApps().length > 0" class="data-table-wrapper">
-      <table class="orange-table">
-        <thead>
-          <tr>
-            <th>Application</th>
-            <th>Namespace</th>
-            <th>Type</th>
-            <th>Statut de supervision</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let app of getK8sApps()">
-            <td>
-              <div style="display:flex;align-items:center;gap:10px;">
-                <div style="width:32px;height:32px;background:var(--color-info-bg);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--color-info);font-size:14px;flex-shrink:0;">
-                  <i class="fas fa-cube"></i>
-                </div>
-                <div>
-                  <div style="font-weight:600;color:var(--gray-900);">{{ app.app }}</div>
-                </div>
-              </div>
-            </td>
-            <td><span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;">{{ app.namespace }}</span></td>
-            <td><span class="badge-status ai"><i class="fas fa-dharmachakra"></i> {{ app.type }}</span></td>
-            <td><span class="badge-status success"><i class="fas fa-circle-check"></i> Surveillé</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    @if (getK8sApps().length === 0) {
+      <div class="empty-state">
+        <div class="empty-icon"><i class="fas fa-dharmachakra"></i></div>
+        <div class="empty-title">Aucun Deployment détecté</div>
+        <div class="empty-text">Aucun Deployment Kubernetes n'a encore été découvert.</div>
+      </div>
+    }
+    @if (getK8sApps().length > 0) {
+      <div class="data-table-wrapper">
+        <table class="orange-table">
+          <thead>
+            <tr>
+              <th>Application</th>
+              <th>Namespace</th>
+              <th>Type</th>
+              <th>Statut de supervision</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (app of getK8sApps(); track app) {
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="width:32px;height:32px;background:var(--color-info-bg);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--color-info);font-size:14px;flex-shrink:0;">
+                      <i class="fas fa-cube"></i>
+                    </div>
+                    <div>
+                      <div style="font-weight:600;color:var(--gray-900);">{{ app.app }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;">{{ app.namespace }}</span></td>
+                <td><span class="badge-status ai"><i class="fas fa-dharmachakra"></i> {{ app.type }}</span></td>
+                <td><span class="badge-status success"><i class="fas fa-circle-check"></i> Surveillé</span></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
   </div>
-
   <!-- ── Services VM ── -->
   <div class="card">
     <div class="card-header">
@@ -123,40 +131,43 @@
         <span class="badge-status manual" style="margin-left:8px;">{{ getVmApps().length }} services</span>
       </div>
     </div>
-
-    <div *ngIf="getVmApps().length === 0" class="empty-state">
-      <div class="empty-icon"><i class="fas fa-server"></i></div>
-      <div class="empty-title">Aucun service VM</div>
-      <div class="empty-text">Aucun service externe n'est configuré.</div>
-    </div>
-
-    <div *ngIf="getVmApps().length > 0" class="data-table-wrapper">
-      <table class="orange-table">
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>VM / Namespace</th>
-            <th>Type</th>
-            <th>Statut</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let app of getVmApps()">
-            <td>
-              <div style="display:flex;align-items:center;gap:10px;">
-                <div style="width:32px;height:32px;background:var(--gray-100);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--gray-600);font-size:14px;flex-shrink:0;">
-                  <i class="fas fa-server"></i>
-                </div>
-                <div style="font-weight:600;color:var(--gray-900);">{{ app.app }}</div>
-              </div>
-            </td>
-            <td><span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;">{{ app.namespace }}</span></td>
-            <td><span class="badge-status manual">{{ app.type }}</span></td>
-            <td><span class="badge-status success"><i class="fas fa-circle-check"></i> Actif</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    @if (getVmApps().length === 0) {
+      <div class="empty-state">
+        <div class="empty-icon"><i class="fas fa-server"></i></div>
+        <div class="empty-title">Aucun service VM</div>
+        <div class="empty-text">Aucun service externe n'est configuré.</div>
+      </div>
+    }
+    @if (getVmApps().length > 0) {
+      <div class="data-table-wrapper">
+        <table class="orange-table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>VM / Namespace</th>
+              <th>Type</th>
+              <th>Statut</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (app of getVmApps(); track app) {
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="width:32px;height:32px;background:var(--gray-100);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--gray-600);font-size:14px;flex-shrink:0;">
+                      <i class="fas fa-server"></i>
+                    </div>
+                    <div style="font-weight:600;color:var(--gray-900);">{{ app.app }}</div>
+                  </div>
+                </td>
+                <td><span class="mono" style="background:var(--gray-100);padding:3px 8px;border-radius:4px;font-size:12px;">{{ app.namespace }}</span></td>
+                <td><span class="badge-status manual">{{ app.type }}</span></td>
+                <td><span class="badge-status success"><i class="fas fa-circle-check"></i> Actif</span></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
   </div>
-
-</ng-container>
+}

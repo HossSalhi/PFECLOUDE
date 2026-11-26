@@ -17,70 +17,79 @@
 </div>
 
 <!-- ── Loading ── -->
-<div *ngIf="loading" style="padding:60px;text-align:center;">
-  <div class="spinner-orange"></div>
-  <div class="text-muted" style="margin-top:14px;">Chargement…</div>
-</div>
+@if (loading) {
+  <div style="padding:60px;text-align:center;">
+    <div class="spinner-orange"></div>
+    <div class="text-muted" style="margin-top:14px;">Chargement…</div>
+  </div>
+}
 
 <!-- ── Empty (tout est résolu automatiquement) ── -->
-<div *ngIf="!loading && failedIncidents.length === 0" class="card">
-  <div class="empty-state">
-    <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
-    <div class="empty-title">Aucune remédiation échouée</div>
-    <div class="empty-text">HELIOS a réparé tous les incidents automatiquement. Ceux qu'il ne parvient pas à résoudre apparaîtront ici pour intervention manuelle.</div>
+@if (!loading && failedIncidents.length === 0) {
+  <div class="card">
+    <div class="empty-state">
+      <div class="empty-icon"><i class="fas fa-circle-check"></i></div>
+      <div class="empty-title">Aucune remédiation échouée</div>
+      <div class="empty-text">HELIOS a réparé tous les incidents automatiquement. Ceux qu'il ne parvient pas à résoudre apparaîtront ici pour intervention manuelle.</div>
+    </div>
   </div>
-</div>
+}
 
 <!-- ── Liste des incidents RESOLUTION_FAILED ── -->
-<div *ngIf="!loading && failedIncidents.length > 0" class="card">
-  <div class="card-header">
-    <div class="card-title">
-      <div class="card-title-icon"><i class="fas fa-circle-xmark"></i></div>
-      Incidents à reprendre manuellement
+@if (!loading && failedIncidents.length > 0) {
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <div class="card-title-icon"><i class="fas fa-circle-xmark"></i></div>
+        Incidents à reprendre manuellement
+      </div>
+      <span class="badge-status danger">{{ failedIncidents.length }} incident(s)</span>
     </div>
-    <span class="badge-status danger">{{ failedIncidents.length }} incident(s)</span>
-  </div>
-
-  <div class="data-table-wrapper">
-    <table class="orange-table">
-      <thead>
-        <tr>
-          <th>Incident</th>
-          <th>Application</th>
-          <th>Type</th>
-          <th>Sévérité</th>
-          <th>Détecté le</th>
-          <th style="text-align:right;">Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let inc of failedIncidents; trackBy: trackById" style="background:rgba(220,53,69,0.04);">
-          <td>
-            <div style="display:flex;align-items:center;gap:10px;">
-              <div style="width:32px;height:32px;background:#fde8ea;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#dc3545;font-size:14px;flex-shrink:0;">
-                <i class="fas fa-circle-xmark"></i>
-              </div>
-              <div>
-                <span style="font-weight:600;color:var(--gray-900);">#{{ inc.id }}</span>
-                <div *ngIf="inc.title" style="font-size:12px;color:var(--gray-500);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                  {{ inc.title }}
+    <div class="data-table-wrapper">
+      <table class="orange-table">
+        <thead>
+          <tr>
+            <th>Incident</th>
+            <th>Application</th>
+            <th>Type</th>
+            <th>Sévérité</th>
+            <th>Détecté le</th>
+            <th style="text-align:right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (inc of failedIncidents; track trackById($index, inc)) {
+            <tr style="background:rgba(220,53,69,0.04);">
+              <td>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="width:32px;height:32px;background:#fde8ea;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#dc3545;font-size:14px;flex-shrink:0;">
+                    <i class="fas fa-circle-xmark"></i>
+                  </div>
+                  <div>
+                    <span style="font-weight:600;color:var(--gray-900);">#{{ inc.id }}</span>
+                    @if (inc.title) {
+                      <div style="font-size:12px;color:var(--gray-500);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        {{ inc.title }}
+                      </div>
+                    }
+                  </div>
                 </div>
-              </div>
-            </div>
-          </td>
-          <td style="font-size:13px;color:var(--gray-700);">{{ inc.app || '—' }}</td>
-          <td style="font-size:12px;color:var(--gray-600);">{{ inc.incidentType || '—' }}</td>
-          <td><span class="badge-status" [ngClass]="sevClass(inc.severity)">{{ inc.severity }}</span></td>
-          <td class="col-meta">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
-          <td>
-            <div style="display:flex;gap:8px;justify-content:flex-end;">
-              <a [routerLink]="['/incidents', inc.id]" class="btn btn-ghost btn-sm" style="text-decoration:none;">
-                <i class="fas fa-file-lines"></i> Voir le rapport
-              </a>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+              </td>
+              <td style="font-size:13px;color:var(--gray-700);">{{ inc.app || '—' }}</td>
+              <td style="font-size:12px;color:var(--gray-600);">{{ inc.incidentType || '—' }}</td>
+              <td><span class="badge-status" [ngClass]="sevClass(inc.severity)">{{ inc.severity }}</span></td>
+              <td class="col-meta">{{ inc.createdAt | date:'dd/MM/yyyy HH:mm' }}</td>
+              <td>
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <a [routerLink]="['/incidents', inc.id]" class="btn btn-ghost btn-sm" style="text-decoration:none;">
+                    <i class="fas fa-file-lines"></i> Voir le rapport
+                  </a>
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
   </div>
-</div>
+}

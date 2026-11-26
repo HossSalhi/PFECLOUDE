@@ -21,7 +21,7 @@ describe('ReportViewComponent', () => {
   };
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ declarations: [ReportViewComponent], schemas: [NO_ERRORS_SCHEMA] });
+    TestBed.configureTestingModule({ imports: [ReportViewComponent], schemas: [NO_ERRORS_SCHEMA] });
     fixture = TestBed.createComponent(ReportViewComponent);
     component = fixture.componentInstance;
   });

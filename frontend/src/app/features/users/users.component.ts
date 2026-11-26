@@ -1,10 +1,14 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 @Component({
-  selector: 'app-users',
-  templateUrl: './users.component.html'
+    selector: 'app-users',
+    templateUrl: './users.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [FormsModule, NgClass]
 })
 export class UsersComponent implements OnInit {
   users: UserData[] = [];

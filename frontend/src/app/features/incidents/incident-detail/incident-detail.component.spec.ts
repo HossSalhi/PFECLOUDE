@@ -78,16 +78,15 @@ describe('IncidentDetailComponent — rendu de la carte (TestBed, HTTP mocké)',
       getIncidentVerification: () => of(verification)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '1' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();   // déclenche ngOnInit -> loadAll -> rendu
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)   // déclenche ngOnInit -> loadAll -> rendu
   }
 
   afterEach(() => TestBed.resetTestingModule());
@@ -174,16 +173,15 @@ describe('IncidentDetailComponent — décision déterministe & neutralité IA (
       getIncidentVerification: () => of(null)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '1' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();   // ngOnInit -> loadAll -> rendu
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)   // ngOnInit -> loadAll -> rendu
     return (fixture.nativeElement as HTMLElement).textContent || '';
   }
 
@@ -253,16 +251,15 @@ describe('IncidentDetailComponent — cohérence configuré vs recommandé vs ex
       getIncidentVerification: () => of(null)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '3229' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
-    fixture.detectChanges();
+    fixture.detectChanges(false);  // mock ApiService synchrone : on saute le controle checkNoChanges (HTTP reel = asynchrone)
     return (fixture.nativeElement as HTMLElement).textContent || '';
   }
 

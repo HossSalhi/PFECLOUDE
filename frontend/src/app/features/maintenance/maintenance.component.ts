@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { MaintenanceService } from '../../core/services/maintenance.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
@@ -8,6 +8,8 @@ import {
 } from '../../core/models/org.models';
 import { buildMonthGrid, CalendarDay, gridRange, MONTH_NAMES, WEEKDAY_NAMES } from '../../shared/calendar.util';
 import { errorMessage, formatDateTime, toDatetimeLocalValue, toLocalIso } from '../../shared/date.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass, SlicePipe } from '@angular/common';
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'Titre', resource: 'Ressource', startAt: 'Début', endAt: 'Fin', status: 'Statut',
@@ -20,8 +22,10 @@ const FIELD_LABELS: Record<string, string> = {
  * Une maintenance est une information de gestion : elle n'arrête ni la supervision ni les mécanismes de sécurité.
  */
 @Component({
-  selector: 'app-maintenance',
-  templateUrl: './maintenance.component.html'
+    selector: 'app-maintenance',
+    templateUrl: './maintenance.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [FormsModule, NgClass, SlicePipe]
 })
 export class MaintenanceComponent implements OnInit {
 

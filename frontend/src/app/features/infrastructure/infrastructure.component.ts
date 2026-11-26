@@ -1,7 +1,8 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
 import { interval, Subscription } from 'rxjs';
 import { switchMap, startWith } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
+import { NgClass } from '@angular/common';
 
 export interface ComponentHealth {
   namespace: string;
@@ -29,8 +30,10 @@ export interface VmPolicyEntry {
 }
 
 @Component({
-  selector: 'app-infrastructure',
-  templateUrl: './infrastructure.component.html'
+    selector: 'app-infrastructure',
+    templateUrl: './infrastructure.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [NgClass]
 })
 export class InfrastructureComponent implements OnInit, OnDestroy {
   loading = true;

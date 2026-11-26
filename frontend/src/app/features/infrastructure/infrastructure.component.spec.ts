@@ -37,9 +37,9 @@ describe('InfrastructureComponent (politique VM_DOWN)', () => {
   beforeEach(() => {
     api = jasmine.createSpyObj<ApiService>('ApiService', ['getInfrastructureHealth']);
     TestBed.configureTestingModule({
-      declarations: [InfrastructureComponent],
-      providers: [{ provide: ApiService, useValue: api }],
-    });
+    imports: [InfrastructureComponent],
+    providers: [{ provide: ApiService, useValue: api }],
+});
   });
 
   function create(response: any): void {

@@ -1,18 +1,23 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { Observable } from 'rxjs';
 import { TeamService } from '../../core/services/team.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import { Team, TeamMember, TeamSummary } from '../../core/models/org.models';
 import { errorMessage, formatDateTime } from '../../shared/date.util';
+import { RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 /**
  * Gestion des équipes : création / modification, responsable, membres, activation / désactivation / suppression,
  * avancement des tâches de l'équipe. Les responsables et membres sont des utilisateurs HELIOS existants.
  */
 @Component({
-  selector: 'app-teams',
-  templateUrl: './teams.component.html'
+    selector: 'app-teams',
+    templateUrl: './teams.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [RouterLink, FormsModule, NgClass]
 })
 export class TeamsComponent implements OnInit {
 

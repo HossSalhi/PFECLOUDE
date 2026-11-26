@@ -1,11 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { environment } from '../../../environments/environment';
 import { MaintenanceService } from './maintenance.service';
 import { TeamService } from './team.service';
 import { AuditTrailService } from './audit-trail.service';
 import { ReportService } from './report.service';
 import { MaintenanceRequest } from '../models/org.models';
+import { provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
 
 const base = environment.apiBaseUrl;
 
@@ -13,7 +14,7 @@ describe('Services des modules « organisation » (URL, méthode, paramètres, c
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [HttpClientTestingModule] });
+    TestBed.configureTestingModule({ imports: [], providers: [provideHttpClient(withXhr(), withInterceptorsFromDi()), provideHttpClientTesting()] });
     http = TestBed.inject(HttpTestingController);
   });
 

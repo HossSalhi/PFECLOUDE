@@ -1,292 +1,395 @@
 <div class="org-scope">
-<div class="org-page">
+  <div class="org-page">
 
-  <div class="page-header">
-    <div>
-      <h1 class="page-title"><i class="fas fa-screwdriver-wrench"></i> Gestion de la maintenance</h1>
-      <p class="page-subtitle">Planification et suivi des opérations de maintenance de l'infrastructure — information de gestion : la supervision n'est jamais interrompue.</p>
-    </div>
-    <div class="header-actions">
-      <button *ngIf="canCreate" class="btn-primary" (click)="openCreate()">
-        <i class="fas fa-calendar-plus"></i> Planifier une maintenance
-      </button>
-    </div>
-  </div>
-
-  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
-  <div *ngIf="error" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
-
-  <div class="tabs">
-    <button class="tab" [class.active]="view === 'list'" (click)="setView('list')"><i class="fas fa-list"></i> Liste</button>
-    <button class="tab" [class.active]="view === 'calendar'" (click)="setView('calendar')"><i class="fas fa-calendar-days"></i> Calendrier</button>
-  </div>
-
-  <!-- ══ Liste ═══════════════════════════════════════════════════════════════ -->
-  <ng-container *ngIf="view === 'list'">
-    <div class="filters-bar">
-      <div class="search-wrap">
-        <i class="fas fa-search"></i>
-        <input type="text" placeholder="Rechercher un titre ou une ressource…" [(ngModel)]="filters.q" (keyup.enter)="load(true)">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-screwdriver-wrench"></i> Gestion de la maintenance</h1>
+        <p class="page-subtitle">Planification et suivi des opérations de maintenance de l'infrastructure — information de gestion : la supervision n'est jamais interrompue.</p>
       </div>
-      <select class="filter-select" [(ngModel)]="filters.status" (ngModelChange)="load(true)">
-        <option value="">Tous les statuts</option>
-        <option *ngFor="let s of statuses" [value]="s">{{ statusLabels[s] }}</option>
-      </select>
-      <select class="filter-select" [(ngModel)]="filters.resourceType" (ngModelChange)="load(true)">
-        <option value="">Tous les types</option>
-        <option *ngFor="let t of resourceTypes" [value]="t">{{ typeLabels[t] }}</option>
-      </select>
-      <input class="filter-input" type="text" placeholder="Ressource" [(ngModel)]="filters.resource" (keyup.enter)="load(true)" style="width:150px;">
-      <select *ngIf="users.length > 0" class="filter-select" [(ngModel)]="filters.responsibleId" (ngModelChange)="load(true)">
-        <option [ngValue]="null">Tous les responsables</option>
-        <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
-      </select>
-      <label class="filter-check" title="Chevauche cette période">Du
-        <input class="filter-input" type="datetime-local" [(ngModel)]="filters.from" (ngModelChange)="load(true)">
-      </label>
-      <label class="filter-check">au
-        <input class="filter-input" type="datetime-local" [(ngModel)]="filters.to" (ngModelChange)="load(true)">
-      </label>
-      <button class="btn-secondary" (click)="resetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
-      <span class="results-count">{{ total }} maintenance(s)</span>
+      <div class="header-actions">
+        @if (canCreate) {
+          <button class="btn-primary" (click)="openCreate()">
+            <i class="fas fa-calendar-plus"></i> Planifier une maintenance
+          </button>
+        }
+      </div>
     </div>
 
-    <div class="table-card">
-      <div *ngIf="loading" class="table-loading"><div class="spinner"></div> Chargement…</div>
-      <table *ngIf="!loading" class="org-table">
-        <thead>
-          <tr>
-            <th>Titre</th><th>Ressource</th><th>Début</th><th>Fin</th><th>Statut</th><th>Responsable</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let m of items" class="clickable" [class.row-muted]="m.status === 'CANCELLED'" (click)="openDetail(m)">
-            <td><span class="text-strong">{{ m.title }}</span></td>
-            <td>{{ m.resourceName }}<div class="text-muted text-small">{{ typeLabels[m.resourceType] }}</div></td>
-            <td>{{ fmt(m.startAt) }}<div *ngIf="m.startOverdue" class="flag-late text-small">Début dépassé</div></td>
-            <td>{{ fmt(m.endAt) }}<div *ngIf="m.endOverdue" class="flag-late text-small">Fin dépassée</div></td>
-            <td><span class="badge" [ngClass]="'st-' + m.status.toLowerCase()">{{ statusLabels[m.status] }}</span></td>
-            <td>{{ m.responsible ? m.responsible.displayName : '—' }}</td>
-            <td class="actions-cell" (click)="$event.stopPropagation()">
-              <button class="btn-icon btn-view" title="Détail" (click)="openDetail(m)"><i class="fas fa-eye"></i></button>
-              <button *ngIf="canUpdate && isActive(m)" class="btn-icon btn-edit" title="Modifier" (click)="openEdit(m)"><i class="fas fa-pen"></i></button>
-              <button *ngIf="canUpdate && m.status === 'PLANNED'" class="btn-icon btn-ok" title="Démarrer" (click)="askStart(m)"><i class="fas fa-play"></i></button>
-              <button *ngIf="canUpdate && m.status === 'IN_PROGRESS'" class="btn-icon btn-ok" title="Terminer" (click)="askComplete(m)"><i class="fas fa-flag-checkered"></i></button>
-              <button *ngIf="canCancel && isActive(m)" class="btn-icon btn-warn" title="Annuler" (click)="askCancel(m)"><i class="fas fa-ban"></i></button>
-            </td>
-          </tr>
-          <tr *ngIf="items.length === 0">
-            <td colspan="7" class="org-empty"><i class="fas fa-screwdriver-wrench"></i><p>Aucune maintenance ne correspond aux critères.</p></td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="pager" *ngIf="!loading && total > 0">
-        <span>Page {{ page + 1 }} / {{ totalPages }}</span>
-        <div class="pager-btns">
-          <button (click)="goTo(0)" [disabled]="page === 0">«</button>
-          <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
-          <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
-          <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+    @if (success) {
+      <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+    }
+    @if (error) {
+      <div class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+    }
+
+    <div class="tabs">
+      <button class="tab" [class.active]="view === 'list'" (click)="setView('list')"><i class="fas fa-list"></i> Liste</button>
+      <button class="tab" [class.active]="view === 'calendar'" (click)="setView('calendar')"><i class="fas fa-calendar-days"></i> Calendrier</button>
+    </div>
+
+    <!-- ══ Liste ═══════════════════════════════════════════════════════════════ -->
+    @if (view === 'list') {
+      <div class="filters-bar">
+        <div class="search-wrap">
+          <i class="fas fa-search"></i>
+          <input type="text" placeholder="Rechercher un titre ou une ressource…" [(ngModel)]="filters.q" (keyup.enter)="load(true)">
         </div>
+        <select class="filter-select" [(ngModel)]="filters.status" (ngModelChange)="load(true)">
+          <option value="">Tous les statuts</option>
+          @for (s of statuses; track s) {
+            <option [value]="s">{{ statusLabels[s] }}</option>
+          }
+        </select>
+        <select class="filter-select" [(ngModel)]="filters.resourceType" (ngModelChange)="load(true)">
+          <option value="">Tous les types</option>
+          @for (t of resourceTypes; track t) {
+            <option [value]="t">{{ typeLabels[t] }}</option>
+          }
+        </select>
+        <input class="filter-input" type="text" placeholder="Ressource" [(ngModel)]="filters.resource" (keyup.enter)="load(true)" style="width:150px;">
+        @if (users.length > 0) {
+          <select class="filter-select" [(ngModel)]="filters.responsibleId" (ngModelChange)="load(true)">
+            <option [ngValue]="null">Tous les responsables</option>
+            @for (u of users; track u) {
+              <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+            }
+          </select>
+        }
+        <label class="filter-check" title="Chevauche cette période">Du
+          <input class="filter-input" type="datetime-local" [(ngModel)]="filters.from" (ngModelChange)="load(true)">
+        </label>
+        <label class="filter-check">au
+          <input class="filter-input" type="datetime-local" [(ngModel)]="filters.to" (ngModelChange)="load(true)">
+        </label>
+        <button class="btn-secondary" (click)="resetFilters()"><i class="fas fa-rotate-left"></i> Réinitialiser</button>
+        <span class="results-count">{{ total }} maintenance(s)</span>
       </div>
-    </div>
-  </ng-container>
+      <div class="table-card">
+        @if (loading) {
+          <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+        }
+        @if (!loading) {
+          <table class="org-table">
+            <thead>
+              <tr>
+                <th>Titre</th><th>Ressource</th><th>Début</th><th>Fin</th><th>Statut</th><th>Responsable</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (m of items; track m) {
+                <tr class="clickable" [class.row-muted]="m.status === 'CANCELLED'" (click)="openDetail(m)">
+                  <td><span class="text-strong">{{ m.title }}</span></td>
+                  <td>{{ m.resourceName }}<div class="text-muted text-small">{{ typeLabels[m.resourceType] }}</div></td>
+                  <td>{{ fmt(m.startAt) }}@if (m.startOverdue) {
+                    <div class="flag-late text-small">Début dépassé</div>
+                  }</td>
+                  <td>{{ fmt(m.endAt) }}@if (m.endOverdue) {
+                    <div class="flag-late text-small">Fin dépassée</div>
+                  }</td>
+                  <td><span class="badge" [ngClass]="'st-' + m.status.toLowerCase()">{{ statusLabels[m.status] }}</span></td>
+                  <td>{{ m.responsible ? m.responsible.displayName : '—' }}</td>
+                  <td class="actions-cell" (click)="$event.stopPropagation()">
+                    <button class="btn-icon btn-view" title="Détail" (click)="openDetail(m)"><i class="fas fa-eye"></i></button>
+                    @if (canUpdate && isActive(m)) {
+                      <button class="btn-icon btn-edit" title="Modifier" (click)="openEdit(m)"><i class="fas fa-pen"></i></button>
+                    }
+                    @if (canUpdate && m.status === 'PLANNED') {
+                      <button class="btn-icon btn-ok" title="Démarrer" (click)="askStart(m)"><i class="fas fa-play"></i></button>
+                    }
+                    @if (canUpdate && m.status === 'IN_PROGRESS') {
+                      <button class="btn-icon btn-ok" title="Terminer" (click)="askComplete(m)"><i class="fas fa-flag-checkered"></i></button>
+                    }
+                    @if (canCancel && isActive(m)) {
+                      <button class="btn-icon btn-warn" title="Annuler" (click)="askCancel(m)"><i class="fas fa-ban"></i></button>
+                    }
+                  </td>
+                </tr>
+              }
+              @if (items.length === 0) {
+                <tr>
+                  <td colspan="7" class="org-empty"><i class="fas fa-screwdriver-wrench"></i><p>Aucune maintenance ne correspond aux critères.</p></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+        @if (!loading && total > 0) {
+          <div class="pager">
+            <span>Page {{ page + 1 }} / {{ totalPages }}</span>
+            <div class="pager-btns">
+              <button (click)="goTo(0)" [disabled]="page === 0">«</button>
+              <button (click)="goTo(page - 1)" [disabled]="page === 0">Précédent</button>
+              <button (click)="goTo(page + 1)" [disabled]="page + 1 >= totalPages">Suivant</button>
+              <button (click)="goTo(totalPages - 1)" [disabled]="page + 1 >= totalPages">»</button>
+            </div>
+          </div>
+        }
+      </div>
+    }
 
-  <!-- ══ Calendrier ══════════════════════════════════════════════════════════ -->
-  <ng-container *ngIf="view === 'calendar'">
-    <div class="table-card card-pad">
-      <div class="cal-toolbar">
-        <div class="cal-title"><i class="fas fa-calendar-days" style="color:#ff7900"></i> {{ calTitle }}</div>
-        <div class="cal-nav">
-          <button class="btn-secondary" (click)="shiftMonth(-1)"><i class="fas fa-chevron-left"></i></button>
-          <button class="btn-secondary" (click)="goToday()">Aujourd'hui</button>
-          <button class="btn-secondary" (click)="shiftMonth(1)"><i class="fas fa-chevron-right"></i></button>
-        </div>
-      </div>
-      <div *ngIf="calLoading" class="table-loading"><div class="spinner"></div> Chargement du calendrier…</div>
-      <div *ngIf="!calLoading">
-        <div class="cal-head"><div *ngFor="let d of weekdays">{{ d }}</div></div>
-        <div class="cal-week" *ngFor="let week of weeks">
-          <div class="cal-cell" *ngFor="let day of week" [class.out]="!day.inMonth" [class.today]="day.isToday">
-            <span class="cal-day">{{ day.date.getDate() }}</span>
-            <button *ngFor="let e of day.events | slice:0:3" class="cal-ev" [ngClass]="'st-' + e.status.toLowerCase()"
-                    [title]="e.title" (click)="openFromCalendar(e.id)">{{ e.title }}</button>
-            <div class="cal-more" *ngIf="day.events.length > 3">+ {{ day.events.length - 3 }} autre(s)</div>
+    <!-- ══ Calendrier ══════════════════════════════════════════════════════════ -->
+    @if (view === 'calendar') {
+      <div class="table-card card-pad">
+        <div class="cal-toolbar">
+          <div class="cal-title"><i class="fas fa-calendar-days" style="color:#ff7900"></i> {{ calTitle }}</div>
+          <div class="cal-nav">
+            <button class="btn-secondary" (click)="shiftMonth(-1)"><i class="fas fa-chevron-left"></i></button>
+            <button class="btn-secondary" (click)="goToday()">Aujourd'hui</button>
+            <button class="btn-secondary" (click)="shiftMonth(1)"><i class="fas fa-chevron-right"></i></button>
           </div>
         </div>
-        <div class="legend">
-          <span class="st-planned" style="background:none">Planifiée</span>
-          <span class="st-in_progress" style="background:none">En cours</span>
-          <span class="st-completed" style="background:none">Terminée</span>
-          <span class="st-cancelled" style="background:none">Annulée</span>
+        @if (calLoading) {
+          <div class="table-loading"><div class="spinner"></div> Chargement du calendrier…</div>
+        }
+        @if (!calLoading) {
+          <div>
+            <div class="cal-head">@for (d of weekdays; track d) {
+              <div>{{ d }}</div>
+            }</div>
+            @for (week of weeks; track week) {
+              <div class="cal-week">
+                @for (day of week; track day) {
+                  <div class="cal-cell" [class.out]="!day.inMonth" [class.today]="day.isToday">
+                    <span class="cal-day">{{ day.date.getDate() }}</span>
+                    @for (e of day.events | slice:0:3; track e) {
+                      <button class="cal-ev" [ngClass]="'st-' + e.status.toLowerCase()"
+                      [title]="e.title" (click)="openFromCalendar(e.id)">{{ e.title }}</button>
+                    }
+                    @if (day.events.length > 3) {
+                      <div class="cal-more">+ {{ day.events.length - 3 }} autre(s)</div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+            <div class="legend">
+              <span class="st-planned" style="background:none">Planifiée</span>
+              <span class="st-in_progress" style="background:none">En cours</span>
+              <span class="st-completed" style="background:none">Terminée</span>
+              <span class="st-cancelled" style="background:none">Annulée</span>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
+  @if (selected && !showCancel && !showDelete) {
+    <div class="modal-overlay" (click)="closeDetail()">
+      <div class="modal modal-lg" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3><i class="fas fa-screwdriver-wrench"></i> {{ selected.title }}</h3>
+          <button class="modal-close" (click)="closeDetail()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          @if (error) {
+            <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+          }
+          <dl class="detail-grid">
+            <dt>Statut</dt><dd><span class="badge" [ngClass]="'st-' + selected.status.toLowerCase()">{{ statusLabels[selected.status] }}</span></dd>
+            <dt>Ressource</dt><dd>{{ selected.resourceName }} <span class="text-muted">({{ typeLabels[selected.resourceType] }})</span></dd>
+            <dt>Période prévue</dt><dd>{{ fmt(selected.startAt) }} → {{ fmt(selected.endAt) }}</dd>
+            <dt>Période réelle</dt><dd>{{ fmt(selected.actualStartAt) }} → {{ fmt(selected.actualEndAt) }}</dd>
+            <dt>Motif</dt><dd>{{ selected.reason || '—' }}</dd>
+            <dt>Description</dt><dd>{{ selected.description || '—' }}</dd>
+            <dt>Créée par</dt><dd>{{ selected.createdBy ? selected.createdBy.displayName : '—' }} le {{ fmt(selected.createdAt) }}</dd>
+            <dt>Responsable</dt><dd>{{ selected.responsible ? selected.responsible.displayName : '—' }}</dd>
+            <dt>Dernière modification</dt><dd>{{ fmt(selected.updatedAt) }}</dd>
+            @if (selected.cancelReason) {
+              <dt>Motif d'annulation</dt>
+              }@if (selected.cancelReason) {
+              <dd>{{ selected.cancelReason }}</dd>
+            }
+          </dl>
+          @if (selected.status === 'IN_PROGRESS') {
+            <div class="alert-info">
+              <i class="fas fa-circle-info"></i> Maintenance en cours : information de gestion uniquement. La supervision et les mécanismes de sécurité restent actifs.
+            </div>
+          }
+          <div class="section-title">Historique des changements</div>
+          @if (historyLoading) {
+            <div class="text-muted">Chargement…</div>
+          }
+          @if (!historyLoading) {
+            <ul class="org-timeline">
+              @for (h of history; track h) {
+                <li>
+                  <strong>{{ h.changeType }}</strong> — {{ fmt(h.changedAt) }} par {{ h.changedBy || 'système' }}
+                  @for (line of historyLines(h); track line) {
+                    <div class="text-muted">{{ line }}</div>
+                  }
+                </li>
+              }
+              @if (history.length === 0) {
+                <li class="text-muted">Aucun changement enregistré.</li>
+              }
+            </ul>
+          }
+        </div>
+        <div class="modal-footer">
+          @if (canUpdate && isActive(selected)) {
+            <button class="btn-secondary" (click)="openEdit(selected)"><i class="fas fa-pen"></i> Modifier</button>
+          }
+          @if (canUpdate && selected.status === 'PLANNED') {
+            <button class="btn-primary" (click)="askStart(selected)"><i class="fas fa-play"></i> Démarrer</button>
+          }
+          @if (canUpdate && selected.status === 'IN_PROGRESS') {
+            <button class="btn-primary" (click)="askComplete(selected)"><i class="fas fa-flag-checkered"></i> Terminer</button>
+          }
+          @if (canCancel && isActive(selected)) {
+            <button class="btn-secondary" (click)="askCancel(selected)"><i class="fas fa-ban"></i> Annuler</button>
+          }
+          @if (canDelete && (selected.status === 'PLANNED' || selected.status === 'CANCELLED')) {
+            <button class="btn-danger" (click)="askDelete(selected)"><i class="fas fa-trash"></i> Supprimer</button>
+          }
+          <button class="btn-secondary" (click)="closeDetail()">Fermer</button>
         </div>
       </div>
     </div>
-  </ng-container>
-</div>
+  }
 
-<!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="selected && !showCancel && !showDelete" (click)="closeDetail()">
-  <div class="modal modal-lg" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-screwdriver-wrench"></i> {{ selected.title }}</h3>
-      <button class="modal-close" (click)="closeDetail()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="error" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
-      <dl class="detail-grid">
-        <dt>Statut</dt><dd><span class="badge" [ngClass]="'st-' + selected.status.toLowerCase()">{{ statusLabels[selected.status] }}</span></dd>
-        <dt>Ressource</dt><dd>{{ selected.resourceName }} <span class="text-muted">({{ typeLabels[selected.resourceType] }})</span></dd>
-        <dt>Période prévue</dt><dd>{{ fmt(selected.startAt) }} → {{ fmt(selected.endAt) }}</dd>
-        <dt>Période réelle</dt><dd>{{ fmt(selected.actualStartAt) }} → {{ fmt(selected.actualEndAt) }}</dd>
-        <dt>Motif</dt><dd>{{ selected.reason || '—' }}</dd>
-        <dt>Description</dt><dd>{{ selected.description || '—' }}</dd>
-        <dt>Créée par</dt><dd>{{ selected.createdBy ? selected.createdBy.displayName : '—' }} le {{ fmt(selected.createdAt) }}</dd>
-        <dt>Responsable</dt><dd>{{ selected.responsible ? selected.responsible.displayName : '—' }}</dd>
-        <dt>Dernière modification</dt><dd>{{ fmt(selected.updatedAt) }}</dd>
-        <dt *ngIf="selected.cancelReason">Motif d'annulation</dt><dd *ngIf="selected.cancelReason">{{ selected.cancelReason }}</dd>
-      </dl>
-      <div class="alert-info" *ngIf="selected.status === 'IN_PROGRESS'">
-        <i class="fas fa-circle-info"></i> Maintenance en cours : information de gestion uniquement. La supervision et les mécanismes de sécurité restent actifs.
-      </div>
-      <div class="section-title">Historique des changements</div>
-      <div *ngIf="historyLoading" class="text-muted">Chargement…</div>
-      <ul class="org-timeline" *ngIf="!historyLoading">
-        <li *ngFor="let h of history">
-          <strong>{{ h.changeType }}</strong> — {{ fmt(h.changedAt) }} par {{ h.changedBy || 'système' }}
-          <div *ngFor="let line of historyLines(h)" class="text-muted">{{ line }}</div>
-        </li>
-        <li *ngIf="history.length === 0" class="text-muted">Aucun changement enregistré.</li>
-      </ul>
-    </div>
-    <div class="modal-footer">
-      <button *ngIf="canUpdate && isActive(selected)" class="btn-secondary" (click)="openEdit(selected)"><i class="fas fa-pen"></i> Modifier</button>
-      <button *ngIf="canUpdate && selected.status === 'PLANNED'" class="btn-primary" (click)="askStart(selected)"><i class="fas fa-play"></i> Démarrer</button>
-      <button *ngIf="canUpdate && selected.status === 'IN_PROGRESS'" class="btn-primary" (click)="askComplete(selected)"><i class="fas fa-flag-checkered"></i> Terminer</button>
-      <button *ngIf="canCancel && isActive(selected)" class="btn-secondary" (click)="askCancel(selected)"><i class="fas fa-ban"></i> Annuler</button>
-      <button *ngIf="canDelete && (selected.status === 'PLANNED' || selected.status === 'CANCELLED')" class="btn-danger" (click)="askDelete(selected)"><i class="fas fa-trash"></i> Supprimer</button>
-      <button class="btn-secondary" (click)="closeDetail()">Fermer</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ Formulaire ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showForm" (click)="closeForm()">
-  <div class="modal modal-lg" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-calendar-plus'"></i> {{ editing ? 'Modifier la maintenance' : 'Planifier une maintenance' }}</h3>
-      <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <div class="alert-info" *ngIf="lockedFields"><i class="fas fa-lock"></i> Maintenance démarrée : seuls le titre, la description, le motif, le responsable et la date de fin sont modifiables.</div>
-      <div class="form-group">
-        <label>Titre <span class="required">*</span></label>
-        <input class="form-input" type="text" maxlength="200" [(ngModel)]="form.title" placeholder="Ex. Mise à jour du noyau">
-      </div>
-      <div class="form-row-2">
-        <div class="form-group">
-          <label>Type de ressource <span class="required">*</span></label>
-          <select class="form-input" [(ngModel)]="form.resourceType" [disabled]="lockedFields">
-            <option *ngFor="let t of resourceTypes" [value]="t">{{ typeLabels[t] }}</option>
-          </select>
+  <!-- ══ Formulaire ═══════════════════════════════════════════════════════════ -->
+  @if (showForm) {
+    <div class="modal-overlay" (click)="closeForm()">
+      <div class="modal modal-lg" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-calendar-plus'"></i> {{ editing ? 'Modifier la maintenance' : 'Planifier une maintenance' }}</h3>
+          <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
         </div>
-        <div class="form-group">
-          <label>Ressource <span class="required">*</span></label>
-          <input class="form-input" type="text" list="maintenance-resources" maxlength="200" [(ngModel)]="form.resourceName"
-                 [readonly]="lockedFields" placeholder="Choisir ou saisir">
-          <datalist id="maintenance-resources"><option *ngFor="let r of resourcesOfType()" [value]="r.name">{{ r.label }}</option></datalist>
-          <div class="hint">Applications et VM : contrôlées contre le catalogue HELIOS.</div>
-        </div>
-      </div>
-      <div class="form-row-2">
-        <div class="form-group">
-          <label>Début <span class="required">*</span></label>
-          <input class="form-input" type="datetime-local" [(ngModel)]="form.startAt" [readonly]="lockedFields">
-        </div>
-        <div class="form-group">
-          <label>Fin <span class="required">*</span></label>
-          <input class="form-input" type="datetime-local" [(ngModel)]="form.endAt">
+        <div class="modal-body">
+          @if (modalError) {
+            <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+          }
+          @if (lockedFields) {
+            <div class="alert-info"><i class="fas fa-lock"></i> Maintenance démarrée : seuls le titre, la description, le motif, le responsable et la date de fin sont modifiables.</div>
+          }
+          <div class="form-group">
+            <label>Titre <span class="required">*</span></label>
+            <input class="form-input" type="text" maxlength="200" [(ngModel)]="form.title" placeholder="Ex. Mise à jour du noyau">
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Type de ressource <span class="required">*</span></label>
+              <select class="form-input" [(ngModel)]="form.resourceType" [disabled]="lockedFields">
+                @for (t of resourceTypes; track t) {
+                  <option [value]="t">{{ typeLabels[t] }}</option>
+                }
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Ressource <span class="required">*</span></label>
+              <input class="form-input" type="text" list="maintenance-resources" maxlength="200" [(ngModel)]="form.resourceName"
+                [readonly]="lockedFields" placeholder="Choisir ou saisir">
+                <datalist id="maintenance-resources">@for (r of resourcesOfType(); track r) {
+                  <option [value]="r.name">{{ r.label }}</option>
+                }</datalist>
+                <div class="hint">Applications et VM : contrôlées contre le catalogue HELIOS.</div>
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Début <span class="required">*</span></label>
+                <input class="form-input" type="datetime-local" [(ngModel)]="form.startAt" [readonly]="lockedFields">
+              </div>
+              <div class="form-group">
+                <label>Fin <span class="required">*</span></label>
+                <input class="form-input" type="datetime-local" [(ngModel)]="form.endAt">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Responsable</label>
+              <select class="form-input" [(ngModel)]="form.responsibleId">
+                <option [ngValue]="null">— Aucun —</option>
+                @for (u of users; track u) {
+                  <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+                }
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Motif</label>
+              <input class="form-input" type="text" maxlength="500" [(ngModel)]="form.reason" placeholder="Raison de l'opération">
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <textarea class="form-input" rows="4" [(ngModel)]="form.description" placeholder="Détail des opérations prévues"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="closeForm()">Annuler</button>
+            <button class="btn-primary" (click)="submit()" [disabled]="saving">
+              @if (saving) {
+                <span class="btn-spinner"></span>
+              }
+              {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Planifier') }}
+            </button>
+          </div>
         </div>
       </div>
-      <div class="form-group">
-        <label>Responsable</label>
-        <select class="form-input" [(ngModel)]="form.responsibleId">
-          <option [ngValue]="null">— Aucun —</option>
-          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Motif</label>
-        <input class="form-input" type="text" maxlength="500" [(ngModel)]="form.reason" placeholder="Raison de l'opération">
-      </div>
-      <div class="form-group">
-        <label>Description</label>
-        <textarea class="form-input" rows="4" [(ngModel)]="form.description" placeholder="Détail des opérations prévues"></textarea>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeForm()">Annuler</button>
-      <button class="btn-primary" (click)="submit()" [disabled]="saving">
-        <span *ngIf="saving" class="btn-spinner"></span>
-        {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Planifier') }}
-      </button>
-    </div>
-  </div>
-</div>
+    }
 
-<!-- ══ Annulation ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showCancel && selected" (click)="showCancel = false">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header danger">
-      <h3><i class="fas fa-ban"></i> Annuler la maintenance</h3>
-      <button class="modal-close" (click)="showCancel = false"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Annuler <strong>{{ selected.title }}</strong> ? Le créneau sera libéré.</p>
-      <div class="form-group">
-        <label>Motif de l'annulation (facultatif)</label>
-        <textarea class="form-input" rows="3" maxlength="500" [(ngModel)]="cancelReason"></textarea>
+    <!-- ══ Annulation ═══════════════════════════════════════════════════════════ -->
+    @if (showCancel && selected) {
+      <div class="modal-overlay" (click)="showCancel = false">
+        <div class="modal modal-sm" (click)="$event.stopPropagation()">
+          <div class="modal-header danger">
+            <h3><i class="fas fa-ban"></i> Annuler la maintenance</h3>
+            <button class="modal-close" (click)="showCancel = false"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            @if (modalError) {
+              <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+            }
+            <p class="modal-desc">Annuler <strong>{{ selected.title }}</strong> ? Le créneau sera libéré.</p>
+            <div class="form-group">
+              <label>Motif de l'annulation (facultatif)</label>
+              <textarea class="form-input" rows="3" maxlength="500" [(ngModel)]="cancelReason"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="showCancel = false">Retour</button>
+            <button class="btn-danger" (click)="submitCancel()" [disabled]="busy"><i class="fas fa-ban"></i> Annuler la maintenance</button>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="showCancel = false">Retour</button>
-      <button class="btn-danger" (click)="submitCancel()" [disabled]="busy"><i class="fas fa-ban"></i> Annuler la maintenance</button>
-    </div>
-  </div>
-</div>
+    }
 
-<!-- ══ Suppression ══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showDelete && selected" (click)="showDelete = false">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header danger">
-      <h3><i class="fas fa-trash"></i> Supprimer la maintenance</h3>
-      <button class="modal-close" (click)="showDelete = false"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Supprimer définitivement <strong>{{ selected.title }}</strong> et son historique ? La trace d'audit de la suppression est conservée.</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="showDelete = false">Retour</button>
-      <button class="btn-danger" (click)="submitDelete()" [disabled]="busy"><i class="fas fa-trash"></i> Supprimer</button>
-    </div>
-  </div>
-</div>
+    <!-- ══ Suppression ══════════════════════════════════════════════════════════ -->
+    @if (showDelete && selected) {
+      <div class="modal-overlay" (click)="showDelete = false">
+        <div class="modal modal-sm" (click)="$event.stopPropagation()">
+          <div class="modal-header danger">
+            <h3><i class="fas fa-trash"></i> Supprimer la maintenance</h3>
+            <button class="modal-close" (click)="showDelete = false"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            @if (modalError) {
+              <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+            }
+            <p class="modal-desc">Supprimer définitivement <strong>{{ selected.title }}</strong> et son historique ? La trace d'audit de la suppression est conservée.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="showDelete = false">Retour</button>
+            <button class="btn-danger" (click)="submitDelete()" [disabled]="busy"><i class="fas fa-trash"></i> Supprimer</button>
+          </div>
+        </div>
+      </div>
+    }
 
-<!-- ══ Confirmation générique ═══════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="confirm" (click)="confirm = null">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas fa-circle-question"></i> {{ confirm.title }}</h3>
-      <button class="modal-close" (click)="confirm = null"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body"><p class="modal-desc">{{ confirm.message }}</p></div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="confirm = null">Retour</button>
-      <button class="btn-primary" (click)="runConfirm()" [disabled]="busy">{{ confirm.label }}</button>
-    </div>
+    <!-- ══ Confirmation générique ═══════════════════════════════════════════════ -->
+    @if (confirm) {
+      <div class="modal-overlay" (click)="confirm = null">
+        <div class="modal modal-sm" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3><i class="fas fa-circle-question"></i> {{ confirm.title }}</h3>
+            <button class="modal-close" (click)="confirm = null"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body"><p class="modal-desc">{{ confirm.message }}</p></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="confirm = null">Retour</button>
+            <button class="btn-primary" (click)="runConfirm()" [disabled]="busy">{{ confirm.label }}</button>
+          </div>
+        </div>
+      </div>
+    }
   </div>
-</div>
-</div>

@@ -44,14 +44,13 @@ describe('MaintenanceComponent', () => {
     service.calendar.and.returnValue(of([]));
     api.getUsers.and.returnValue(of([]));
     TestBed.configureTestingModule({
-      imports: [FormsModule],
-      declarations: [MaintenanceComponent],
-      providers: [
+    imports: [FormsModule, MaintenanceComponent],
+    providers: [
         { provide: MaintenanceService, useValue: service },
         { provide: ApiService, useValue: api },
         { provide: OrgPermissionsService, useValue: perms }
-      ]
-    });
+    ]
+});
   });
 
   function create(...granted: string[]): void {

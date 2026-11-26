@@ -1,9 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { AuditTrailService } from '../../core/services/audit-trail.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import { AuditEntry, AuditMeta, AuditQuery, AUDIT_ACTION_LABELS, AUDIT_MODULE_LABELS } from '../../core/models/org.models';
 import { errorMessage, formatDateTime, toLocalIso } from '../../shared/date.util';
 import { saveBlob } from '../../shared/download.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 export interface AuditDiffRow {
   field: string;
@@ -20,8 +22,10 @@ const RESULT_LABELS: Record<string, string> = { SUCCESS: 'Succès', FAILURE: 'É
  * Un utilisateur sans droit global ne voit que sa propre activité (règle appliquée par le Backend).
  */
 @Component({
-  selector: 'app-audit-trail',
-  templateUrl: './audit-trail.component.html'
+    selector: 'app-audit-trail',
+    templateUrl: './audit-trail.component.html',
+    changeDetection: ChangeDetectionStrategy.Eager,
+    imports: [FormsModule, NgClass]
 })
 export class AuditTrailComponent implements OnInit {
 

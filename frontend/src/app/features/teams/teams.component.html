@@ -1,180 +1,226 @@
 <div class="org-scope">
-<div class="org-page">
+  <div class="org-page">
 
-  <div class="page-header">
-    <div>
-      <h1 class="page-title"><i class="fas fa-users"></i> Gestion des équipes</h1>
-      <p class="page-subtitle">Organisez les utilisateurs HELIOS en équipes, désignez un responsable et suivez l'avancement des tâches.</p>
-    </div>
-    <div class="header-actions">
-      <a class="btn-secondary" routerLink="/team-tasks" style="text-decoration:none"><i class="fas fa-list-check"></i> Tâches</a>
-      <button *ngIf="canCreate" class="btn-primary" (click)="openCreate()"><i class="fas fa-plus"></i> Nouvelle équipe</button>
-    </div>
-  </div>
-
-  <div *ngIf="success" class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
-  <div *ngIf="error" class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
-
-  <div class="filters-bar">
-    <div class="search-wrap">
-      <i class="fas fa-search"></i>
-      <input type="text" placeholder="Rechercher une équipe…" [(ngModel)]="q" (keyup.enter)="load()">
-    </div>
-    <label class="filter-check"><input type="checkbox" [(ngModel)]="includeInactive" (ngModelChange)="load()"> Afficher les équipes désactivées</label>
-    <span class="results-count">{{ teams.length }} équipe(s)</span>
-  </div>
-
-  <div class="table-card">
-    <div *ngIf="loading" class="table-loading"><div class="spinner"></div> Chargement…</div>
-    <table *ngIf="!loading" class="org-table">
-      <thead>
-        <tr><th>Équipe</th><th>Responsable</th><th>Membres</th><th>Tâches ouvertes</th><th>Statut</th><th>Actions</th></tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let t of teams" class="clickable" [class.row-muted]="!t.active" (click)="select(t)">
-          <td><span class="text-strong">{{ t.name }}</span><div class="text-muted text-small">{{ t.description }}</div></td>
-          <td>{{ t.lead ? t.lead.displayName : '—' }}</td>
-          <td>{{ t.memberCount }}</td>
-          <td>{{ t.openTaskCount }}</td>
-          <td><span class="badge" [ngClass]="t.active ? 'st-completed' : 'st-cancelled'">{{ t.active ? 'Active' : 'Désactivée' }}</span></td>
-          <td class="actions-cell" (click)="$event.stopPropagation()">
-            <button class="btn-icon btn-view" title="Détail" (click)="select(t)"><i class="fas fa-eye"></i></button>
-            <button *ngIf="canUpdate" class="btn-icon btn-edit" title="Modifier" (click)="openEdit(t)"><i class="fas fa-pen"></i></button>
-            <button *ngIf="canDeactivate" class="btn-icon btn-warn" [title]="t.active ? 'Désactiver' : 'Réactiver'" (click)="askToggle(t)">
-              <i class="fas" [ngClass]="t.active ? 'fa-toggle-on' : 'fa-toggle-off'"></i></button>
-            <button *ngIf="canDelete" class="btn-icon btn-delete" title="Supprimer" (click)="askDelete(t)"><i class="fas fa-trash"></i></button>
-          </td>
-        </tr>
-        <tr *ngIf="teams.length === 0">
-          <td colspan="6" class="org-empty"><i class="fas fa-users-slash"></i><p>Aucune équipe à afficher.</p></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- ══ Détail de l'équipe ═════════════════════════════════════════════════ -->
-  <div *ngIf="selected" class="table-card card-pad">
-    <div class="page-header" style="margin-bottom:14px">
+    <div class="page-header">
       <div>
-        <div class="card-title" style="font-size:16px;margin:0"><i class="fas fa-people-group"></i> {{ selected.name }}
-          <span class="badge" [ngClass]="selected.active ? 'st-completed' : 'st-cancelled'">{{ selected.active ? 'Active' : 'Désactivée' }}</span></div>
-        <div class="text-muted text-small">Créée le {{ fmt(selected.createdAt) }} par {{ selected.createdBy ? selected.createdBy.displayName : '—' }}</div>
+        <h1 class="page-title"><i class="fas fa-users"></i> Gestion des équipes</h1>
+        <p class="page-subtitle">Organisez les utilisateurs HELIOS en équipes, désignez un responsable et suivez l'avancement des tâches.</p>
       </div>
       <div class="header-actions">
-        <a class="btn-secondary" routerLink="/team-tasks" [queryParams]="{ teamId: selected.id }" style="text-decoration:none"><i class="fas fa-list-check"></i> Tâches de l'équipe</a>
-        <button class="btn-secondary" (click)="selected = null"><i class="fas fa-xmark"></i> Fermer</button>
+        <a class="btn-secondary" routerLink="/team-tasks" style="text-decoration:none"><i class="fas fa-list-check"></i> Tâches</a>
+        @if (canCreate) {
+          <button class="btn-primary" (click)="openCreate()"><i class="fas fa-plus"></i> Nouvelle équipe</button>
+        }
       </div>
     </div>
 
-    <div *ngIf="detailLoading" class="table-loading"><div class="spinner"></div> Chargement…</div>
+    @if (success) {
+      <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
+    }
+    @if (error) {
+      <div class="alert-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+    }
 
-    <ng-container *ngIf="summary">
-      <div class="stat-grid">
-        <div class="stat-tile"><div class="stat-label">Tâches</div><div class="stat-value">{{ summary.tasks.total }}</div></div>
-        <div class="stat-tile s-todo"><div class="stat-label">À faire</div><div class="stat-value">{{ summary.tasks.byStatus['TODO'] || 0 }}</div></div>
-        <div class="stat-tile s-progress"><div class="stat-label">En cours</div><div class="stat-value">{{ summary.tasks.byStatus['IN_PROGRESS'] || 0 }}</div></div>
-        <div class="stat-tile s-hold"><div class="stat-label">En attente</div><div class="stat-value">{{ summary.tasks.byStatus['ON_HOLD'] || 0 }}</div></div>
-        <div class="stat-tile s-done"><div class="stat-label">Terminées</div><div class="stat-value">{{ summary.tasks.byStatus['DONE'] || 0 }}</div></div>
-        <div class="stat-tile s-late"><div class="stat-label">En retard</div><div class="stat-value">{{ summary.tasks.overdue }}</div></div>
-        <div class="stat-tile"><div class="stat-label">Avancement</div><div class="stat-value">{{ summary.tasks.completionRate }}<span class="stat-unit">%</span></div></div>
+    <div class="filters-bar">
+      <div class="search-wrap">
+        <i class="fas fa-search"></i>
+        <input type="text" placeholder="Rechercher une équipe…" [(ngModel)]="q" (keyup.enter)="load()">
       </div>
-    </ng-container>
-
-    <div class="section-title">Membres ({{ members.length }})</div>
-    <div *ngIf="canMembers && selected.active" class="filters-bar">
-      <select class="filter-select" [(ngModel)]="addMemberId" style="min-width:260px">
-        <option [ngValue]="null">Ajouter un membre…</option>
-        <option *ngFor="let u of candidates" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
-      </select>
-      <button class="btn-primary" (click)="addMember()" [disabled]="addMemberId === null || busy"><i class="fas fa-user-plus"></i> Ajouter</button>
-      <ng-container *ngIf="canUpdate">
-        <select class="filter-select" [(ngModel)]="newLeadId" style="min-width:240px">
-          <option [ngValue]="null">Changer de responsable…</option>
-          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
-        </select>
-        <button class="btn-secondary" (click)="changeLead()" [disabled]="newLeadId === null || busy"><i class="fas fa-crown"></i> Désigner</button>
-      </ng-container>
+      <label class="filter-check"><input type="checkbox" [(ngModel)]="includeInactive" (ngModelChange)="load()"> Afficher les équipes désactivées</label>
+      <span class="results-count">{{ teams.length }} équipe(s)</span>
     </div>
-    <table class="org-table">
-      <thead><tr><th>Membre</th><th>Rôle HELIOS</th><th>Ajouté le</th><th>Par</th><th></th></tr></thead>
-      <tbody>
-        <tr *ngFor="let m of members">
-          <td><span class="text-strong">{{ m.displayName }}</span> <span class="text-muted">@{{ m.username }}</span>
-            <i *ngIf="m.lead" class="fas fa-crown lead-star" title="Responsable"></i></td>
-          <td>{{ m.role }}</td>
-          <td>{{ fmt(m.addedAt) }}</td>
-          <td>{{ m.addedBy || '—' }}</td>
-          <td class="actions-cell">
-            <button *ngIf="canMembers" class="btn-icon btn-delete" title="Retirer" (click)="askRemoveMember(m)"><i class="fas fa-user-minus"></i></button>
-          </td>
-        </tr>
-        <tr *ngIf="members.length === 0 && !detailLoading"><td colspan="5" class="text-muted">Aucun membre.</td></tr>
-      </tbody>
-    </table>
 
-    <ng-container *ngIf="summary && summary.members.length > 0">
-      <div class="section-title">Avancement par membre</div>
-      <table class="org-table">
-        <thead><tr><th>Membre</th><th>Total</th><th>Ouvertes</th><th>Terminées</th><th>En retard</th></tr></thead>
-        <tbody>
-          <tr *ngFor="let m of summary.members">
-            <td class="text-strong">{{ m.displayName }}</td><td>{{ m.total }}</td><td>{{ m.open }}</td><td>{{ m.done }}</td>
-            <td [class.flag-late]="m.overdue > 0">{{ m.overdue }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </ng-container>
-  </div>
-</div>
-
-<!-- ══ Formulaire ═══════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="showForm" (click)="closeForm()">
-  <div class="modal" (click)="$event.stopPropagation()">
-    <div class="modal-header">
-      <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-plus'"></i> {{ editing ? "Modifier l'équipe" : 'Nouvelle équipe' }}</h3>
-      <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <div class="form-group">
-        <label>Nom <span class="required">*</span></label>
-        <input class="form-input" type="text" maxlength="100" [(ngModel)]="form.name" placeholder="Ex. Équipe réseau">
-        <div class="hint">Le nom est unique (sans tenir compte de la casse).</div>
+    <div class="table-card">
+      @if (loading) {
+        <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+      }
+      @if (!loading) {
+        <table class="org-table">
+          <thead>
+            <tr><th>Équipe</th><th>Responsable</th><th>Membres</th><th>Tâches ouvertes</th><th>Statut</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            @for (t of teams; track t) {
+              <tr class="clickable" [class.row-muted]="!t.active" (click)="select(t)">
+                <td><span class="text-strong">{{ t.name }}</span><div class="text-muted text-small">{{ t.description }}</div></td>
+                <td>{{ t.lead ? t.lead.displayName : '—' }}</td>
+                <td>{{ t.memberCount }}</td>
+                <td>{{ t.openTaskCount }}</td>
+                <td><span class="badge" [ngClass]="t.active ? 'st-completed' : 'st-cancelled'">{{ t.active ? 'Active' : 'Désactivée' }}</span></td>
+                <td class="actions-cell" (click)="$event.stopPropagation()">
+                  <button class="btn-icon btn-view" title="Détail" (click)="select(t)"><i class="fas fa-eye"></i></button>
+                  @if (canUpdate) {
+                    <button class="btn-icon btn-edit" title="Modifier" (click)="openEdit(t)"><i class="fas fa-pen"></i></button>
+                  }
+                  @if (canDeactivate) {
+                    <button class="btn-icon btn-warn" [title]="t.active ? 'Désactiver' : 'Réactiver'" (click)="askToggle(t)">
+                      <i class="fas" [ngClass]="t.active ? 'fa-toggle-on' : 'fa-toggle-off'"></i></button>
+                    }
+                    @if (canDelete) {
+                      <button class="btn-icon btn-delete" title="Supprimer" (click)="askDelete(t)"><i class="fas fa-trash"></i></button>
+                    }
+                  </td>
+                </tr>
+              }
+              @if (teams.length === 0) {
+                <tr>
+                  <td colspan="6" class="org-empty"><i class="fas fa-users-slash"></i><p>Aucune équipe à afficher.</p></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
       </div>
-      <div class="form-group">
-        <label>Description</label>
-        <textarea class="form-input" rows="3" maxlength="1000" [(ngModel)]="form.description"></textarea>
-      </div>
-      <div class="form-group">
-        <label>Responsable</label>
-        <select class="form-input" [(ngModel)]="form.leadId">
-          <option [ngValue]="null">— Aucun —</option>
-          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
-        </select>
-        <div class="hint">Le responsable devient automatiquement membre de l'équipe.</div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="closeForm()">Annuler</button>
-      <button class="btn-primary" (click)="submit()" [disabled]="saving">
-        <span *ngIf="saving" class="btn-spinner"></span> {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Créer') }}
-      </button>
-    </div>
-  </div>
-</div>
 
-<!-- ══ Confirmation ═════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" *ngIf="confirm" (click)="confirm = null">
-  <div class="modal modal-sm" (click)="$event.stopPropagation()">
-    <div class="modal-header" [class.danger]="confirm.danger">
-      <h3><i class="fas fa-circle-question"></i> {{ confirm.title }}</h3>
-      <button class="modal-close" (click)="confirm = null"><i class="fas fa-times"></i></button>
+      <!-- ══ Détail de l'équipe ═════════════════════════════════════════════════ -->
+      @if (selected) {
+        <div class="table-card card-pad">
+          <div class="page-header" style="margin-bottom:14px">
+            <div>
+              <div class="card-title" style="font-size:16px;margin:0"><i class="fas fa-people-group"></i> {{ selected.name }}
+              <span class="badge" [ngClass]="selected.active ? 'st-completed' : 'st-cancelled'">{{ selected.active ? 'Active' : 'Désactivée' }}</span></div>
+              <div class="text-muted text-small">Créée le {{ fmt(selected.createdAt) }} par {{ selected.createdBy ? selected.createdBy.displayName : '—' }}</div>
+            </div>
+            <div class="header-actions">
+              <a class="btn-secondary" routerLink="/team-tasks" [queryParams]="{ teamId: selected.id }" style="text-decoration:none"><i class="fas fa-list-check"></i> Tâches de l'équipe</a>
+              <button class="btn-secondary" (click)="selected = null"><i class="fas fa-xmark"></i> Fermer</button>
+            </div>
+          </div>
+          @if (detailLoading) {
+            <div class="table-loading"><div class="spinner"></div> Chargement…</div>
+          }
+          @if (summary) {
+            <div class="stat-grid">
+              <div class="stat-tile"><div class="stat-label">Tâches</div><div class="stat-value">{{ summary.tasks.total }}</div></div>
+              <div class="stat-tile s-todo"><div class="stat-label">À faire</div><div class="stat-value">{{ summary.tasks.byStatus['TODO'] || 0 }}</div></div>
+              <div class="stat-tile s-progress"><div class="stat-label">En cours</div><div class="stat-value">{{ summary.tasks.byStatus['IN_PROGRESS'] || 0 }}</div></div>
+              <div class="stat-tile s-hold"><div class="stat-label">En attente</div><div class="stat-value">{{ summary.tasks.byStatus['ON_HOLD'] || 0 }}</div></div>
+              <div class="stat-tile s-done"><div class="stat-label">Terminées</div><div class="stat-value">{{ summary.tasks.byStatus['DONE'] || 0 }}</div></div>
+              <div class="stat-tile s-late"><div class="stat-label">En retard</div><div class="stat-value">{{ summary.tasks.overdue }}</div></div>
+              <div class="stat-tile"><div class="stat-label">Avancement</div><div class="stat-value">{{ summary.tasks.completionRate }}<span class="stat-unit">%</span></div></div>
+            </div>
+          }
+          <div class="section-title">Membres ({{ members.length }})</div>
+          @if (canMembers && selected.active) {
+            <div class="filters-bar">
+              <select class="filter-select" [(ngModel)]="addMemberId" style="min-width:260px">
+                <option [ngValue]="null">Ajouter un membre…</option>
+                @for (u of candidates; track u) {
+                  <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+                }
+              </select>
+              <button class="btn-primary" (click)="addMember()" [disabled]="addMemberId === null || busy"><i class="fas fa-user-plus"></i> Ajouter</button>
+              @if (canUpdate) {
+                <select class="filter-select" [(ngModel)]="newLeadId" style="min-width:240px">
+                  <option [ngValue]="null">Changer de responsable…</option>
+                  @for (u of users; track u) {
+                    <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+                  }
+                </select>
+                <button class="btn-secondary" (click)="changeLead()" [disabled]="newLeadId === null || busy"><i class="fas fa-crown"></i> Désigner</button>
+              }
+            </div>
+          }
+          <table class="org-table">
+            <thead><tr><th>Membre</th><th>Rôle HELIOS</th><th>Ajouté le</th><th>Par</th><th></th></tr></thead>
+            <tbody>
+              @for (m of members; track m) {
+                <tr>
+                  <td><span class="text-strong">{{ m.displayName }}</span> <span class="text-muted">&#64;{{ m.username }}</span>
+                  @if (m.lead) {
+                    <i class="fas fa-crown lead-star" title="Responsable"></i>
+                  }</td>
+                  <td>{{ m.role }}</td>
+                  <td>{{ fmt(m.addedAt) }}</td>
+                  <td>{{ m.addedBy || '—' }}</td>
+                  <td class="actions-cell">
+                    @if (canMembers) {
+                      <button class="btn-icon btn-delete" title="Retirer" (click)="askRemoveMember(m)"><i class="fas fa-user-minus"></i></button>
+                    }
+                  </td>
+                </tr>
+              }
+              @if (members.length === 0 && !detailLoading) {
+                <tr><td colspan="5" class="text-muted">Aucun membre.</td></tr>
+              }
+            </tbody>
+          </table>
+          @if (summary && summary.members.length > 0) {
+            <div class="section-title">Avancement par membre</div>
+            <table class="org-table">
+              <thead><tr><th>Membre</th><th>Total</th><th>Ouvertes</th><th>Terminées</th><th>En retard</th></tr></thead>
+              <tbody>
+                @for (m of summary.members; track m) {
+                  <tr>
+                    <td class="text-strong">{{ m.displayName }}</td><td>{{ m.total }}</td><td>{{ m.open }}</td><td>{{ m.done }}</td>
+                    <td [class.flag-late]="m.overdue > 0">{{ m.overdue }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        </div>
+      }
     </div>
-    <div class="modal-body"><p class="modal-desc">{{ confirm.message }}</p></div>
-    <div class="modal-footer">
-      <button class="btn-secondary" (click)="confirm = null">Retour</button>
-      <button [ngClass]="confirm.danger ? 'btn-danger' : 'btn-primary'" (click)="runConfirm()" [disabled]="busy">{{ confirm.label }}</button>
+
+    <!-- ══ Formulaire ═══════════════════════════════════════════════════════════ -->
+    @if (showForm) {
+      <div class="modal-overlay" (click)="closeForm()">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3><i class="fas" [ngClass]="editing ? 'fa-pen' : 'fa-plus'"></i> {{ editing ? "Modifier l'équipe" : 'Nouvelle équipe' }}</h3>
+            <button class="modal-close" (click)="closeForm()"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            @if (modalError) {
+              <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+            }
+            <div class="form-group">
+              <label>Nom <span class="required">*</span></label>
+              <input class="form-input" type="text" maxlength="100" [(ngModel)]="form.name" placeholder="Ex. Équipe réseau">
+              <div class="hint">Le nom est unique (sans tenir compte de la casse).</div>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <textarea class="form-input" rows="3" maxlength="1000" [(ngModel)]="form.description"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Responsable</label>
+              <select class="form-input" [(ngModel)]="form.leadId">
+                <option [ngValue]="null">— Aucun —</option>
+                @for (u of users; track u) {
+                  <option [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
+                }
+              </select>
+              <div class="hint">Le responsable devient automatiquement membre de l'équipe.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="closeForm()">Annuler</button>
+            <button class="btn-primary" (click)="submit()" [disabled]="saving">
+              @if (saving) {
+                <span class="btn-spinner"></span>
+                } {{ saving ? 'Enregistrement…' : (editing ? 'Enregistrer' : 'Créer') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+
+      <!-- ══ Confirmation ═════════════════════════════════════════════════════════ -->
+      @if (confirm) {
+        <div class="modal-overlay" (click)="confirm = null">
+          <div class="modal modal-sm" (click)="$event.stopPropagation()">
+            <div class="modal-header" [class.danger]="confirm.danger">
+              <h3><i class="fas fa-circle-question"></i> {{ confirm.title }}</h3>
+              <button class="modal-close" (click)="confirm = null"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body"><p class="modal-desc">{{ confirm.message }}</p></div>
+            <div class="modal-footer">
+              <button class="btn-secondary" (click)="confirm = null">Retour</button>
+              <button [ngClass]="confirm.danger ? 'btn-danger' : 'btn-primary'" (click)="runConfirm()" [disabled]="busy">{{ confirm.label }}</button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
-  </div>
-</div>
-</div>

@@ -44,14 +44,13 @@ describe('ReportsComponent', () => {
     service.list.and.returnValue(of(pageOf([item()])));
     service.schedules.and.returnValue(of([]));
     TestBed.configureTestingModule({
-      imports: [FormsModule],
-      declarations: [ReportsComponent],
-      schemas: [NO_ERRORS_SCHEMA],                      // <app-report-view> n'est pas l'objet de ces tests
-      providers: [
+    imports: [FormsModule, ReportsComponent],
+    schemas: [NO_ERRORS_SCHEMA], // <app-report-view> n'est pas l'objet de ces tests
+    providers: [
         { provide: ReportService, useValue: service },
         { provide: OrgPermissionsService, useValue: perms }
-      ]
-    });
+    ]
+});
   });
 
   function create(...granted: string[]): void {
