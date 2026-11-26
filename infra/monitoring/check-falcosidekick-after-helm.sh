@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# HELIOS - controle a lancer APRES chaque "helm upgrade" de la release falco : le jeton du webhook doit toujours etre transmis au backend.
+# Usage (sur un noeud avec kubectl) : ./check-falcosidekick-after-helm.sh      Code retour 0 = OK, 1 = ECART (agir : voir infra/helios-sot ou falco-values.yaml)
+set -u; ok=1; NS=falco
+ref=$(kubectl -n $NS get deploy falco-falcosidekick -o json | python3 -c "import json,sys; e=[x for x in json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env'] if x['name']=='WEBHOOK_CUSTOMHEADERS']; print(e[0]['valueFrom']['secretKeyRef']['name'] if e and 'valueFrom' in e[0] else 'ABSENT')")
+[ "$ref" = "falcosidekick-helios-webhook" ] && echo "OK    env WEBHOOK_CUSTOMHEADERS -> Secret $ref" || { echo "ECART env WEBHOOK_CUSTOMHEADERS : $ref (attendu falcosidekick-helios-webhook)"; ok=0; }
+len=$(kubectl -n $NS get secret falcosidekick-helios-webhook -o jsonpath='{.data.WEBHOOK_CUSTOMHEADERS}' 2>/dev/null | base64 -d | wc -c); [ "$len" -gt 20 ] && echo "OK    Secret dedie present ($len octets)" || { echo "ECART Secret dedie absent ou vide"; ok=0; }
+kubectl -n $NS rollout status deploy/falco-falcosidekick --timeout=120s >/dev/null 2>&1 && echo "OK    falcosidekick pret" || { echo "ECART falcosidekick non pret"; ok=0; }
+SK=$(kubectl -n $NS get svc falco-falcosidekick -o jsonpath='{.spec.clusterIP}'); code=$(curl -s -m 8 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"output":"controle post-helm","priority":"Critical","rule":"HELIOS controle","time":"2026-01-01T00:00:00Z","output_fields":{"k8s.ns.name":"kube-system"}}' http://$SK:2801/)
+sleep 4; line=$(kubectl -n $NS logs deploy/falco-falcosidekick --since=30s | grep -i 'webhook' | tail -n 1); echo "$line" | grep -q 'POST OK (200)' && echo "OK    evenement de bout en bout : $line" || { echo "ECART evenement refuse ou absent : $line (sidekick HTTP $code)"; ok=0; }
+[ $ok -eq 1 ] && echo "RESULTAT : OK" || echo "RESULTAT : ECART"; exit $((1-ok))
