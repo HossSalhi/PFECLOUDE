@@ -2,6 +2,8 @@ import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/
 import { Subscription } from 'rxjs';
 import { ApiService, Incident } from '../../core/services/api.service';
 import { SseService } from '../../core/services/sse.service';
+import { NgClass, DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 
 /**
  * "Remédiations Échouées" — dans le modèle 100% autonome, l'humain n'intervient QUE
@@ -13,7 +15,7 @@ import { SseService } from '../../core/services/sse.service';
     selector: 'app-human-tasks',
     templateUrl: './human-tasks.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [NgClass, RouterLink, DatePipe]
 })
 export class HumanTasksComponent implements OnInit, OnDestroy {
   failedIncidents: Incident[] = [];

@@ -34,13 +34,12 @@ describe('AuditTrailComponent', () => {
     service.search.and.returnValue(of(pageOf([entry()])));
     service.meta.and.returnValue(of({ modules: ['AUTH', 'USERS'], actions: ['LOGIN', 'UPDATE'], results: ['SUCCESS', 'FAILURE', 'DENIED'] }));
     TestBed.configureTestingModule({
-      imports: [FormsModule],
-      declarations: [AuditTrailComponent],
-      providers: [
+    imports: [FormsModule, AuditTrailComponent],
+    providers: [
         { provide: AuditTrailService, useValue: service },
         { provide: OrgPermissionsService, useValue: perms }
-      ]
-    });
+    ]
+});
   });
 
   function create(...granted: string[]): void {

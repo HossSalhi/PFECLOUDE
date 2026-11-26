@@ -4,8 +4,7 @@ import { Router } from '@angular/router';
 @Component({
     selector: 'app-not-found',
     templateUrl: './not-found.component.html',
-    changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    changeDetection: ChangeDetectionStrategy.Eager
 })
 export class NotFoundComponent {
   constructor(private router: Router) {}

@@ -78,14 +78,13 @@ describe('IncidentDetailComponent — rendu de la carte (TestBed, HTTP mocké)',
       getIncidentVerification: () => of(verification)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '1' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
     fixture.detectChanges();   // déclenche ngOnInit -> loadAll -> rendu
   }
@@ -174,14 +173,13 @@ describe('IncidentDetailComponent — décision déterministe & neutralité IA (
       getIncidentVerification: () => of(null)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '1' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
     fixture.detectChanges();   // ngOnInit -> loadAll -> rendu
     return (fixture.nativeElement as HTMLElement).textContent || '';
@@ -253,14 +251,13 @@ describe('IncidentDetailComponent — cohérence configuré vs recommandé vs ex
       getIncidentVerification: () => of(null)
     };
     TestBed.configureTestingModule({
-      declarations: [IncidentDetailComponent],
-      imports: [CommonModule],
-      providers: [
+    imports: [CommonModule, IncidentDetailComponent],
+    providers: [
         { provide: ApiService, useValue: api },
-        { provide: Router, useValue: { navigate: () => {} } },
+        { provide: Router, useValue: { navigate: () => { } } },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '3229' } } } }
-      ]
-    });
+    ]
+});
     fixture = TestBed.createComponent(IncidentDetailComponent);
     fixture.detectChanges();
     return (fixture.nativeElement as HTMLElement).textContent || '';

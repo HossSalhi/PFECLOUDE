@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/
 import { interval, Subscription } from 'rxjs';
 import { switchMap, startWith } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
+import { NgClass } from '@angular/common';
 
 export interface ComponentHealth {
   namespace: string;
@@ -32,7 +33,7 @@ export interface VmPolicyEntry {
     selector: 'app-infrastructure',
     templateUrl: './infrastructure.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [NgClass]
 })
 export class InfrastructureComponent implements OnInit, OnDestroy {
   loading = true;

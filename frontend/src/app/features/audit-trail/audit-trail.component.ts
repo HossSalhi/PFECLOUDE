@@ -4,6 +4,8 @@ import { OrgPermissionsService } from '../../core/services/org-permissions.servi
 import { AuditEntry, AuditMeta, AuditQuery, AUDIT_ACTION_LABELS, AUDIT_MODULE_LABELS } from '../../core/models/org.models';
 import { errorMessage, formatDateTime, toLocalIso } from '../../shared/date.util';
 import { saveBlob } from '../../shared/download.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 export interface AuditDiffRow {
   field: string;
@@ -23,7 +25,7 @@ const RESULT_LABELS: Record<string, string> = { SUCCESS: 'Succès', FAILURE: 'É
     selector: 'app-audit-trail',
     templateUrl: './audit-trail.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [FormsModule, NgClass]
 })
 export class AuditTrailComponent implements OnInit {
 

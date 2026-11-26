@@ -45,16 +45,15 @@ describe('TeamTasksComponent', () => {
     service.taskSummary.and.returnValue(of({ total: 1, byStatus: { TODO: 1 }, overdue: 0, completionRate: 0 }));
     service.members.and.returnValue(of([]));
     TestBed.configureTestingModule({
-      imports: [FormsModule],
-      declarations: [TeamTasksComponent],
-      schemas: [NO_ERRORS_SCHEMA],                       // routerLink : sans importance pour ces tests
-      providers: [
+    imports: [FormsModule, TeamTasksComponent],
+    schemas: [NO_ERRORS_SCHEMA], // routerLink : sans importance pour ces tests
+    providers: [
         { provide: TeamService, useValue: service },
         { provide: ApiService, useValue: jasmine.createSpyObj<ApiService>('ApiService', { getUsers: of([]) }) },
         { provide: OrgPermissionsService, useValue: perms },
         { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({ teamId: '7' }) } } }
-      ]
-    });
+    ]
+});
   });
 
   function create(...granted: string[]): void {

@@ -2,6 +2,7 @@ import { Component, Input, OnChanges, ChangeDetectionStrategy } from '@angular/c
 import { ReportContent, ReportMetric } from '../../core/models/org.models';
 import { buildChartViews, ChartView, formatNumber } from '../../shared/chart.util';
 import { formatDate, toLocalIso } from '../../shared/date.util';
+import { NgChartsModule } from 'ng2-charts';
 
 /**
  * Affichage d'un rapport (indicateurs, comparaison avec la période précédente, graphiques, tableaux).
@@ -11,7 +12,7 @@ import { formatDate, toLocalIso } from '../../shared/date.util';
     selector: 'app-report-view',
     templateUrl: './report-view.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [NgChartsModule]
 })
 export class ReportViewComponent implements OnChanges {
 

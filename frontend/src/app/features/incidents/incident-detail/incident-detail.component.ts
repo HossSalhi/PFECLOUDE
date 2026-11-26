@@ -3,6 +3,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ApiService, Incident, Action, WorkflowLogEntry, TerminalEvidence, IncidentVerification } from '../../../core/services/api.service';
 import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, REMEDIATION_CONFIG_VERSION } from '../../../core/config/remediation-scenarios';
+import { NgClass, DatePipe } from '@angular/common';
 
 interface HistoryEntry {
   id: number;
@@ -15,7 +16,7 @@ interface HistoryEntry {
     selector: 'app-incident-detail',
     templateUrl: './incident-detail.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [NgClass, DatePipe]
 })
 export class IncidentDetailComponent implements OnInit, OnDestroy {
   incident: Incident | null = null;

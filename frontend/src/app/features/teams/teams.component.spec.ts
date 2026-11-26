@@ -45,15 +45,14 @@ describe('TeamsComponent', () => {
     }));
     api.getUsers.and.returnValue(of([user(2, 'alice'), user(3, 'bob'), user(4, 'carol')]));
     TestBed.configureTestingModule({
-      imports: [FormsModule],
-      declarations: [TeamsComponent],
-      schemas: [NO_ERRORS_SCHEMA],
-      providers: [
+    imports: [FormsModule, TeamsComponent],
+    schemas: [NO_ERRORS_SCHEMA],
+    providers: [
         { provide: TeamService, useValue: service },
         { provide: ApiService, useValue: api },
         { provide: OrgPermissionsService, useValue: perms }
-      ]
-    });
+    ]
+});
   });
 
   function create(...granted: string[]): void {

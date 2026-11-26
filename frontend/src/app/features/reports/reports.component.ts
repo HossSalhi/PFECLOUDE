@@ -7,6 +7,9 @@ import {
 import { errorMessage, formatDateTime } from '../../shared/date.util';
 import { saveBlob } from '../../shared/download.util';
 import { PERIOD_PRESET_LABELS, PeriodPreset, presetRange, toBackendPeriod, validatePeriod } from '../../shared/period.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
+import { ReportViewComponent } from './report-view.component';
 
 type Tab = 'reports' | 'stats' | 'schedules';
 
@@ -20,7 +23,7 @@ type Tab = 'reports' | 'stats' | 'schedules';
     selector: 'app-reports',
     templateUrl: './reports.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [FormsModule, NgClass, ReportViewComponent]
 })
 export class ReportsComponent implements OnInit {
 

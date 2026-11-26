@@ -8,6 +8,8 @@ import {
 } from '../../core/models/org.models';
 import { buildMonthGrid, CalendarDay, gridRange, MONTH_NAMES, WEEKDAY_NAMES } from '../../shared/calendar.util';
 import { errorMessage, formatDateTime, toDatetimeLocalValue, toLocalIso } from '../../shared/date.util';
+import { FormsModule } from '@angular/forms';
+import { NgClass, SlicePipe } from '@angular/common';
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'Titre', resource: 'Ressource', startAt: 'Début', endAt: 'Fin', status: 'Statut',
@@ -23,7 +25,7 @@ const FIELD_LABELS: Record<string, string> = {
     selector: 'app-maintenance',
     templateUrl: './maintenance.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [FormsModule, NgClass, SlicePipe]
 })
 export class MaintenanceComponent implements OnInit {
 

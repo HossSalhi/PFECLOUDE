@@ -1,11 +1,14 @@
 import { Component, OnInit, OnDestroy, HostListener, ChangeDetectionStrategy } from '@angular/core';
-import { Router, NavigationEnd } from '@angular/router';
+import { Router, NavigationEnd, RouterLink, RouterOutlet } from '@angular/router';
 import { Subscription, interval } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { SseService } from './core/services/sse.service';
 import { AuthService } from './core/services/auth.service';
 import { ApiService } from './core/services/api.service';
 import { OrgPermissionsService } from './core/services/org-permissions.service';
+import { OrangeLogoComponent } from './shared/orange-logo/orange-logo.component';
+import { NgClass, LowerCasePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 
 export interface NavItem {
   label: string;
@@ -34,7 +37,7 @@ export interface AppNotif {
     templateUrl: './app.component.html',
     styleUrls: ['./app.component.scss'],
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [OrangeLogoComponent, NgClass, RouterLink, RouterOutlet, FormsModule, LowerCasePipe]
 })
 export class AppComponent implements OnInit, OnDestroy {
   currentTime = '';

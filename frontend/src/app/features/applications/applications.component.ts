@@ -13,8 +13,7 @@ export interface MonitoredApp {
 @Component({
     selector: 'app-applications',
     templateUrl: './applications.component.html',
-    changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    changeDetection: ChangeDetectionStrategy.Eager
 })
 export class ApplicationsComponent implements OnInit, OnDestroy {
   loading = true;

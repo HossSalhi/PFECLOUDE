@@ -56,8 +56,7 @@ import { Component, Input, OnChanges, ChangeDetectionStrategy } from '@angular/c
       -webkit-font-smoothing: antialiased;
     }
   `],
-    changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    changeDetection: ChangeDetectionStrategy.Eager
 })
 export class OrangeLogoComponent implements OnChanges {
   @Input() size = 60;

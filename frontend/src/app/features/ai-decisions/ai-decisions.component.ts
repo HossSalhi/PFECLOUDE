@@ -4,6 +4,8 @@ import { ApiService, Incident, PagedResponse } from '../../core/services/api.ser
 import { AuthService } from '../../core/services/auth.service';
 import { SseService } from '../../core/services/sse.service';
 import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRule, BusinessScenario } from '../../core/config/remediation-scenarios';
+import { NgClass, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 
 /**
  * Page « Décisions de remédiation » — DÉTERMINISTE.
@@ -16,7 +18,7 @@ import { scenarioForIncidentType, validationLabel, neutralizeAiText, ScenarioRul
     selector: 'app-ai-decisions',
     templateUrl: './ai-decisions.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [NgClass, FormsModule, DatePipe]
 })
 export class AiDecisionsComponent implements OnInit, OnDestroy {
   incidents: Incident[] = [];

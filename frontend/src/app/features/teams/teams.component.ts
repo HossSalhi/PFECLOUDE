@@ -5,6 +5,9 @@ import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import { Team, TeamMember, TeamSummary } from '../../core/models/org.models';
 import { errorMessage, formatDateTime } from '../../shared/date.util';
+import { RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 /**
  * Gestion des équipes : création / modification, responsable, membres, activation / désactivation / suppression,
@@ -14,7 +17,7 @@ import { errorMessage, formatDateTime } from '../../shared/date.util';
     selector: 'app-teams',
     templateUrl: './teams.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    standalone: false
+    imports: [RouterLink, FormsModule, NgClass]
 })
 export class TeamsComponent implements OnInit {
 
