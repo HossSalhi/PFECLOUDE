@@ -11,6 +11,20 @@ PGBIN = os.environ.get('PGBIN', r'C:\Program Files\PostgreSQL\16\bin'); PGPORT =
 SOURCES = [('A', 'helios158', '/opt/local-path-provisioner/pvc-036608b9-0842-4301-80bb-8f91d0eee350_pfe_postgres-backups'),
            ('B', 'helios155', '/opt/local-path-provisioner/pvc-c3506dc8-b545-44fc-ac71-5463c947de65_pfe_postgres-backups-b')]
 MAGIC = b'HELIOSBK1'
+# Destination INDEPENDANTE (NAS : \\\\nas\\partage\\helios, disque externe : E:\\helios, dossier synchronise...) : variable HELIOS_OFFSITE_DEST ou fichier ROOT\\dest.txt (1 ligne)
+def get_dest():
+    d = os.environ.get('HELIOS_OFFSITE_DEST', '').strip()
+    f = os.path.join(ROOT, 'dest.txt')
+    if not d and os.path.exists(f): d = open(f, encoding='utf-8').read().strip()
+    return d or None
+def replicate(enc_path, dest):
+    if not dest: return None
+    os.makedirs(dest, exist_ok=True); out = None
+    for suf in ('', '.sha256', '.manifest.json'):
+        shutil.copy2(enc_path + suf, os.path.join(dest, os.path.basename(enc_path) + suf))
+    out = os.path.join(dest, os.path.basename(enc_path))
+    if hashlib.sha256(open(out, 'rb').read()).hexdigest() != hashlib.sha256(open(enc_path, 'rb').read()).hexdigest(): raise RuntimeError('copie vers la destination alteree (SHA-256 different)')
+    return out
 def ssh(host, cmd, binary=False):
     r = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host, cmd], capture_output=True)
     if r.returncode != 0: raise RuntimeError(f'ssh {host} : {r.stderr.decode(errors="replace")[:200]}')
@@ -83,12 +97,12 @@ def main():
     os.makedirs(os.path.join(ROOT, 'rapports'), exist_ok=True); key = get_key(); rapport = {'date_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'), 'resultats': [], 'ok': True}
     for label, host, path in SOURCES:
         try:
-            enc, man = pull(label, host, path, key); rest = restore_test(key, enc, man); man['restauration'] = rest
+            enc, man = pull(label, host, path, key); dest = get_dest(); denc = replicate(enc, dest); man['destination'] = dest or 'AUCUNE (copie locale seulement : pas independante du PC)'; rest = restore_test(key, denc or enc, man); man['restauration'] = rest; man['restauration_depuis'] = 'destination' if denc else 'local'
             rapport['resultats'].append(man); rapport['ok'] &= bool(rest.get('ok'))
             print(f"[{label}] {man['dump']} -> {os.path.basename(enc)} ({man['encrypted_bytes']} o) ; restauration {'OK' if rest.get('ok') else 'ECHEC'} : Flyway V{rest.get('flyway_max')} tables={rest.get('tables')} incidents={rest.get('incidents')} orphelins={rest.get('fk_orphans')}")
         except Exception as e:
             rapport['ok'] = False; rapport['resultats'].append({'source': label, 'erreur': str(e)[:300]}); print(f'[{label}] ECHEC : {e}')
     p = os.path.join(ROOT, 'rapports', 'offsite-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + ('.json' if rapport['ok'] else '.ECHEC.json')); open(p, 'w').write(json.dumps(rapport, indent=1)); print('rapport :', p)
-    open(os.path.join(ROOT, 'dernier-statut.txt'), 'w').write(('OK ' if rapport['ok'] else 'ECHEC ') + rapport['date_utc'] + '\n')
+    open(os.path.join(ROOT, 'dernier-statut.txt'), 'w').write(('OK ' if rapport['ok'] else 'ECHEC ') + rapport['date_utc'] + (' [destination: ' + str(get_dest()) + ']' if get_dest() else ' [AUCUNE destination independante]') + '\n')
     sys.exit(0 if rapport['ok'] else 1)
 if __name__ == '__main__': main()
