@@ -1,54 +1,57 @@
 package com.orange.pfe.backend.service;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+/** Le stockage PostgreSQL est simulé ici ; l'atomicité entre deux pods est prouvée par l'essai réel (deux backends, une base). */
 class SseTicketServiceTest {
 
-    static class MutableClock extends Clock {
-        final AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-11-26T10:00:00Z"));
-        @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
-        @Override public Clock withZone(java.time.ZoneId z) { return this; }
-        @Override public Instant instant() { return now.get(); }
+    @Test void issue_storesOnlyTheSha256_neverTheTicketItself() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        SseTicketService s = new SseTicketService(jdbc, 30);
+        String t = s.issue("alice");
+        ArgumentCaptor<Object> a = ArgumentCaptor.forClass(Object.class);
+        verify(jdbc).update(anyString(), a.capture(), a.capture(), a.capture());
+        assertThat(a.getAllValues().get(0)).isEqualTo(SseTicketService.sha256(t));
+        assertThat((String) a.getAllValues().get(0)).hasSize(64).isNotEqualTo(t);
+        assertThat(a.getAllValues().get(1)).isEqualTo("alice");
+        assertThat(t.length()).isGreaterThanOrEqualTo(43);
     }
-
-    @Test void validTicket_isAcceptedOnce_thenRefused() {
-        SseTicketService s = new SseTicketService("secret-factice", 30, new MutableClock());
-        String t = s.issue();
-        assertThat(s.consume(t)).isTrue();
-        assertThat(s.consume(t)).isFalse();
+    @Test void tickets_areUnique() {
+        SseTicketService s = new SseTicketService(mock(JdbcTemplate.class), 30);
+        assertThat(s.issue("a")).isNotEqualTo(s.issue("a"));
     }
-    @Test void expiredTicket_isRefused() {
-        MutableClock c = new MutableClock(); SseTicketService s = new SseTicketService("secret-factice", 30, c);
-        String t = s.issue(); c.now.set(c.now.get().plusSeconds(31));
-        assertThat(s.consume(t)).isFalse();
+    @Test @SuppressWarnings("unchecked") void consume_returnsTheUser_whenTheAtomicDeleteMatchesOneRow() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(anyString(), any(RowMapper.class), eq(SseTicketService.sha256("t1")))).thenReturn(List.of("alice"));
+        assertThat(new SseTicketService(jdbc, 30).consume("t1")).isEqualTo(Optional.of("alice"));
     }
-    @Test void ticketJustBeforeExpiry_isAccepted() {
-        MutableClock c = new MutableClock(); SseTicketService s = new SseTicketService("secret-factice", 30, c);
-        String t = s.issue(); c.now.set(c.now.get().plusSeconds(29));
-        assertThat(s.consume(t)).isTrue();
+    @Test @SuppressWarnings("unchecked") void consume_isEmpty_whenNothingDeleted_expiredReusedOrUnknown() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(anyString(), any(RowMapper.class), anyString())).thenReturn(List.of());
+        assertThat(new SseTicketService(jdbc, 30).consume("t1")).isEmpty();
     }
-    @Test void tamperedOrMalformedTickets_areRefused() {
-        SseTicketService s = new SseTicketService("secret-factice", 30, new MutableClock());
-        String t = s.issue(); String[] p = t.split("\\.");
-        assertThat(s.consume(p[0] + "." + p[1] + ".AAAA")).isFalse();
-        assertThat(s.consume((Long.parseLong(p[0]) + 3600) + "." + p[1] + "." + p[2])).isFalse();   // expiration prolongée
-        for (String bad : new String[]{null, "", "a.b", "a.b.c.d", "x".repeat(300), "1.2.%%%"}) assertThat(s.consume(bad)).as(String.valueOf(bad)).isFalse();
+    @Test void consume_rejectsNullBlankAndOversizedWithoutTouchingTheDatabase() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        SseTicketService s = new SseTicketService(jdbc, 30);
+        for (String bad : new String[]{null, "", "  ", "x".repeat(101)}) assertThat(s.consume(bad)).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
     }
-    @Test void ticketSignedWithAnotherSecret_isRefused() {
-        MutableClock c = new MutableClock();
-        String t = new SseTicketService("autre-secret", 30, c).issue();
-        assertThat(new SseTicketService("secret-factice", 30, c).consume(t)).isFalse();
-    }
-    @Test void ticketsAreUnique_andTtlIsBounded() {
-        SseTicketService s = new SseTicketService("secret-factice", 100000, new MutableClock());
-        assertThat(s.issue()).isNotEqualTo(s.issue());
-        assertThat(s.ttlSeconds()).isLessThanOrEqualTo(120);
+    @Test void ttl_isBounded() {
+        assertThat(new SseTicketService(mock(JdbcTemplate.class), 100000).ttlSeconds()).isEqualTo(120);
+        assertThat(new SseTicketService(mock(JdbcTemplate.class), 1).ttlSeconds()).isEqualTo(5);
     }
 }

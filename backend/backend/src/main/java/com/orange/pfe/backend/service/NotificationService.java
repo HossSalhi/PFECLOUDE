@@ -59,7 +59,7 @@ public class NotificationService {
     }
 
     public void notifyNewIncident(Incident incident) {
-        sseEventService.broadcast("incident_created", Map.of(
+        sseEventService.broadcast("incident_created", incident.getNamespace(), Map.of(
                 "id",          incident.getId(),
                 "title",       incident.getTitle(),
                 "severity",    incident.getSeverity() != null ? incident.getSeverity().name() : "UNKNOWN",
@@ -77,7 +77,7 @@ public class NotificationService {
      * automatiquement et rien n'est escaladé.
      */
     public void notifyNewIncidentUiOnly(Incident incident) {
-        sseEventService.broadcast("incident_created", Map.of(
+        sseEventService.broadcast("incident_created", incident.getNamespace(), Map.of(
                 "id",          incident.getId(),
                 "title",       incident.getTitle(),
                 "severity",    incident.getSeverity() != null ? incident.getSeverity().name() : "UNKNOWN",
@@ -88,7 +88,7 @@ public class NotificationService {
 
     /** Pendant de {@link #notifyNewIncidentUiOnly} à la clôture : SSE seulement, ni webhook ni e-mail. */
     public void notifyIncidentResolvedUiOnly(Incident incident) {
-        sseEventService.broadcast("incident_resolved", Map.of(
+        sseEventService.broadcast("incident_resolved", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "status", "RESOLVED"
@@ -100,7 +100,7 @@ public class NotificationService {
      * les notifications à l'interface (.160) : l'état d'échec est explicite et visible, personne n'est sollicité.
      */
     public void notifyRemediationFailedUiOnly(Incident incident, String reason) {
-        sseEventService.broadcast("remediation_failed", Map.of(
+        sseEventService.broadcast("remediation_failed", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "reason", reason != null ? reason : "unknown"
@@ -108,7 +108,7 @@ public class NotificationService {
     }
 
     public void notifyIncidentUpdated(Incident incident) {
-        sseEventService.broadcast("incident_updated", Map.of(
+        sseEventService.broadcast("incident_updated", incident.getNamespace(), Map.of(
                 "id",       incident.getId(),
                 "title",    incident.getTitle(),
                 "severity", incident.getSeverity() != null ? incident.getSeverity().name() : "UNKNOWN",
@@ -117,7 +117,7 @@ public class NotificationService {
     }
 
     public void notifyEscalation(Incident incident) {
-        sseEventService.broadcast("incident_escalated", Map.of(
+        sseEventService.broadcast("incident_escalated", incident.getNamespace(), Map.of(
                 "id",    incident.getId(),
                 "title", incident.getTitle()
         ));
@@ -126,7 +126,7 @@ public class NotificationService {
     }
 
     public void notifyIncidentResolved(Incident incident) {
-        sseEventService.broadcast("incident_resolved", Map.of(
+        sseEventService.broadcast("incident_resolved", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "status", "RESOLVED"
@@ -137,7 +137,7 @@ public class NotificationService {
 
     /** Résolution avec rapport COMPLET (détection + décision IA + trace Camunda/kubectl). */
     public void notifyIncidentResolvedWithTrace(Incident incident, List<WorkflowLogDTO> workflowLogs) {
-        sseEventService.broadcast("incident_resolved", Map.of(
+        sseEventService.broadcast("incident_resolved", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "status", "RESOLVED"
@@ -147,7 +147,7 @@ public class NotificationService {
     }
 
     public void notifyRemediationFailed(Incident incident, String reason) {
-        sseEventService.broadcast("remediation_failed", Map.of(
+        sseEventService.broadcast("remediation_failed", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "reason", reason != null ? reason : "unknown"
@@ -157,7 +157,7 @@ public class NotificationService {
     }
 
     public void notifyRemediationFailedWithTrace(Incident incident, String reason, List<WorkflowLogDTO> workflowLogs) {
-        sseEventService.broadcast("remediation_failed", Map.of(
+        sseEventService.broadcast("remediation_failed", incident.getNamespace(), Map.of(
                 "id",     incident.getId(),
                 "title",  incident.getTitle(),
                 "reason", reason != null ? reason : "unknown"
@@ -168,7 +168,7 @@ public class NotificationService {
 
     public void notifyHumanTaskCreated(HumanTask task) {
         Incident incident = task.getWorkflowInstance().getIncident();
-        sseEventService.broadcast("human_task_created", Map.of(
+        sseEventService.broadcast("human_task_created", incident.getNamespace(), Map.of(
                 "taskId",    task.getId(),
                 "taskName",  task.getTaskName() != null ? task.getTaskName() : "",
                 "incidentId", incident.getId(),
@@ -180,7 +180,7 @@ public class NotificationService {
 
     public void notifyHumanTaskDecided(HumanTask task, String actor) {
         Incident incident = task.getWorkflowInstance().getIncident();
-        sseEventService.broadcast("human_task_decided", Map.of(
+        sseEventService.broadcast("human_task_decided", incident.getNamespace(), Map.of(
                 "taskId",    task.getId(),
                 "decision",  task.getDecision().name(),
                 "incidentId", incident.getId(),
@@ -190,7 +190,7 @@ public class NotificationService {
     }
 
     public void notifyRemediationExecuted(Incident incident, String actionType, String target) {
-        sseEventService.broadcast("remediation_executed", Map.of(
+        sseEventService.broadcast("remediation_executed", incident.getNamespace(), Map.of(
                 "incidentId", incident.getId(),
                 "actionType", actionType != null ? actionType : "",
                 "target",     target != null ? target : ""

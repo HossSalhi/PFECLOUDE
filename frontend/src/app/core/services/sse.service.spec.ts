@@ -6,7 +6,7 @@ import { AuthService } from './auth.service';
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onopen: any; onerror: any; onmessage: any;
-  constructor(public url: string) { FakeEventSource.instances.push(this); }
+  constructor(public url: string, public opts?: any) { FakeEventSource.instances.push(this); }
   addEventListener(): void {}
   close(): void {}
 }
@@ -28,13 +28,16 @@ describe('SseService (accès par ticket)', () => {
   beforeEach(() => { FakeEventSource.instances = []; (window as any).EventSource = FakeEventSource; loggedIn = true; });
   afterEach(() => { (window as any).EventSource = realES; });
 
-  it("demande un ticket puis ouvre le flux avec ce ticket, sans jeton permanent dans l'URL", () => {
+  it("demande un ticket (cookie HttpOnly) puis ouvre le flux avec les cookies, sans ticket ni jeton dans l'URL", () => {
     const s = create();
     const req = http.expectOne(r => r.url.endsWith('/api/events/ticket'));
     expect(req.request.method).toBe('POST');
-    req.flush({ ticket: 't1.n1.sig' });
+    expect(req.request.withCredentials).toBe(true);
+    req.flush({ expiresInSeconds: 30 });
     expect(FakeEventSource.instances.length).toBe(1);
-    expect(FakeEventSource.instances[0].url).toContain('/api/events/stream?ticket=t1.n1.sig');
+    expect(FakeEventSource.instances[0].url.endsWith('/api/events/stream')).toBe(true);
+    expect(FakeEventSource.instances[0].url).not.toContain('ticket');
+    expect(FakeEventSource.instances[0].opts).toEqual({ withCredentials: true });
     expect(FakeEventSource.instances[0].url).not.toContain('Bearer');
     s.ngOnDestroy();
   });

@@ -30,14 +30,14 @@ export class SseService implements OnDestroy {
       this.eventSource.close();
     }
 
-    // Le flux SSE n'est plus public : EventSource ne peut pas envoyer d'en-tête Authorization, on obtient donc un TICKET
-    // court (30 s), à usage unique, via une requête authentifiée ; le JWT n'est jamais placé dans l'URL.
+    // Le flux SSE n'est plus public : EventSource ne peut pas envoyer d'en-tête Authorization. Une requête authentifiée dépose
+    // un TICKET à usage unique (30 s) dans un cookie HttpOnly limité au flux : ni JWT ni ticket dans l'URL.
     if (!this.auth.isLoggedIn()) {
       this.scheduleReconnect();
       return;
     }
-    this.http.post<{ ticket: string }>(`${this.baseUrl}/api/events/ticket`, {}).subscribe({
-      next: res => this.openStream(res.ticket),
+    this.http.post<{ expiresInSeconds: number }>(`${this.baseUrl}/api/events/ticket`, {}, { withCredentials: true }).subscribe({
+      next: () => this.openStream(),
       error: () => {
         this.connected$.next(false);
         this.scheduleReconnect();
@@ -45,11 +45,11 @@ export class SseService implements OnDestroy {
     });
   }
 
-  private openStream(ticket: string): void {
-    const url = `${this.baseUrl}/api/events/stream?ticket=${encodeURIComponent(ticket)}`;
+  private openStream(): void {
+    const url = `${this.baseUrl}/api/events/stream`;
 
     try {
-      this.eventSource = new EventSource(url);
+      this.eventSource = new EventSource(url, { withCredentials: true });
 
       this.eventSource.onopen = () => {
         this.connected$.next(true);
