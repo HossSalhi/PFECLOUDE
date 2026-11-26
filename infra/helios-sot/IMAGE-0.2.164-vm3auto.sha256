@@ -1,0 +1,12 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.164-vm3auto (6 nov. 2026, vérifiée AVANT déploiement).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:\Users\houss\helios-minimal-build-0.2.164\target\classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+# Source : copie minimale hors dépôt C:\Users\houss\helios-minimal-build-0.2.164 = arbre de travail MOINS l'édition Camunda `businessId`
+# (CamundaWorkflowService.java := sauvegarde datée before-business-id ; pom.xml camunda.version 8.8.0 ; aucun fichier Camunda touché).
+contenu-0.2.164-vm3auto = 623e83dae74d53766736d2502d89aa9e5318167c31bd331ccca7ba2885b3518e   # 304 fichiers (classes + ressources)
+contenu-0.2.163-vm4auto = af9e5aa69fb19d7057ac320c6f4d5fd9e1255063cb7dda2cc02c7f68533d0f32   # image en marche au 6 nov. 17:30, 304 fichiers
+# Écart exact 0.2.163 -> 0.2.164 : 16 fichiers, 0 ajouté, 0 retiré :
+#   VmPowerPolicy.class + 9 classes imbriquées (Decision, Entry, Mode, Notifications, PowerState, Refusal, Request, Request$Builder, Route, VmClass)
+#   VmPowerWatch.class + 3 classes imbriquées ($1, Recovery, Track)
+#   resources/application.properties (commentaire seulement)
+# Identiques à l'image en marche (288 fichiers) dont KubernetesRemediationExecutor.class et TOUTES les classes Camunda.

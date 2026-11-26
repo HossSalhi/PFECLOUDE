@@ -1,0 +1,7 @@
+# Copies byte-identiques de la PRODUCTION (référence de comparaison) : elles contiennent des identifiants hérités
+# (watchdog : HELIOS_PASS, SSH_PASS ; Bridge : mots de passe par défaut). Elles ne doivent JAMAIS être commitées.
+# Seuls README.md, MANIFEST.sha256 et ce .gitignore sont suivis.
+*
+!.gitignore
+!README.md
+!MANIFEST.sha256

@@ -1,0 +1,26 @@
+# Deployment sur une image inexistante : docker.io/helios/inexistante:v0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-cible
+  namespace: {{NAMESPACE}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helios-cible
+  template:
+    metadata:
+      labels:
+        app: helios-cible
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{NODE}}
+      containers:
+      - name: cible
+        image: docker.io/helios/inexistante:v0
+        imagePullPolicy: Always
+        resources:
+          limits:
+            memory: 32Mi
+            cpu: 50m

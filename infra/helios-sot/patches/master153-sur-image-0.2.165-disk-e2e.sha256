@@ -1,0 +1,6 @@
+76b28591ab809c7313ca4bf6b36662f5fd4c10d13a986c6766dc18d51627baef *src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerPolicy.java
+adee229b3f4d15cb112d3cc41e46de7171c5ab4df8547f10641cd8ad749c7a9b *src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
+07d703c76c3ddcd81a3c5e23e90b6a5c8d51acc20d7810e0d898c9de54627b2d *src/main/java/com/orange/pfe/backend/service/vmpower/VmRecoveryVerifier.java
+24343198284f2e2fb80b67d42f0b63707ec8b392e881df0ec91b08c7d71ad46a *src/main/java/com/orange/pfe/backend/service/remediation/RemediationPolicyService.java
+5fd557fce5364cb0175262babdb9f0dfd15f49c9f52eafe35516b83656a61dec *src/main/java/com/orange/pfe/backend/service/InfrastructureHealthScheduler.java
+5c7e38c2f292da8f09c7b28bdff69d87ec0697729aa89445714eb40c3c252933 *src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java

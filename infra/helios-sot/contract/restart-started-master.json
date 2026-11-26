@@ -1,0 +1,23 @@
+{
+  "case": "restart-started-master",
+  "request": {
+    "auth": "valid",
+    "headers": {
+      "X-Helios-Incident": "116"
+    },
+    "method": "POST",
+    "path": "/restart/k8s-master"
+  },
+  "response": {
+    "body": {
+      "incident": 116,
+      "node": "k8s-master",
+      "request_id": "<id>",
+      "started": true,
+      "state_after": "RUNNING",
+      "status": "STARTED",
+      "vm": "k8s-master"
+    },
+    "status": 200
+  }
+}

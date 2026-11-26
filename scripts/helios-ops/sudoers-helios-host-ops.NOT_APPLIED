@@ -1,0 +1,37 @@
+# ==========================================================================================
+# HELIOS — PROPOSITION sudoers pour le helper privilégié — *** NOT_APPLIED ***
+# LOT HOST-EXEC-LEAST-PRIVILEGE-REDESIGN-DEV-ONLY-01
+#
+# CE FICHIER N'EST PAS UNE CONFIGURATION ACTIVE. Il n'a PAS été installé sur les nœuds.
+# Ne PAS copier dans /etc/sudoers.d/ sans la revue + la procédure de migration (lot distinct).
+# Cible de déploiement future : /etc/sudoers.d/helios-host-ops  (root:root, 0440)
+# ==========================================================================================
+#
+# PRINCIPE : autoriser `kube` à exécuter UNIQUEMENT le helper privilégié, pour chacun des 5
+# identifiants d'opération FERMÉS — AUCUN shell, AUCUN `bash`, AUCUN `ALL`.
+#
+# Règle proposée (indicative, à valider par `visudo -c` avant toute installation) :
+#
+# kube ALL=(root) NOPASSWD: /usr/local/sbin/helios-host-ops restart-kubelet, \
+#                           /usr/local/sbin/helios-host-ops restart-containerd, \
+#                           /usr/local/sbin/helios-host-ops sync-time, \
+#                           /usr/local/sbin/helios-host-ops image-gc, \
+#                           /usr/local/sbin/helios-host-ops reboot
+#
+# ------------------------------------------------------------------------------------------
+# EXIGENCES DE VALIDATION AVANT INSTALLATION (lot de déploiement distinct) :
+#   - le chemin /usr/local/sbin/helios-host-ops doit exister, root:root, 0755, non modifiable par kube ;
+#   - le répertoire /usr/local/sbin doit être non modifiable par kube (sinon escalade) ;
+#   - confirmer les chemins ABSOLUS réels de systemctl/crictl/chronyc sur CHAQUE nœud (helper _resolve_abs) ;
+#   - `visudo -c` doit renvoyer "parsed OK" sur un fichier de test AVANT remplacement ;
+#   - `sudo -l` ciblé doit montrer ces 5 invocations en NOPASSWD, ET refuser toute autre commande ;
+#   - vérifier qu'aucun wildcard/argument libre n'autorise un contournement (pas d'argument variable ici) ;
+#   - RETRAIT de /etc/sudoers.d/kube-nopasswd (`kube ALL=(ALL) NOPASSWD:ALL`) APRÈS validation, avec
+#     procédure de secours (accès console) et vérification avant/après.
+#
+# LIMITE : la sécurité ne tient PAS seulement à cette ligne restreinte — elle dépend aussi de la logique du
+# helper (ensemble fermé, pas de shell, pas d'argument libre), de la propriété root de ses fichiers, et de
+# l'absence de répertoire modifiable par kube dans la chaîne privilégiée. Tous ces points doivent être
+# vérifiés sur machine avant mise en service.
+#
+# AUCUNE de ces actions n'a été réalisée dans le LOT 09.9 (DEV-ONLY).

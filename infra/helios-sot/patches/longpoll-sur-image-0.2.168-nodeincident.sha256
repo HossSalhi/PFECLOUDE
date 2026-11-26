@@ -1,0 +1,2 @@
+6a1f56c69713b9f8b09c584c80d5830da94019a0d9df97d716779f233031f1e3  src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
+3ff7a9e3214e3c16efb8275ccbea5270c0ded024b418470301798164f1f89077  src/test/java/com/orange/pfe/backend/service/CamundaWorkerLongPollTest.java

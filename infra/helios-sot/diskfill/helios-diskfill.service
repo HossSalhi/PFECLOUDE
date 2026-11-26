@@ -1,0 +1,85 @@
+[Unit]
+# HELIOS - remplissage disque de LABORATOIRE du noeud .158 (k8s-worker1). HORS PRODUCTION.
+# Modele : helios-cpuload.service (meme emplacement /etc/systemd/system, code dans /opt, Restart=no, RuntimeMaxSec, AUCUNE section [Install]).
+#
+# Equivalent LOCAL de `helios_disk_test.py --target 158 --go` : remplit / par fallocate jusqu'a 81 %, laisse HELIOS (detecteur, incident,
+# HOST_RECLAIM_DISK par le Bridge, verification) liberer les fichiers, puis verifie le retour a 77 % ou moins. Il ne supprime RIEN dans le
+# cas nominal : seul HELIOS libere. Il ne libere lui-meme que par securite (urgence 83 %, garde 83,5 %, fin d'observation, expiration).
+#
+# DEMARRAGE : `sudo systemctl start helios-diskfill.service` - UNE SEULE commande, directement dans la VM, COMME helios-cpuload.service : AUCUN
+# armement ni pre-vol a executer avant, AUCUNE dependance de l'hote Windows. ExecStartPre (diskfill.py verifier) execute AUTOMATIQUEMENT tous les
+# controles du noeud (cible .158, empreintes des unites, repertoire et montage, espace et inodes, plan, cooldown, Prometheus, garde independante) et
+# REFUSE de demarrer, sans rien allouer, si l'un d'eux echoue. L'attestation de l'agent Windows DISK (HMAC, 192.168.148.1:19158) est OPTIONNELLE :
+# desactivee par defaut (ATTESTATION_HOTE_REQUISE = False dans diskfill.py) ; la rendre obligatoire = nouvelle version du programme. Le watchdog
+# VM_DOWN :9099 reste INCHANGE. Le pre-vol manuel --preflight reste un diagnostic facultatif.
+# Requires=/After= demarrent la garde independante AVANT (ne jamais la lancer a la main). Type=simple : `systemctl start` rend la main apres
+# ExecStartPre (un refus s'y affiche), le scenario se poursuit en tache de fond. Suivi : `journalctl -fu helios-diskfill -u helios-diskguard` ;
+# resultat final : la ligne `RESULTAT : verdict=... code=...` du journal, et `systemctl show -p Result -p ExecMainStatus`.
+#
+# Il n est volontairement PAS lie a multi-user.target : il ne doit jamais demarrer au boot, ni survivre a un redemarrage de la VM.
+Description=HELIOS - remplissage disque de laboratoire (HORS PRODUCTION)
+Documentation=file:/opt/helios-diskfill/diskfill.py
+AssertPathExists=/opt/helios-diskfill/diskfill.py
+After=network.target helios-diskguard.service
+# La garde independante est un filet de securite : si elle ne demarre pas, le service ne demarre pas (rien n'est alloue).
+Requires=helios-diskguard.service
+
+[Service]
+Type=simple
+
+# Restart=no est une EXIGENCE DE SECURITE : un service qui se relancerait seul remplirait le disque une 2e fois apres que HELIOS l'a libere.
+Restart=no
+RemainAfterExit=no
+
+# CONTRAT DU BRIDGE (HOST_RECLAIM_DISK) : le repertoire /var/lib/helios-diskfill doit etre EXACTEMENT directory|root|700. Le mode par defaut
+# de StateDirectory= est 0755 : StateDirectoryMode=0700 est donc OBLIGATOIRE et explicite (verifie par les tests, par ExecStartPre via
+# `systemctl show`, et par le Bridge lui-meme : mode different = REFUS de toute suppression).
+# helios-diskfill-etat : horodatage du cooldown local (hors du repertoire du Bridge : une entree etrangere y serait comptee par le Bridge).
+StateDirectory=helios-diskfill helios-diskfill-etat
+StateDirectoryMode=0700
+# /run/helios-diskfill : etat du lancement, battement de la garde, marqueurs (volatil : perdu au redemarrage, comme les unites transitoires du lanceur).
+RuntimeDirectory=helios-diskfill
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+# `+` : ExecStartPre s'execute SANS le bac a sable (il doit voir les unites reelles et creer l'etat du lancement). Les parametres sont CODES EN
+# DUR dans diskfill.py : aucun argument, aucune variable d'environnement ne peut les modifier.
+ExecStartPre=+/usr/bin/python3 -I -B -u /opt/helios-diskfill/diskfill.py verifier
+ExecStart=/usr/bin/python3 -I -B -u /opt/helios-diskfill/diskfill.py run
+# ExecStopPost s'execute meme si le demarrage a echoue ou si le processus a ete tue : il ne libere QUE les fichiers de CE lancement (jeton et
+# INVOCATION_ID de l'etat) et ne fait RIEN pour un lancement precedent (aucun nettoyage automatique des orphelins).
+ExecStopPost=/usr/bin/python3 -I -B -u /opt/helios-diskfill/diskfill.py nettoyer
+
+# Arret propre : SIGTERM -> liberation immediate des fichiers de ce lancement.
+KillSignal=SIGTERM
+KillMode=control-group
+# Codes de sortie (diskfill.py, CODES_SORTIE) : 0 OK ; 1 erreur ; 2 refus ; 3 detection seule ; 4 aucune detection ; 5 urgence ; 6 ARRET.
+# 6 = arret demande par l'exploitant (`systemctl stop` -> SIGTERM -> fichiers liberes) : ce n'est pas une panne, l'unite reste propre
+# (`inactive (dead)`). Le journal porte quand meme `RESULTAT : verdict=ARRET code=6`. Tout autre code non nul laisse l'unite en `failed` (un
+# scenario non abouti se voit dans `systemctl status`) ; un depassement de RuntimeMaxSec reste `timeout` (failed), quel que soit le code.
+SuccessExitStatus=6
+TimeoutStartSec=150
+TimeoutStopSec=90
+
+# Expiration : observation 720 s + marge 300 s = 1020 s (identique au lanceur valide). Meme si tout le reste echoue, systemd arrete le service
+# et ExecStopPost libere ; la garde independante (RuntimeMaxSec=1080) est un second filet.
+RuntimeMaxSec=1020
+
+SyslogIdentifier=helios-diskfill
+StandardOutput=journal
+StandardError=journal
+
+# Durcissement (ensemble eprouve sur ce noeud avec helios-cpuload.service). L'ecriture n'est possible que dans les repertoires d'etat declares
+# ci-dessus (ProtectSystem=strict).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryMax=64M
+TasksMax=32
+
+# PAS de section [Install] : le service ne doit jamais etre `enabled`.

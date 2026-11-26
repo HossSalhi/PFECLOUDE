@@ -1,0 +1,4 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.166-master153 (établie le 2026-11-17 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:/Users/houss/helios-minimal-build-0.2.166-master153/target/classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+contenu-0.2.166-master153 = 5dc2990ce2528caa99d2bd8828128b1453f052af965a147a46738a0347a43f90   # 305 fichiers (classes + ressources)

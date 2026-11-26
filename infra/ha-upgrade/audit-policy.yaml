@@ -1,0 +1,89 @@
+# =============================================================================
+# HELIOS — Kubernetes Audit Policy
+# =============================================================================
+# Copier sur CHAQUE master : /etc/kubernetes/audit-policy.yaml
+# Cree le repertoire de logs : mkdir -p /var/log/kubernetes/audit
+# L'apiserver charge cette policy via les extraArgs dans kubeadm-ha-config.yaml.
+#
+# Niveau de log :
+#   None       = rien
+#   Metadata   = qui a fait quoi, quand (pas le body)
+#   Request    = metadata + request body
+#   RequestResponse = metadata + request + response body
+# =============================================================================
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Ne pas loguer les probes de sante et les metriques (bruit)
+omitStages:
+  - "RequestReceived"
+rules:
+  # --- Exclure le bruit (health checks, metrics, leases) ---
+  - level: None
+    resources:
+      - group: ""
+        resources: ["endpoints", "services", "services/status"]
+    verbs: ["get", "list", "watch"]
+
+  - level: None
+    resources:
+      - group: "coordination.k8s.io"
+        resources: ["leases"]
+
+  - level: None
+    nonResourceURLs:
+      - "/healthz*"
+      - "/readyz*"
+      - "/livez*"
+      - "/metrics"
+      - "/api"
+      - "/api/*"
+      - "/apis"
+      - "/apis/*"
+    verbs: ["get"]
+
+  # --- Secrets : loguer SEULEMENT les metadonnees (jamais le contenu) ---
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets", "configmaps"]
+
+  # --- Actions sensibles : log complet ---
+  # RBAC
+  - level: RequestResponse
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
+    verbs: ["create", "update", "patch", "delete"]
+
+  # Pods (creation/suppression = remediation HELIOS)
+  - level: Request
+    resources:
+      - group: ""
+        resources: ["pods", "pods/exec", "pods/attach", "pods/eviction"]
+    verbs: ["create", "delete", "patch", "update"]
+
+  # Deployments (rollback, scale)
+  - level: Request
+    resources:
+      - group: "apps"
+        resources: ["deployments", "deployments/scale", "replicasets"]
+    verbs: ["create", "update", "patch", "delete"]
+
+  # NetworkPolicies (remediation reseau HELIOS)
+  - level: Request
+    resources:
+      - group: "networking.k8s.io"
+        resources: ["networkpolicies"]
+    verbs: ["create", "delete"]
+
+  # Nodes (cordon/uncordon)
+  - level: Request
+    resources:
+      - group: ""
+        resources: ["nodes", "nodes/status"]
+    verbs: ["update", "patch"]
+
+  # --- Tout le reste : metadonnees seulement ---
+  - level: Metadata
+    omitStages:
+      - "RequestReceived"

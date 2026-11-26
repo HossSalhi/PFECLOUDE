@@ -1,0 +1,30 @@
+# Deployment referencant la ConfigMap inexistante config-absente
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-cible
+  namespace: {{NAMESPACE}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helios-cible
+  template:
+    metadata:
+      labels:
+        app: helios-cible
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{NODE}}
+      containers:
+      - name: cible
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        command: ["sh","-c","sleep 3600"]
+        envFrom:
+        - configMapRef:
+            name: config-absente
+        resources:
+          limits:
+            memory: 32Mi
+            cpu: 50m

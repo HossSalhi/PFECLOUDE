@@ -1,0 +1,4 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.169-longpoll (établie le 2026-11-22 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:\Users\houss\helios-minimal-build-0.2.169-longpoll\target\classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+contenu-0.2.169-longpoll = 21ff21f5990dbcd773140cde3beaa1891e166b3d3bcaeeeba607c73a74b16eed   # 302 fichiers (classes + ressources)

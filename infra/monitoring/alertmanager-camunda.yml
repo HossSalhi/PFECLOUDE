@@ -1,0 +1,215 @@
+# =============================================================================
+# HELIOS — Alertmanager : routage des incidents vers Camunda (EVENT-DRIVEN)
+# =============================================================================
+# A DEPLOYER : /etc/alertmanager/alertmanager.yml sur .160
+# Recharger  : curl -X POST http://localhost:9093/-/reload
+#
+# ══════════════════════════════════════════════════════════════════════
+#  POURQUOI CETTE ARCHITECTURE (et pas un script qui poll Prometheus)
+# ══════════════════════════════════════════════════════════════════════
+#  ANCIEN MODELE (a remplacer) :
+#      Camunda --[timer 60s]--> SSH .160 --> requete Prometheus --> 1 incident
+#    Problemes : latence jusqu'a 60s, un seul incident par cycle, SSH root,
+#    pas de deduplication, pas de groupement, pas de resolution automatique.
+#
+#  NOUVEAU MODELE (push, standard industriel) :
+#      Prometheus --[regle `for:` satisfaite]--> Alertmanager
+#                 --[dedup + group + inhibit + silence]--> webhook HTTP
+#                 --> Camunda (message BPMN correle)
+#    Gains : latence <5s, N incidents en parallele, deduplication native,
+#    inhibition en cascade, notification `resolved` automatique, silences.
+#
+#  IDEMPOTENCE : Alertmanager envoie un `groupKey` stable. Le recepteur
+#  l'utilise comme cle de correlation BPMN -> un meme incident ne demarre
+#  JAMAIS deux workflows. Le retry Alertmanager (repeat_interval) tombe sur
+#  la meme cle et est ignore par Camunda.
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+  # SMTP via le relais sur l'hote (le TCP direct .160 -> Gmail est casse par le NAT)
+  smtp_smarthost: '192.168.148.1:2526'
+  smtp_from: 'helios-aiops@orange.tn'
+  smtp_require_tls: false
+
+# ─── Modeles de message ──────────────────────────────────────────
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# ══════════════════════════════════════════════════════════════════
+#  ROUTAGE
+# ══════════════════════════════════════════════════════════════════
+route:
+  # Groupement : un incident = (type, cible). Deux pods differents en
+  # CrashLoop = deux incidents distincts, donc deux workflows Camunda.
+  group_by: ['helios_type', 'helios_target']
+
+  # Laisser 30s aux alertes correlees d'arriver avant d'envoyer (evite
+  # d'ouvrir 12 workflows pour une seule panne de noeud).
+  group_wait: 30s
+  group_interval: 2m
+  repeat_interval: 4h
+
+  receiver: 'camunda-and-email'
+
+  routes:
+
+    # ─────────────────────────────────────────────────────────────
+    # 1. PANNES D'INFRASTRUCTURE MAJEURES -> humain uniquement
+    #    Perte de quorum, tous les API servers morts, VM injoignable :
+    #    aucune automatisation ne doit s'y risquer.
+    # ─────────────────────────────────────────────────────────────
+    - matchers:
+        - helios_type =~ "ETCD_QUORUM_LOST|APISERVER_ALL_DOWN|ETCD_NO_LEADER|VM_UNREACHABLE"
+      receiver: 'escalation-humaine'
+      group_wait: 0s
+      repeat_interval: 30m
+      continue: false          # ne PAS transmettre a Camunda
+
+    # ─────────────────────────────────────────────────────────────
+    # 2. MONITORING LUI-MEME EN PANNE -> email direct
+    #    Si Camunda ou l'IA sont morts, inutile de leur envoyer l'alerte.
+    # ─────────────────────────────────────────────────────────────
+    - matchers:
+        - helios_type =~ "MONITORING_DOWN|ALERTING_DOWN|CAMUNDA_DOWN|AI_SERVICE_DOWN"
+      receiver: 'escalation-humaine'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: false
+
+    # ─────────────────────────────────────────────────────────────
+    # 3. NAMESPACES SYSTEME -> observer, ne pas toucher
+    # ─────────────────────────────────────────────────────────────
+    - matchers:
+        - helios_target =~ "^(kube-system|kube-public|kube-node-lease|cnpg-system|calico-system|tigera-operator|falco|local-path-storage|metallb-system|monitoring)/.*"
+      receiver: 'escalation-humaine'
+      repeat_interval: 2h
+      continue: false
+
+    # ─────────────────────────────────────────────────────────────
+    # 4. INCIDENTS AUTO-REMEDIABLES -> Camunda (le coeur du systeme)
+    # ─────────────────────────────────────────────────────────────
+    - matchers:
+        - auto_remediate = "true"
+      receiver: 'camunda-webhook'
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: true           # ET notifier par email en parallele
+
+    # ─────────────────────────────────────────────────────────────
+    # 5. Tout le reste : critique -> email immediat
+    # ─────────────────────────────────────────────────────────────
+    - matchers:
+        - severity = "critical"
+      receiver: 'email-critique'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - matchers:
+        - severity = "info"
+      receiver: 'null'         # journalise seulement, pas de notification
+
+# ══════════════════════════════════════════════════════════════════
+#  INHIBITION — evite les tempetes d'alertes en cascade
+# ══════════════════════════════════════════════════════════════════
+# Sans cela, une VM qui tombe genere : 1 VMDown + 1 NodeNotReady +
+# 12 PodPending + 3 DeploymentUnavailable + 4 ServiceNoEndpoints = 21 alertes
+# et 21 workflows Camunda pour UNE seule cause racine.
+inhibit_rules:
+
+  # Une VM morte inhibe TOUT ce qui la concerne
+  - source_matchers: [helios_type = "VM_UNREACHABLE"]
+    target_matchers: [severity =~ "critical|warning"]
+    equal: ['instance']
+
+  # Un noeud NotReady inhibe les pods qu'il heberge
+  - source_matchers: [helios_type = "NODE_NOT_READY"]
+    target_matchers: [helios_type =~ "POD_PENDING|POD_FAILED|DEPLOYMENT_UNAVAILABLE|SERVICE_NO_ENDPOINTS"]
+    equal: ['node']
+
+  # kubelet mort inhibe containerd et les pods du meme hote
+  - source_matchers: [helios_type = "KUBELET_DOWN"]
+    target_matchers: [helios_type =~ "NODE_NOT_READY|SCRAPE_TARGET_DOWN"]
+    equal: ['vm']
+
+  # Perte de quorum inhibe TOUT le reste (rien n'a plus de sens)
+  - source_matchers: [helios_type = "ETCD_QUORUM_LOST"]
+    target_matchers: [severity =~ "critical|warning"]
+
+  # Une alerte critical inhibe la warning equivalente
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: ['helios_type', 'helios_target']
+
+  # Disque plein inhibe "disque se remplit"
+  - source_matchers: [helios_type = "HOST_DISK_FULL"]
+    target_matchers: [helios_type =~ "HOST_DISK_FILLING|HOST_DISK_TREND"]
+    equal: ['vm']
+
+# ══════════════════════════════════════════════════════════════════
+#  RECEIVERS
+# ══════════════════════════════════════════════════════════════════
+receivers:
+
+  # ─────────────────────────────────────────────────────────────
+  # CAMUNDA — le webhook qui declenche le workflow de self-healing
+  # ─────────────────────────────────────────────────────────────
+  # Cible : le bridge HELIOS sur .161 (voir camunda-direct/bridge/).
+  # Le bridge traduit le payload Alertmanager en message BPMN Zeebe
+  # (PublishMessage) avec correlationKey = groupKey.
+  #
+  # SECURITE : le bridge exige l'en-tete X-Helios-Token. Alertmanager
+  # ne sait pas ajouter d'en-tete arbitraire -> on passe par HTTP basic
+  # auth (supporte nativement) que le bridge valide.
+  - name: 'camunda-webhook'
+    webhook_configs:
+      - url: 'http://192.168.148.161:8099/alertmanager'
+        send_resolved: true          # notifie AUSSI quand l'incident se resout
+        max_alerts: 0                # 0 = pas de troncature
+        http_config:
+          basic_auth:
+            username: 'alertmanager'
+            password_file: '/etc/alertmanager/camunda-token'
+          follow_redirects: false
+          # Retry automatique par Alertmanager si le bridge est momentanement down.
+          # Alertmanager reessaie a chaque group_interval jusqu'a resolution.
+
+  # ─────────────────────────────────────────────────────────────
+  # CAMUNDA + EMAIL (route par defaut)
+  # ─────────────────────────────────────────────────────────────
+  - name: 'camunda-and-email'
+    webhook_configs:
+      - url: 'http://192.168.148.161:8099/alertmanager'
+        send_resolved: true
+        http_config:
+          basic_auth:
+            username: 'alertmanager'
+            password_file: '/etc/alertmanager/camunda-token'
+    email_configs:
+      - to: 'houssamsalhi972@gmail.com'
+        send_resolved: true
+        headers:
+          Subject: '[HELIOS] {{ .GroupLabels.helios_type }} — {{ .GroupLabels.helios_target }}'
+        html: '{{ template "helios.email.html" . }}'
+
+  # ─────────────────────────────────────────────────────────────
+  # ESCALADE HUMAINE — incidents que l'automatisation ne doit PAS traiter
+  # ─────────────────────────────────────────────────────────────
+  - name: 'escalation-humaine'
+    email_configs:
+      - to: 'houssamsalhi972@gmail.com'
+        send_resolved: true
+        headers:
+          Subject: '[HELIOS — INTERVENTION MANUELLE] {{ .GroupLabels.helios_type }}'
+        html: '{{ template "helios.email.html" . }}'
+
+  - name: 'email-critique'
+    email_configs:
+      - to: 'houssamsalhi972@gmail.com'
+        send_resolved: true
+        headers:
+          Subject: '[HELIOS CRITIQUE] {{ .GroupLabels.helios_type }} — {{ .GroupLabels.helios_target }}'
+        html: '{{ template "helios.email.html" . }}'
+
+  - name: 'null'

@@ -1,0 +1,56 @@
+# Rapport — HAProxy, TLS, API Kubernetes, DNS et Ingress (6 nov. 2026, 22:00-22:40)
+
+Mission §10. `[MACHINE] [MODE : RO]` partout : **aucune modification n'a été faite** sur HAProxy, le DNS, les certificats ni l'Ingress (les correctifs sont préparés, voir §6). Aucun VIP, aucun Keepalived/VRRP.
+
+## 1. Synthèse des contrôles
+
+| Contrôle | Résultat (mesuré) | Verdict |
+|---|---|---|
+| Configuration HAProxy `.160` = `.162` = dépôt canonique | trois fichiers identiques, `sha256` `b14b829aca6b…`, 128 lignes ; HAProxy 2.8.30 sur les deux ; uptime `.160` 8 h 35, `.162` 9 h 24 | **VALIDÉ** |
+| `verify none` dans la configuration chargée | **0** : le backend `k8s_masters` utilise `check check-ssl verify required ca-file /etc/haproxy/certs/helios-kubernetes-ca.crt verifyhost api.helios.orange.tn check-sni api.helios.orange.tn` ; `apps_https` est en TCP passthrough (le TLS est terminé par Traefik) | **VALIDÉ** |
+| CA de l'API | empreinte SHA-256 `43:13:35:20:27:99:2E:8D…` **identique** : kubeconfig, `.153:/etc/kubernetes/pki/ca.crt`, `.160` et `.162:/etc/haproxy/certs/helios-kubernetes-ca.crt` ; valide jusqu'au 27 mars 2036 | **VALIDÉ** |
+| Validation TLS réelle de l'API (hôte → `:6443`, SNI et vérification du nom `api.helios.orange.tn`, CA du cluster) | `.160`, `.162`, `.153`, `.155`, `.158` : `Verify return code: 0 (ok)` ×5 ; le certificat de l'apiserver contient `DNS:api.helios.orange.tn` (+ noms de nœuds, IP, services) ; émis par `CN=kubernetes` ; validité jusqu'au 2 nov. 2027 | **VALIDÉ** |
+| Certificat applicatif (Traefik, Secret `helios-tls`) | `CN=helios.orange.tn`, émetteur `HELIOS Internal CA`, valide du 30 juil. 2026 au **1er nov. 2028**, SAN `DNS:helios.orange.tn` + `IP:.153 .155 .158` ; **même empreinte** `82:0D:7D:FF…` servie par `.160:443`, `.162:443`, `.155:8443`, `.158:8443` et dans le Secret (partie publique) ; un handshake réussi prouve que le serveur détient la clé correspondante (la clé privée n'a pas été lue) ; la CA interne `HELIOS Internal CA` est installée dans `CurrentUser\Root` de l'hôte (jusqu'en 2036) | **VALIDÉ** (la CA du cluster ne valide pas ce certificat : normal, autre CA) |
+| Cohérence `.160` / `.162` | même configuration HAProxy, même version, même certificat servi, `dnsmasq` + `helios-dns-health` actifs sur les deux, réponses DNS identiques, aucune adresse 192.168.148.x supplémentaire (1 par VM : **pas de VIP**), `keepalived` inactif et binaire absent sur `.160`/`.162`, aucun HAProxy/nginx/Keepalived actif sur `.153 .155 .158 .161` | **VALIDÉ** |
+| Santé HAProxy pendant l'essai de `.155` | marque `node-155` DOWN en 4,8 s (checks `/ping` toutes les 2 s, `fall 2`), `k8s_masters/worker2` DOWN en 16 s ; remise en service à la reprise | **VALIDÉ** (voir `RAPPORT-DISPONIBILITE-78S.md` pour les défauts constatés au retour) |
+
+## 2. DNS (`helios.orange.tn`, `api.helios.orange.tn`)
+- Résolution des noms de l'hôte : serveurs DNS publics (8.8.8.8) **mais** une règle **NRPT** envoie le suffixe `.helios.orange.tn` aux serveurs du cluster `192.168.148.160` et `.162` (dnsmasq). `helios.orange.tn` (nom nu) vient du fichier hosts (deux lignes : `.160`, `.162`) ; `api.helios.orange.tn` **n'a aucune ligne hosts** : il dépend uniquement de la règle NRPT et des dnsmasq.
+- Les deux dnsmasq répondent identiquement : `helios.orange.tn → 192.168.148.162` et `api.helios.orange.tn → 192.168.148.162` (TTL 30 s) = le répartiteur actif choisi par `helios-dns-health` (conception « Option A » : une seule adresse, bascule côté client par DNS à santé contrôlée).
+- Cause connue des problèmes rapportés sur `api.helios.orange.tn` : (a) un navigateur dont le « DNS sécurisé » (DoH) est activé **contourne la règle NRPT** et interroge un résolveur public qui ne connaît pas le nom (Chrome ; documenté dans la mémoire du projet) ; (b) tant que les deux dnsmasq sont injoignables (les deux répartiteurs en panne), le nom ne se résout plus faute de ligne hosts ; (c) le cache DNS client conserve 30 s l'adresse du répartiteur tombé (coupure client de 13-31 s mesurée en HA-01). Aucune erreur DNS n'a été observée pendant les 24 h de supervision à ce stade (sonde `dns` du collecteur).
+- **Aucune modification du DNS public ni des enregistrements** n'a été faite.
+
+## 3. Ingress et chemin applicatif
+- **Ressource** : 1 Ingress `helios-ingress` (classe `nginx`, hôte `helios.orange.tn`, ports 80/443) dans `pfe`.
+- **Chemin réel de production** : client → HAProxy (`:443` TCP passthrough / `:80` HTTP) → **Traefik** (DaemonSet-like : 2 pods `hostNetwork` sur `.155` et `.158`, entrypoints `:8000`/`:8443`, `:8082` pour `/ping`) → Service frontend (nginx) → `backend-headless` (2 pods). Traefik v3 sert l'Ingress de classe `nginx` grâce à son fournisseur de compatibilité `kubernetesingressnginx` (options `proxyconnecttimeout=1`, `proxynextupstreamtries=4`, middleware `ha01-retry`).
+- **Écart de conformité à signaler** : les deux pods du contrôleur `ingress-nginx-controller` (ns `ingress-nginx`) tournent encore (`1/1`) **mais ne reçoivent aucun trafic de production**. La contrainte « Ingress NGINX pour les applications » est donc respectée au niveau des RESSOURCES (API Ingress `nginx`), pas au niveau du PROGRAMME qui les sert. Décision HA-01 antérieure (4 nov.), non modifiée ici ; la décommission du contrôleur inactif attend l'accord de l'utilisateur.
+- Commentaire obsolète dans `haproxy.cfg` (lignes 88-90 : « NodePorts du Service ingress-nginx-controller 31756 / 31411 ») : les serveurs réels sont Traefik `:8000`/`:8443`. À corriger lors de la prochaine édition (sans effet fonctionnel).
+
+## 4. Anomalies restantes (classées)
+| # | Anomalie | Gravité | Action |
+|---|---|---|---|
+| A1 | **Fenêtre de 404 d'environ 30 s au retour d'un nœud** : HAProxy remet Traefik en service sur `/ping` avant le chargement de ses routes (mesuré 18:28:18-48Z) | moyenne (50 % des requêtes pendant 30 s à chaque retour de nœud) | correctif **C2** préparé : `rise 20 fastinter 2s` sur `ingress_http`/`ingress_https` (voir `RAPPORT-DISPONIBILITE-78S.md`) — autorisation requise |
+| A2 | `helios-dns-health.py` (déployé sur `.160` et `.162`) sonde l'API `:6443` et les LB avec `ssl.CERT_NONE` | faible (sonde de santé interne au LAN, hors chemin des données) | remplacer par une vérification contre `helios-kubernetes-ca.crt` (présent sur les deux LB) pour `:6443` ; la sonde `:443` exigerait d'installer `HELIOS Internal CA` sur les LB. **Non appliqué** : une erreur de validation ferait croire que tous les répartiteurs sont morts et bascule le DNS à tort — canari et autorisation requis |
+| A3 | `/etc/haproxy/haproxy.cfg.origine` (sauvegarde de l'ancienne configuration) contient `verify none` sur `.160` et `.162` | informative (fichier non chargé) | à archiver hors serveur à l'occasion d'une maintenance ; aucune suppression faite |
+| A4 | Dépôt : `infra/haproxy-controlplane.cfg:23`, `infra/haproxy-controlplane-only.cfg:63` et `infra/10-local-apiserver-lb.sh:149` contiennent `verify none` | faible (anciennes configurations remplacées par `infra/ha01/haproxy/haproxy.cfg` ; aucun HAProxy actif sur les nœuds) | ne pas redéployer ; marquer « OBSOLÈTE » à la prochaine édition (non modifiés pour préserver les changements locaux) |
+| A5 | Autres `CERT_NONE` du dépôt : sondes HA-01 (`ha01_probe.py`, `ha01_load.py`, `p3_*`), `camunda-direct/detecteur/maj_cibles.py`, `collecteur_ml_host.py` (ML), `ai-service/…/helios_features.py` (IA) | faible ; les sondes mesurent la disponibilité, pas l'authenticité | `collecteur_ml_host.py` et `helios_features.py` disparaissent avec le nettoyage IA (§9) |
+| A6 | Page de statistiques HAProxy `:8404` en clair **sans authentification** sur `*:8404` des deux LB (`listen stats … stats enable`) | faible dans ce LAN isolé (VMnet8), mais elle expose la topologie et l'état des serveurs ; elle est utilisée par les outils de supervision de l'hôte | restreindre ou authentifier lors d'une édition de la configuration (les outils lisent `;csv` depuis l'hôte : prévoir `stats auth` ou une ACL source) — autorisation requise |
+| A7 | SAN du certificat applicatif : IP des nœuds `.153 .155 .158` mais **pas** `.160`/`.162` | informative (les clients utilisent le nom) | à ajouter au prochain renouvellement si des clients se connectent par IP |
+| A8 | Certificats feuilles kubeadm qui expirent le **30 mars 2027** (143 j) : `admin.conf`, `controller-manager.conf`, `scheduler.conf`, `super-admin.conf`, `apiserver-kubelet-client`, `apiserver-etcd-client`, `etcd-*`, `front-proxy-client` (l'`apiserver` lui-même : 2 nov. 2027) | à planifier | `kubeadm certs renew all` nœud par nœud avant mars 2027 ; **non fait** |
+| A9 | Pas de Keepalived/VRRP/VIP | — | conforme |
+
+## 5. Verdicts
+| Tâche | Verdict |
+|---|---|
+| TLS API/Ingress/CA, cohérence `.160`/`.162`, absence de VIP et de `verify none` dans la configuration chargée | **VALIDÉ** |
+| DNS `api.helios.orange.tn` | **VALIDÉ** pour l'état actuel (réponses identiques, TTL 30 s) ; causes des incidents passés qualifiées ci-dessus |
+| Fenêtre de 404 au retour d'un nœud (A1) | **BLOQUÉ / AUTORISATION REQUISE** (correctif préparé) |
+| Sonde DNS sans vérification TLS (A2), page de statistiques ouverte (A6), expiration 2027 (A8) | **BLOQUÉ / AUTORISATION REQUISE** (production) / planification |
+
+## 6. Correctif C2 prêt à appliquer (pour validation)
+`infra/ha01/haproxy/haproxy.cfg`, backends `ingress_http` et `ingress_https` : remplacer `default-server inter 2s fastinter 1s downinter 2s fall 2 rise 2 check port 8082 on-marked-down shutdown-sessions` par `default-server inter 2s fastinter 2s downinter 2s fall 2 rise 20 check port 8082 on-marked-down shutdown-sessions`. Procédure : sauvegarde de `/etc/haproxy/haproxy.cfg` sur chaque LB → `haproxy -c -f` sur le fichier candidat → déploiement sur le LB **non actif** (`.160`) → `systemctl reload haproxy` (graceful) → vérification des serveurs UP → **test de l'effet** : mettre `node-155` en maintenance puis `ready` via le socket d'administration du LB non actif et mesurer que le serveur ne redevient UP qu'après ≈ 38 s (un réglage qui n'agit pas, comme `serversTransport.*`, a déjà trompé ce projet) → même opération sur `.162` → retour arrière = remettre le fichier sauvegardé + `reload`.
+
+## 7. Mise à jour du 11 nov. 2026 (`[MODE : RO]` : lecture SSH, stats `:8404/;csv`)
+- **Configuration inchangée** : `.160` et `.162` ont toujours le même `sha256` `b14b829aca6b…` que le dépôt (`infra/ha01/haproxy/haproxy.cfg`) ; `haproxy -c` : **valide** ; service actif ; uptime 1 j 15 h (les deux VM ont été relancées ensemble le 9 nov. 10:36Z, arrêt provoqué par l'utilisateur). Aucun serveur non `UP` sur les deux pages de stats (≈ 14:52 locale). Toujours aucun VIP ni `verify none` dans la configuration chargée.
+- **Effet des événements du 7-11 nov.** : les séries d'échecs vues par les sondes (jusqu'à 939 s sur `lb162_*`) viennent de l'**arrêt de `.162`** (cooldown de 30 min du backend, cf. `RAPPORT-DISPONIBILITE-78S.md` §6) et des **gels d'hôte**, pas d'un défaut de configuration HAProxy ; la fenêtre de 404 au retour d'un nœud (A1) reste d'actualité (correctif C2 préparé, **autorisation requise**).
+- **Anomalies A1-A9 : statut inchangé** (A1, A2, A6, A8 en attente d'autorisation ; A3-A5, A7 informatives ; A9 conforme).

@@ -1,0 +1,54 @@
+[Unit]
+# HELIOS - garde INDEPENDANTE du remplissage disque de laboratoire (.158). HORS PRODUCTION.
+# Filet de securite du service helios-diskfill.service : processus distinct, cgroup distinct, demarre AVANT lui (Requires=/After= dans
+# l'unite principale) et verifie par lui avant la premiere allocation (sinon rien n'est alloue).
+#
+# Il bat toutes les 2 s (battement dans /run/helios-diskfill), et libere par NOMS EXACTS les fichiers du lancement en cours si l'occupation
+# de / atteint 83,5 % (urgence + 0,5 point, au moins 1,5 point sous le seuil du kubelet) ou si l'echeance du lancement est atteinte.
+# Il n'adopte QUE l'etat d'un lancement cree APRES son propre demarrage : jamais celui d'un lancement precedent (aucun nettoyage automatique
+# des orphelins). Sans lancement annonce, il sort seul au bout de 120 s.
+#
+# Il n est volontairement PAS lie a multi-user.target : il ne doit jamais demarrer au boot.
+Description=HELIOS - garde independante du remplissage disque de laboratoire (HORS PRODUCTION)
+Documentation=file:/opt/helios-diskfill/diskfill.py
+AssertPathExists=/opt/helios-diskfill/diskfill.py
+
+[Service]
+Type=simple
+Restart=no
+RemainAfterExit=no
+
+# Meme contrat du Bridge : le repertoire doit rester directory|root|700 (StateDirectoryMode=0700 explicite, comme l'unite principale).
+# Les DEUX repertoires d'etat sont declares ici comme dans l'unite principale : la garde demarre AVANT le controle de l'unite principale
+# (Requires=/After=), donc les repertoires existent (0700) quand celui-ci les relit, meme au tout premier demarrage.
+StateDirectory=helios-diskfill helios-diskfill-etat
+StateDirectoryMode=0700
+RuntimeDirectory=helios-diskfill
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+ExecStart=/usr/bin/python3 -I -B -u /opt/helios-diskfill/diskfill.py garde
+
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=15
+
+# Echeance du lancement (1020 s) + 60 s : la garde ne survit jamais longtemps a un lancement.
+RuntimeMaxSec=1080
+
+SyslogIdentifier=helios-diskguard
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryMax=32M
+TasksMax=16
+
+# PAS de section [Install] : la garde ne doit jamais etre `enabled`.

@@ -1,0 +1,68 @@
+# =============================================================================
+# HELIOS — Configuration kubeadm HA (3 control-plane + worker, stacked etcd)
+# =============================================================================
+# Remplace l'ancien kubeadm-min.yaml (1 master SPOF).
+# controlPlaneEndpoint = HAProxy EXTERNE (.160:6443), PAS de VIP dans le cluster.
+#
+# Utilisation :
+#   1. Mettre a jour le ConfigMap existant :
+#      kubectl -n kube-system get cm kubeadm-config -o yaml > kubeadm-config-backup.yaml
+#      kubectl -n kube-system edit cm kubeadm-config
+#      # Remplacer ClusterConfiguration par le contenu ci-dessous
+#   2. Puis utiliser les scripts de migration (01-*, 02-*, 03-*)
+# =============================================================================
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v1.29.15
+# HAProxy EXTERNE comme point d'entree unique de l'API.
+# Tous les kubelets, kubectl et composants internes utilisent cette adresse.
+# HAProxy (.160) repartit vers les 3 API servers (.153, .158, .155).
+controlPlaneEndpoint: "192.168.148.160:6443"
+networking:
+  podSubnet: "192.168.0.0/16"       # Calico
+  serviceSubnet: "10.96.0.0/12"
+apiServer:
+  certSANs:
+    # Les 3 noeuds control-plane
+    - "192.168.148.153"
+    - "192.168.148.158"
+    - "192.168.148.155"
+    # HAProxy (controlPlaneEndpoint)
+    - "192.168.148.160"
+    # VIP HAProxy (keepalived entre .160 et .162)
+    - "192.168.148.150"
+    # Noms DNS
+    - "k8s-master"
+    - "k8s-worker1"
+    - "k8s-worker2"
+    - "helios.orange.tn"
+    # Localhost (probes internes)
+    - "127.0.0.1"
+    - "localhost"
+  extraArgs:
+    # Audit logging pour tracabilite des actions API
+    audit-log-path: "/var/log/kubernetes/audit/audit.log"
+    audit-log-maxage: "7"
+    audit-log-maxbackup: "3"
+    audit-log-maxsize: "100"
+    audit-policy-file: "/etc/kubernetes/audit-policy.yaml"
+    # Chiffrement etcd au repos (deja en place)
+    encryption-provider-config: "/etc/kubernetes/pki/encryption-config.yaml"
+  extraVolumes:
+    - name: audit-log
+      hostPath: /var/log/kubernetes/audit
+      mountPath: /var/log/kubernetes/audit
+      pathType: DirectoryOrCreate
+    - name: audit-policy
+      hostPath: /etc/kubernetes/audit-policy.yaml
+      mountPath: /etc/kubernetes/audit-policy.yaml
+      pathType: File
+      readOnly: true
+etcd:
+  local:
+    extraArgs:
+      # Performance etcd pour cluster contraint en RAM
+      quota-backend-bytes: "2147483648"      # 2 Go (defaut 2 Go, explicite)
+      auto-compaction-retention: "1"         # compaction horaire
+      auto-compaction-mode: "periodic"
+      snapshot-count: "5000"                 # snapshot plus frequent (defaut 10000)

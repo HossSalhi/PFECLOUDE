@@ -1,0 +1,8 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.165-disk-e2e (établie le 2026-11-17 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:/Users/houss/helios-minimal-build-0.2.165-disk-e2e/target/classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+# RÉTROACTIF : cette image est EN PRODUCTION depuis le 14 nov. 2026 (13:28, déploiement DISK-E2E-158) ; son empreinte n'avait pas été
+# enregistrée (le fichier IMAGE-0.2.164-vm3auto.sha256 était resté la seule référence de policy_reconcile.py). Contrôle du 17 nov. 2026 22:4x
+# (lecture seule) : empreinte du build (copie minimale du 14 nov., 305 fichiers) = empreinte du code EN MARCHE (pod backend) : identiques.
+# C'est la BASE du correctif `.153` (infra/helios-sot/patches/master153-sur-image-0.2.165-disk-e2e.patch).
+contenu-0.2.165-disk-e2e = 8db54f0b317f3e2928f6111c71fbe0500ecaee343cc5471f9114fd3b02a8ffc3   # 305 fichiers (classes + ressources)

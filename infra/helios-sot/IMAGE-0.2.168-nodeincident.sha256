@@ -1,0 +1,4 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.168-nodeincident (établie le 2026-11-21 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:\Users\houss\helios-minimal-build-0.2.168-nodeincident\target\classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+contenu-0.2.168-nodeincident = 3f5e075b57ba66a3db6517461f4e93f1f13a86749e234399eb359965485d9597   # 305 fichiers (classes + ressources)

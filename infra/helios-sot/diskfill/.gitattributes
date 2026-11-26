@@ -1,0 +1,3 @@
+# Fichiers destines a Linux (.158) : fins de ligne LF imposees. Sans ce fichier, core.autocrlf=true (poste Windows) les convertirait en CRLF
+# et fausserait les empreintes SHA-256 verifiees par le pre-vol et par le noeud.
+* text eol=lf

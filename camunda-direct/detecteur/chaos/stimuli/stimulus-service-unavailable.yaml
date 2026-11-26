@@ -1,0 +1,17 @@
+# Service dont le selecteur ne correspond a AUCUN pod : 0 endpoint.
+# Cas particulier : le stimulus porte sur le Service / les Endpoints, pas sur un Pod.
+# Aucun Deployment n'est cree - c'est precisement ce qui produit 0 endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: helios-cible
+  namespace: {{NAMESPACE}}
+  labels:
+    helios/stimulus: service-unavailable
+spec:
+  selector:
+    app: helios-cible-inexistant
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080

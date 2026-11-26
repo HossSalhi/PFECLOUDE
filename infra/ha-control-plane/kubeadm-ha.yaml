@@ -1,0 +1,61 @@
+# =============================================================================
+# kubeadm HA Configuration — 3 Control Plane + Worker nodes
+# =============================================================================
+# Remplace kubeadm-min.yaml. Le controlPlaneEndpoint pointe vers la VIP
+# Keepalived (.150) qui flotte entre les 3 nœuds — PAS vers un seul master.
+# La VIP doit être dans les certSANs de chaque apiserver.
+#
+# IMPORTANT : ce fichier sert de REFERENCE. La migration se fait via les
+# scripts setup-ha-*.sh, PAS en ré-initialisant le cluster.
+# =============================================================================
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v1.29.15
+# VIP Keepalived — l'adresse unique par laquelle TOUT le monde contacte l'API
+controlPlaneEndpoint: "192.168.148.150:6443"
+networking:
+  podSubnet: 192.168.0.0/16
+  serviceSubnet: 10.96.0.0/12
+apiServer:
+  certSANs:
+    - "192.168.148.150"    # VIP Keepalived
+    - "192.168.148.153"    # master
+    - "192.168.148.158"    # worker1
+    - "192.168.148.155"    # worker2
+    - "192.168.148.160"    # HAProxy monitoring
+    - "k8s-master"
+    - "k8s-worker1"
+    - "k8s-worker2"
+    - "localhost"
+    - "127.0.0.1"
+  extraArgs:
+    # Audit logging — trace toutes les actions sensibles
+    audit-policy-file: "/etc/kubernetes/audit/audit-policy.yaml"
+    audit-log-path: "/var/log/kubernetes/audit/audit.log"
+    audit-log-maxage: "7"
+    audit-log-maxbackup: "3"
+    audit-log-maxsize: "100"
+    # Chiffrement etcd au repos (déjà en place)
+    encryption-provider-config: "/etc/kubernetes/pki/encryption-config.yaml"
+  extraVolumes:
+    - name: audit-policy
+      hostPath: /etc/kubernetes/audit
+      mountPath: /etc/kubernetes/audit
+      readOnly: true
+    - name: audit-logs
+      hostPath: /var/log/kubernetes/audit
+      mountPath: /var/log/kubernetes/audit
+etcd:
+  local:
+    extraArgs:
+      # Performance etcd pour cluster contraint en RAM
+      quota-backend-bytes: "2147483648"          # 2 Go (défaut 2 Go, explicite)
+      auto-compaction-mode: periodic
+      auto-compaction-retention: "1h"            # compacte toutes les heures
+      snapshot-count: "5000"                     # snapshot tous les 5000 tx (réduit WAL)
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 192.168.148.153
+  bindPort: 6443

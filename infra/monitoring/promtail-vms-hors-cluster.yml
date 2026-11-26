@@ -1,0 +1,171 @@
+# =============================================================================
+# HELIOS — Promtail pour les VMs HORS cluster (.160 .161 .162)
+# =============================================================================
+# Le DaemonSet Promtail couvre les logs des PODS des 3 noeuds K8s.
+# Ce fichier couvre les logs SYSTEME des VMs qui ne sont pas dans le cluster,
+# ET les logs systeme des 3 noeuds K8s (journald de l'hote, pas les conteneurs).
+#
+# INSTALLATION sur .160, .161, .162 (et aussi .153 .158 .155 pour le journald hote) :
+#   curl -sLO https://github.com/grafana/loki/releases/download/v3.0.0/promtail-linux-amd64.zip
+#   unzip promtail-linux-amd64.zip && mv promtail-linux-amd64 /usr/local/bin/promtail
+#   chmod +x /usr/local/bin/promtail
+#   cp promtail-vms-hors-cluster.yml /etc/promtail/config.yml
+#   # ADAPTER la valeur de `vm:` dans external_labels selon la machine
+#   systemctl enable --now promtail
+#
+# COUVERTURE :
+#   journald        -> tous les services systemd (kubelet, containerd, haproxy,
+#                      sshd, prometheus, loki, grafana, docker, helios-ai...)
+#   /var/log/syslog -> messages noyau et systeme
+#   /var/log/auth.log -> authentification (SSH, sudo) — securite
+#   kern.log        -> erreurs noyau, OOM-killer, erreurs filesystem
+#   haproxy.log     -> etat des backends, bascules
+# =============================================================================
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://192.168.148.160:3100/loki/api/v1/push
+    batchwait: 1s
+    batchsize: 1048576
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    # ⚠️ ADAPTER `vm` sur CHAQUE machine :
+    #    .153 -> k8s-master    .158 -> k8s-worker1   .155 -> k8s-worker2
+    #    .160 -> monitoring    .161 -> aicamunda     .162 -> lb2
+    external_labels:
+      vm: CHANGER_MOI
+
+scrape_configs:
+
+  # ══════════════════════════════════════════════════════════════
+  #  1. JOURNALD — tous les services systemd
+  # ══════════════════════════════════════════════════════════════
+  # Source unique la plus riche : couvre kubelet, containerd, haproxy,
+  # keepalived, prometheus, loki, grafana, sshd, cron, systemd lui-meme.
+  - job_name: journal
+    journal:
+      max_age: 12h
+      path: /var/log/journal
+      labels:
+        job: systemd-journal
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: unit
+      - source_labels: ['__journal__hostname']
+        target_label: hostname
+      - source_labels: ['__journal_priority_keyword']
+        target_label: level
+      - source_labels: ['__journal_syslog_identifier']
+        target_label: syslog_identifier
+    pipeline_stages:
+      # Marquer les lignes d'erreur pour les requetes LogQL du detecteur
+      - match:
+          selector: '{job="systemd-journal"}'
+          stages:
+            - regex:
+                expression: '(?i)(?P<severite>error|fatal|panic|failed|refused|timeout|OOM)'
+            - labels:
+                severite:
+
+  # ══════════════════════════════════════════════════════════════
+  #  2. SYSLOG — messages systeme generaux
+  # ══════════════════════════════════════════════════════════════
+  - job_name: syslog
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          __path__: /var/log/syslog
+
+  # ══════════════════════════════════════════════════════════════
+  #  3. KERNEL — OOM-killer, erreurs filesystem, panics
+  # ══════════════════════════════════════════════════════════════
+  # Le LLM a besoin de ces lignes pour diagnostiquer un OOMKilled cote hote
+  # ou une corruption de filesystem.
+  - job_name: kernel
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: kernel
+          __path__: /var/log/kern.log
+    pipeline_stages:
+      - match:
+          selector: '{job="kernel"}'
+          stages:
+            - regex:
+                expression: '(?P<evenement>Out of memory|oom-kill|EXT4-fs error|I/O error|segfault|Call Trace)'
+            - labels:
+                evenement:
+
+  # ══════════════════════════════════════════════════════════════
+  #  4. AUTH — securite (SSH, sudo, echecs d'authentification)
+  # ══════════════════════════════════════════════════════════════
+  # Complementaire a Falco : Falco voit l'interieur des conteneurs,
+  # auth.log voit les acces a l'HOTE.
+  - job_name: auth
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: auth
+          __path__: /var/log/auth.log
+    pipeline_stages:
+      - match:
+          selector: '{job="auth"}'
+          stages:
+            - regex:
+                expression: '(?P<evenement>Failed password|Invalid user|authentication failure|sudo:.*COMMAND)'
+            - labels:
+                evenement:
+
+  # ══════════════════════════════════════════════════════════════
+  #  5. HAPROXY — bascules de backend (.160 et .162 uniquement)
+  # ══════════════════════════════════════════════════════════════
+  - job_name: haproxy
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: haproxy
+          __path__: /var/log/haproxy.log
+    pipeline_stages:
+      - match:
+          selector: '{job="haproxy"}'
+          stages:
+            - regex:
+                expression: 'Server (?P<backend>[\w-]+)/(?P<serveur>[\w.-]+) is (?P<etat>DOWN|UP)'
+            - labels:
+                backend:
+                serveur:
+                etat:
+
+  # ══════════════════════════════════════════════════════════════
+  #  6. CONTENEURS DOCKER (.161 : Camunda, Ollama, ChromaDB)
+  # ══════════════════════════════════════════════════════════════
+  # Sur .161 Camunda et Ollama tournent en Docker, pas dans K8s.
+  - job_name: docker
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            timestamp: time
+      - labels:
+          stream:
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - output:
+          source: output

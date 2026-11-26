@@ -1,0 +1,877 @@
+# =============================================================================
+# HELIOS — Regles d'alerte : infrastructure (6 VMs) + Kubernetes + applications
+# =============================================================================
+# A DEPLOYER : /etc/prometheus/rules/rules-infrastructure.yml sur .160
+# Recharger  : curl -X POST http://localhost:9090/-/reload
+#
+# CONVENTION DE LABELS — chaque alerte porte :
+#   severity      : critical | warning | info      -> route Alertmanager
+#   helios_type   : le TYPE d'incident normalise   -> consomme par le ML/Camunda
+#   helios_target : ns/objet ou VM concernee       -> cible de la remediation
+#   auto_remediate: "true" si Camunda peut agir    -> garde-fou explicite
+#
+# ANTI-FAUX-POSITIFS :
+#   - `for:` sur TOUTES les regles (jamais d'alerte instantanee)
+#   - seuils calibres pour rendre ZERO sur un cluster sain
+#   - inhibition en cascade geree dans alertmanager.yml (node down inhibe les pods)
+# =============================================================================
+
+groups:
+
+# ═══════════════════════════════════════════════════════════════════
+#  A. DISPONIBILITE DES VMs  (niveau le plus haut — inhibe le reste)
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.vm.availability
+  interval: 15s
+  rules:
+
+  - alert: VMDown
+    expr: probe_success{job="blackbox-icmp"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: VM_UNREACHABLE
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "false"      # une VM morte se redemarre a la main / vmrun
+    annotations:
+      summary: "VM {{ $labels.instance }} injoignable (ICMP)"
+      description: "Aucune reponse ICMP depuis 1 min. La VM est eteinte, en panne, ou isolee du reseau."
+      runbook: "1) VMware: verifier l'etat  2) vmrun start  3) verifier le reseau NAT"
+
+  - alert: NodeExporterDown
+    expr: up{job="node"} == 0 and on(instance) probe_success{job="blackbox-icmp"} == 1
+    for: 3m
+    labels:
+      severity: warning
+      helios_type: EXPORTER_DOWN
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "node_exporter mort sur {{ $labels.vm }} (mais la VM repond au ping)"
+      description: "La VM est vivante mais n'expose plus ses metriques -> angle mort du monitoring."
+      runbook: "systemctl restart prometheus-node-exporter"
+
+# ═══════════════════════════════════════════════════════════════════
+#  B. RESSOURCES HOST  (les 6 VMs)
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.host.resources
+  interval: 30s
+  rules:
+
+  - alert: HostCPUSaturation
+    expr: 100 - (avg by(vm,instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: HOST_CPU_SATURATION
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "CPU > 90% sur {{ $labels.vm }} depuis 10 min"
+      description: "Charge CPU soutenue : {{ printf \"%.1f\" $value }}%. Risque de throttling des pods."
+
+  - alert: HostMemoryExhaustion
+    expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 92
+    for: 5m
+    labels:
+      severity: critical
+      helios_type: HOST_RAM_EXHAUSTION
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "RAM > 92% sur {{ $labels.vm }}"
+      description: "RAM disponible critique. L'OOM-killer va tuer des processus (kubelet inclus)."
+      runbook: "Identifier le consommateur, evincer les pods basse priorite"
+
+  - alert: HostDiskFillingUp
+    expr: |
+      (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay"}
+         / node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"}) * 100 > 85
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: HOST_DISK_FILLING
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Disque {{ $labels.mountpoint }} a {{ printf \"%.0f\" $value }}% sur {{ $labels.vm }}"
+      description: "A 85% le kubelet declenche l'eviction par imagefs/nodefs pressure."
+      runbook: "crictl rmi --prune ; journalctl --vacuum-size=200M ; nettoyer /var/log"
+
+  - alert: HostDiskCritical
+    expr: |
+      (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay"}
+         / node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"}) * 100 > 93
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: HOST_DISK_FULL
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Disque {{ $labels.mountpoint }} SATURE ({{ printf \"%.0f\" $value }}%) sur {{ $labels.vm }}"
+      description: "etcd passe en lecture seule au-dela de 95%. Action immediate requise."
+
+  # Prediction : le disque sera plein dans < 4h au rythme actuel
+  - alert: HostDiskWillFillIn4h
+    expr: |
+      predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay"}[6h], 4*3600) < 0
+      and node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay"} > 0
+    for: 30m
+    labels:
+      severity: warning
+      helios_type: HOST_DISK_TREND
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.mountpoint }} sera plein dans <4h sur {{ $labels.vm }}"
+      description: "Alerte PREDICTIVE (predict_linear sur 6h). Agir avant la saturation."
+
+  - alert: HostHighDiskIO
+    expr: rate(node_disk_io_time_seconds_total[5m]) > 0.90
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: HOST_DISK_IO
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Disque {{ $labels.device }} sature en I/O sur {{ $labels.vm }}"
+      description: "Le disque est occupe >90% du temps. Latence etcd et applicative degradee."
+
+  - alert: HostLoadHigh
+    expr: node_load15 / count by(vm,instance) (node_cpu_seconds_total{mode="idle"}) > 2.5
+    for: 15m
+    labels:
+      severity: warning
+      helios_type: HOST_LOAD_HIGH
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Load average 15min = {{ printf \"%.1f\" $value }}x le nb de vCPU sur {{ $labels.vm }}"
+
+  - alert: HostNetworkErrors
+    expr: rate(node_network_transmit_errs_total[5m]) + rate(node_network_receive_errs_total[5m]) > 5
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: HOST_NETWORK_ERRORS
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Erreurs reseau sur {{ $labels.device }} de {{ $labels.vm }}"
+
+  - alert: HostClockSkew
+    expr: abs(node_timex_offset_seconds) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: HOST_CLOCK_SKEW
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Horloge desynchronisee de {{ printf \"%.2f\" $value }}s sur {{ $labels.vm }}"
+      description: "Un decalage >1s casse les certificats TLS et le lease etcd."
+      runbook: "systemctl restart systemd-timesyncd  ou  chronyc makestep"
+
+  - alert: HostRebooted
+    expr: node_time_seconds - node_boot_time_seconds < 300
+    for: 0m
+    labels:
+      severity: info
+      helios_type: HOST_REBOOTED
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "{{ $labels.vm }} a redemarre il y a moins de 5 min"
+
+# ═══════════════════════════════════════════════════════════════════
+#  C. SERVICES SYSTEME  (kubelet, containerd, haproxy, camunda...)
+# ═══════════════════════════════════════════════════════════════════
+# PREREQUIS : node_exporter lance avec --collector.systemd
+- name: helios.host.services
+  interval: 30s
+  rules:
+
+  - alert: KubeletDown
+    expr: node_systemd_unit_state{name="kubelet.service",state="active"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: KUBELET_DOWN
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "kubelet arrete sur {{ $labels.vm }}"
+      description: "Le noeud va passer NotReady en ~40s et ses pods seront evinces."
+      runbook: "systemctl restart kubelet ; journalctl -u kubelet -n 50"
+
+  - alert: ContainerRuntimeDown
+    expr: node_systemd_unit_state{name="containerd.service",state="active"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: CONTAINER_RUNTIME_DOWN
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "containerd arrete sur {{ $labels.vm }}"
+      description: "Aucun conteneur ne peut demarrer ni etre gere sur ce noeud."
+      runbook: "systemctl restart containerd && systemctl restart kubelet"
+
+  - alert: SystemdUnitFailed
+    expr: node_systemd_unit_state{state="failed"} == 1
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: SYSTEMD_UNIT_FAILED
+      helios_target: "{{ $labels.vm }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Service {{ $labels.name }} en echec sur {{ $labels.vm }}"
+      runbook: "systemctl status {{ $labels.name }} ; systemctl restart {{ $labels.name }}"
+
+# ═══════════════════════════════════════════════════════════════════
+#  D. CONTROL PLANE KUBERNETES  (le coeur de la HA)
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.k8s.controlplane
+  interval: 15s
+  rules:
+
+  # ═══════════════════════════════════════════════════════════════
+  #  etcd — QUORUM : les alertes les plus critiques du cluster
+  # ═══════════════════════════════════════════════════════════════
+  # CLUSTER A 5 MEMBRES : .153 .155 .158 (noeuds K8s) + .160 .162 (temoins).
+  # quorum = floor(5/2)+1 = 3  ->  tolere la perte de 2 machines.
+  #
+  # ⚠️ Ces seuils DEPENDENT du nombre de membres. Si le cluster etcd est
+  # redimensionne, RECALCULER : 3 membres -> quorum 2 ; 5 -> 3 ; 7 -> 4.
+
+  - alert: EtcdMemberDown
+    expr: count(etcd_server_has_leader == 1) == 4
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: ETCD_MEMBER_DOWN
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "etcd 4/5 membres — un membre est absent"
+      description: "Quorum (3) confortablement atteint. Tolere encore 1 panne. Restaurer le membre manquant."
+
+  - alert: EtcdQuorumAtRisk
+    expr: count(etcd_server_has_leader == 1) == 3
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: ETCD_QUORUM_AT_RISK
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "etcd 3/5 membres — quorum tout juste atteint, ZERO marge"
+      description: >
+        Le quorum (3 sur 5) est au minimum. La perte d'un seul membre de plus
+        GELE le cluster. Le cluster reste pleinement fonctionnel pour l'instant.
+      runbook: "Restaurer d'urgence les membres manquants. NE PAS redemarrer les survivants."
+
+  - alert: EtcdQuorumLost
+    expr: count(etcd_server_has_leader == 1) < 3
+    for: 30s
+    labels:
+      severity: critical
+      helios_type: ETCD_QUORUM_LOST
+      helios_target: cluster
+      auto_remediate: "false"     # JAMAIS d'automatisation sur une perte de quorum
+    annotations:
+      summary: "QUORUM ETCD PERDU — moins de 3 membres sur 5"
+      description: >
+        L'API Kubernetes refuse toute ecriture. Les pods deja lances continuent
+        de tourner (kubelet + containerd autonomes). Le helios-quorum-guard peut
+        reconstituer automatiquement APRES validation de ses 5 garde-fous (90s).
+      runbook: "docs/RUNBOOK-ETCD-QUORUM.md — surveiller /var/log/helios-quorum-guard.log"
+
+  # Le nombre de membres a-t-il derive de la cible (5) ?
+  - alert: EtcdMemberCountUnexpected
+    expr: count(etcd_server_has_leader) != 5
+    for: 15m
+    labels:
+      severity: warning
+      helios_type: ETCD_TOPOLOGY_CHANGED
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Cluster etcd a {{ $value }} membres (attendu : 5)"
+      description: >
+        La topologie etcd a change. Si c'est volontaire, RECALCULER les seuils
+        de quorum dans ce fichier. Un nombre PAIR est toujours a eviter.
+
+  - alert: EtcdNoLeader
+    expr: etcd_server_has_leader == 0
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: ETCD_NO_LEADER
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Membre etcd {{ $labels.instance }} sans leader"
+
+  - alert: EtcdHighFsyncLatency
+    expr: histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: ETCD_SLOW_DISK
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "etcd fsync p99 = {{ printf \"%.2f\" $value }}s sur {{ $labels.instance }}"
+      description: "Disque trop lent pour etcd (seuil sain <25ms). Risque de perte de leader."
+
+  - alert: EtcdFrequentLeaderElections
+    expr: increase(etcd_server_leader_changes_seen_total[15m]) > 3
+    for: 0m
+    labels:
+      severity: warning
+      helios_type: ETCD_UNSTABLE
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "{{ $value }} changements de leader etcd en 15 min"
+      description: "Instabilite reseau ou disque. Le cluster est fragile."
+
+  - alert: EtcdDatabaseSizeHigh
+    expr: etcd_mvcc_db_total_size_in_bytes / etcd_server_quota_backend_bytes > 0.80
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: ETCD_DB_SIZE
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Base etcd a {{ printf \"%.0f\" $value }}% du quota"
+      runbook: "etcdctl compact + etcdctl defrag"
+
+  # ─── kube-apiserver ───
+  - alert: APIServerDown
+    expr: up{job="kube-apiserver"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: APISERVER_DOWN
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "kube-apiserver injoignable sur {{ $labels.instance }}"
+      description: "Un des 3 API servers est mort. Le LB local des autres noeuds le retire du pool."
+
+  - alert: APIServerAllDown
+    expr: count(up{job="kube-apiserver"} == 1) == 0
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: APISERVER_ALL_DOWN
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "TOUS les API servers sont morts — cluster inaccessible"
+
+  - alert: APIServerHighLatency
+    expr: |
+      histogram_quantile(0.99,
+        sum by(le,verb) (rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH|CONNECT"}[5m]))
+      ) > 4
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: APISERVER_SLOW
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Latence API p99 = {{ printf \"%.1f\" $value }}s (verb {{ $labels.verb }})"
+
+  - alert: APIServerHighErrorRate
+    expr: |
+      sum(rate(apiserver_request_total{code=~"5.."}[5m]))
+      / sum(rate(apiserver_request_total[5m])) > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: APISERVER_ERRORS
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Plus de 5% de 5xx sur l'API Kubernetes"
+
+  # ─── scheduler / controller-manager ───
+  - alert: SchedulerDown
+    expr: absent(up{job="kube-scheduler"} == 1)
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: SCHEDULER_DOWN
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Aucun kube-scheduler actif"
+      description: "Aucun nouveau pod ne peut etre place. Le self-healing K8s est mort."
+
+  - alert: ControllerManagerDown
+    expr: absent(up{job="kube-controller-manager"} == 1)
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: CONTROLLER_MANAGER_DOWN
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Aucun kube-controller-manager actif"
+      description: "Plus de reconciliation : replicas, endpoints, noeuds ne sont plus geres."
+
+# ═══════════════════════════════════════════════════════════════════
+#  E. NOEUDS KUBERNETES
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.k8s.nodes
+  interval: 15s
+  rules:
+
+  - alert: NodeNotReady
+    expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: NODE_NOT_READY
+      helios_target: "{{ $labels.node }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Noeud {{ $labels.node }} NotReady depuis 3 min"
+      description: "Les pods seront evinces apres le tolerationSeconds (60s configure)."
+      runbook: "Verifier kubelet, containerd, reseau, disque du noeud"
+
+  - alert: NodeUnschedulable
+    expr: kube_node_spec_unschedulable == 1
+    for: 15m
+    labels:
+      severity: warning
+      helios_type: NODE_CORDONED
+      helios_target: "{{ $labels.node }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Noeud {{ $labels.node }} cordonne depuis 15 min"
+      description: "Cordon oublie apres maintenance ? kubectl uncordon {{ $labels.node }}"
+
+  - alert: NodeMemoryPressure
+    expr: kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+    for: 5m
+    labels:
+      severity: critical
+      helios_type: NODE_MEMORY_PRESSURE
+      helios_target: "{{ $labels.node }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "MemoryPressure sur {{ $labels.node }} — eviction en cours"
+
+  - alert: NodeDiskPressure
+    expr: kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+    for: 5m
+    labels:
+      severity: critical
+      helios_type: NODE_DISK_PRESSURE
+      helios_target: "{{ $labels.node }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "DiskPressure sur {{ $labels.node }} — eviction + refus de nouveaux pods"
+
+  # HA : verifier qu'il reste bien 3 noeuds control-plane
+  - alert: ControlPlaneNodeCountLow
+    expr: count(kube_node_role{role="control-plane"}) < 3
+    for: 10m
+    labels:
+      severity: critical
+      helios_type: HA_DEGRADED
+      helios_target: cluster
+      auto_remediate: "false"
+    annotations:
+      summary: "Seulement {{ $value }} noeud(s) control-plane (attendu 3)"
+      description: "La tolerance aux pannes du cluster est reduite."
+
+# ═══════════════════════════════════════════════════════════════════
+#  F. PODS & WORKLOADS
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.k8s.workloads
+  interval: 30s
+  rules:
+
+  - alert: PodCrashLoopBackOff
+    expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+    for: 5m
+    labels:
+      severity: critical
+      helios_type: POD_CRASHLOOP
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} en CrashLoopBackOff"
+      description: "Le conteneur {{ $labels.container }} redemarre en boucle."
+
+  - alert: PodOOMKilled
+    expr: increase(kube_pod_container_status_restarts_total[10m]) > 0
+      and on(namespace,pod,container) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: POD_OOMKILLED
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} tue par OOM"
+      description: "Le conteneur a depasse sa limite memoire. Augmenter limits.memory ou corriger la fuite."
+
+  - alert: PodPending
+    expr: kube_pod_status_phase{phase="Pending"} == 1
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: POD_PENDING
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} Pending depuis 10 min"
+      description: "Cause probable : ressources insuffisantes, affinite impossible, PVC non lie, quota atteint."
+
+  - alert: PodImagePullBackOff
+    expr: kube_pod_container_status_waiting_reason{reason=~"ImagePullBackOff|ErrImagePull"} == 1
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: POD_IMAGE_PULL_ERROR
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Image introuvable pour {{ $labels.namespace }}/{{ $labels.pod }}"
+      description: "Registry injoignable, tag inexistant, ou image absente du noeud (air-gap)."
+
+  - alert: PodFailed
+    expr: kube_pod_status_phase{phase="Failed"} == 1
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: POD_FAILED
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} en phase Failed"
+
+  - alert: PodStuckTerminating
+    expr: kube_pod_deletion_timestamp != 0
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: POD_STUCK_TERMINATING
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.pod }} bloque en Terminating"
+      description: "Finalizer bloquant ou volume non demonte."
+
+  - alert: PodHighRestartRate
+    expr: increase(kube_pod_container_status_restarts_total[1h]) > 5
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: POD_RESTART_STORM
+      helios_target: "{{ $labels.namespace }}/{{ $labels.pod }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $value }} redemarrages en 1h pour {{ $labels.namespace }}/{{ $labels.pod }}"
+
+  - alert: DeploymentReplicasMismatch
+    expr: |
+      kube_deployment_status_replicas_available
+        != kube_deployment_spec_replicas
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: DEPLOYMENT_UNAVAILABLE
+      helios_target: "{{ $labels.namespace }}/{{ $labels.deployment }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.deployment }} : replicas incomplets"
+      description: "Disponibles != desires depuis 10 min (rollout bloque ou pods en echec)."
+
+  - alert: DeploymentNoReplicas
+    expr: kube_deployment_status_replicas_available == 0 and kube_deployment_spec_replicas > 0
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: DEPLOYMENT_DOWN
+      helios_target: "{{ $labels.namespace }}/{{ $labels.deployment }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.deployment }} : AUCUN replica disponible"
+
+  - alert: StatefulSetReplicasMismatch
+    expr: kube_statefulset_status_replicas_ready != kube_statefulset_replicas
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: STATEFULSET_DEGRADED
+      helios_target: "{{ $labels.namespace }}/{{ $labels.statefulset }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "{{ $labels.namespace }}/{{ $labels.statefulset }} degrade"
+
+  - alert: PVCPending
+    expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: PVC_PENDING
+      helios_target: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "PVC {{ $labels.persistentvolumeclaim }} non lie depuis 10 min"
+
+  - alert: NamespaceQuotaExhausted
+    expr: kube_resourcequota{type="used"} / kube_resourcequota{type="hard"} > 0.95
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: QUOTA_EXHAUSTED
+      helios_target: "{{ $labels.namespace }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Quota {{ $labels.resource }} a 95% dans {{ $labels.namespace }}"
+      description: "CRITIQUE pour HELIOS : sans marge, aucune remediation ne peut creer de pod transitoire."
+
+# ═══════════════════════════════════════════════════════════════════
+#  G. RESEAU & DNS
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.k8s.network
+  interval: 30s
+  rules:
+
+  - alert: CoreDNSDown
+    expr: absent(up{job="k8s-pods", app="kube-dns"} == 1)
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: DNS_DOWN
+      helios_target: kube-system/coredns
+      auto_remediate: "false"     # namespace systeme : escalade humaine
+    annotations:
+      summary: "CoreDNS injoignable — resolution DNS cassee dans tout le cluster"
+
+  - alert: CoreDNSHighErrorRate
+    expr: |
+      sum(rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m]))
+      / sum(rate(coredns_dns_responses_total[5m])) > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: DNS_ERRORS
+      helios_target: kube-system/coredns
+      auto_remediate: "false"
+    annotations:
+      summary: "Plus de 5% de SERVFAIL sur CoreDNS"
+
+  - alert: ServiceWithoutEndpoints
+    expr: kube_service_spec_type != 0 unless on(namespace,service) kube_endpoint_address_available > 0
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: SERVICE_NO_ENDPOINTS
+      helios_target: "{{ $labels.namespace }}/{{ $labels.service }}"
+      auto_remediate: "true"
+    annotations:
+      summary: "Service {{ $labels.namespace }}/{{ $labels.service }} sans endpoint"
+      description: "Aucun pod ready ne correspond au selector : le service renvoie des erreurs."
+
+  - alert: IngressControllerDown
+    expr: absent(up{job="k8s-pods", app="ingress-nginx"} == 1)
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: INGRESS_DOWN
+      helios_target: ingress-nginx
+      auto_remediate: "false"
+    annotations:
+      summary: "Ingress controller injoignable — applications inaccessibles de l'exterieur"
+
+# ═══════════════════════════════════════════════════════════════════
+#  H. PLATEFORME HELIOS  (Camunda, IA, HAProxy, monitoring)
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.platform
+  interval: 30s
+  rules:
+
+  - alert: CamundaZeebeDown
+    expr: up{job="zeebe"} == 0
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: CAMUNDA_DOWN
+      helios_target: k8s-aicamunda
+      auto_remediate: "false"    # Camunda ne peut pas orchestrer sa propre reparation (circularite)
+    annotations:
+      summary: "Camunda/Zeebe injoignable (.161) — orchestration du self-healing ARRETEE"
+      runbook: "ssh .161 'docker compose -f camunda/docker-compose.yml restart'"
+
+  # Retrait de l'IA (11 nov. 2026) : les alertes AIServiceDown et AIServiceHighLatency ont été retirées (le service IA n'existe plus).
+
+  - alert: HAProxyBackendDown
+    expr: haproxy_server_up == 0
+    for: 2m
+    labels:
+      severity: warning
+      helios_type: LB_BACKEND_DOWN
+      helios_target: "{{ $labels.proxy }}/{{ $labels.server }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Backend HAProxy {{ $labels.server }} DOWN dans {{ $labels.proxy }}"
+
+  - alert: HAProxyAllBackendsDown
+    expr: haproxy_backend_active_servers == 0
+    for: 1m
+    labels:
+      severity: critical
+      helios_type: LB_ALL_BACKENDS_DOWN
+      helios_target: "{{ $labels.proxy }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "TOUS les backends de {{ $labels.proxy }} sont DOWN"
+
+  # ─── Auto-surveillance : qui surveille le surveillant ? ───
+  - alert: PrometheusDown
+    expr: up{job="prometheus"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: MONITORING_DOWN
+      helios_target: k8s-monitoring
+      auto_remediate: "false"
+    annotations:
+      summary: "Prometheus est mort — l'infrastructure n'est plus surveillee"
+
+  - alert: AlertmanagerDown
+    expr: up{job="alertmanager"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      helios_type: ALERTING_DOWN
+      helios_target: k8s-monitoring
+      auto_remediate: "false"    # sans Alertmanager, aucune alerte ne part vers Camunda
+    annotations:
+      summary: "Alertmanager mort — aucune alerte ne part vers Camunda ni par email"
+
+  - alert: LokiDown
+    expr: up{job="loki"} == 0
+    for: 3m
+    labels:
+      severity: warning
+      helios_type: LOGS_DOWN
+      helios_target: k8s-monitoring
+      auto_remediate: "true"
+    annotations:
+      summary: "Loki mort — plus de collecte de logs (diagnostic LLM degrade)"
+
+  - alert: GrafanaDown
+    expr: up{job="grafana"} == 0
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: GRAFANA_DOWN
+      helios_target: k8s-monitoring
+      auto_remediate: "true"
+    annotations:
+      summary: "Grafana injoignable — visualisation indisponible"
+
+  - alert: PrometheusTargetMissing
+    expr: up == 0
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: SCRAPE_TARGET_DOWN
+      helios_target: "{{ $labels.instance }}"
+      auto_remediate: "false"
+    annotations:
+      summary: "Cible Prometheus {{ $labels.job }}/{{ $labels.instance }} injoignable"
+
+  - alert: PrometheusRuleEvaluationFailing
+    expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: MONITORING_DEGRADED
+      helios_target: k8s-monitoring
+      auto_remediate: "false"
+    annotations:
+      summary: "Des regles Prometheus echouent — angle mort de detection"
+
+# ═══════════════════════════════════════════════════════════════════
+#  I. APPLICATION HELIOS  (SLO metier)
+# ═══════════════════════════════════════════════════════════════════
+- name: helios.application
+  interval: 30s
+  rules:
+
+  - alert: HeliosAppUnreachable
+    expr: probe_success{job="blackbox-http", instance="http://helios.orange.tn/"} == 0
+    for: 3m
+    labels:
+      severity: critical
+      helios_type: APP_UNREACHABLE
+      helios_target: pfe/frontend
+      auto_remediate: "true"
+    annotations:
+      summary: "helios.orange.tn ne repond plus (sonde HTTP externe)"
+      description: "Vue UTILISATEUR : peu importe l'etat interne, l'app est inaccessible."
+
+  - alert: HeliosBackendHighErrorRate
+    expr: |
+      sum(rate(http_server_requests_seconds_count{job="k8s-pods",app="backend",status=~"5.."}[5m]))
+      / sum(rate(http_server_requests_seconds_count{job="k8s-pods",app="backend"}[5m])) > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      helios_type: APP_HTTP_ERRORS
+      helios_target: pfe/backend
+      auto_remediate: "true"
+    annotations:
+      summary: "Backend HELIOS : plus de 5% de 5xx"
+
+  - alert: HeliosBackendHighLatency
+    expr: |
+      histogram_quantile(0.95,
+        sum by(le) (rate(http_server_requests_seconds_bucket{job="k8s-pods",app="backend"}[5m]))
+      ) > 2
+    for: 10m
+    labels:
+      severity: warning
+      helios_type: APP_LATENCY
+      helios_target: pfe/backend
+      auto_remediate: "true"
+    annotations:
+      summary: "Latence backend p95 = {{ printf \"%.1f\" $value }}s"
+
+  - alert: PostgresClusterDegraded
+    expr: cnpg_pg_replication_streaming_replicas < 1
+    for: 5m
+    labels:
+      severity: critical
+      helios_type: DATABASE_DEGRADED
+      helios_target: pfe/postgres
+      auto_remediate: "false"
+    annotations:
+      summary: "PostgreSQL sans replica en streaming — plus de HA base de donnees"
+
+  - alert: PostgresBackupTooOld
+    expr: time() - cnpg_collector_last_available_backup_timestamp > 129600   # 36h
+    for: 1h
+    labels:
+      severity: warning
+      helios_type: BACKUP_STALE
+      helios_target: pfe/postgres
+      auto_remediate: "false"
+    annotations:
+      summary: "Dernier backup PostgreSQL vieux de plus de 36h"

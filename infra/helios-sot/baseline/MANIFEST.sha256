@@ -1,0 +1,13 @@
+# MANIFEST de la baseline de production — capture du 2026-11-05T15:55:11Z (lecture seule). Format: sha256sum.
+# bridge/* : 192.168.148.161:/opt/helios-ssh-bridge/ ; detecteur/* : 192.168.148.160:/opt/helios/ ; watchdog/*, host/* : poste Windows (hôte).
+3e65e060cd4f46734ab763b71c8cc73f9931b449f887d686a660795f0a9501e0 *./bridge/bridge.py
+ba7d53286cf2b28dcf699615feb2c92d347f72cb03d98f825d493b34ec680e2e *./bridge/telemetrie.py
+0996328865f3f21c5a04a2564afd5cb7dc846e6daf3aa5d2b9e92175fecc48be *./detecteur/detecter.py
+30750e3359bde3a1c4b994231d2747874edfcbb10084150f472a1794fe0e560e *./host/helios-agents-start.bat
+16d1ca71959cd57488099ddffc5829dfc8eddd96a92f29e92003ffd9971ed647 *./host/helios-vm-control.ps1
+4afe69d5d053e3f946ea99a9f1af517ce35da272ec0a5ef32d2510a45adf5012 *./host/pare-feu-regles-helios.txt
+0cfacf48236e429520bc556cc240682f5cb0493af84f4dadc45cdd8a410d43d8 *./host/tache-HELIOS-NodeAutoheal.xml
+77b5877713a95b030bd276df74b72f475544788a39ca5fef82eac4b65ba3025e *./host/tache-HELIOS-Watchdog-HTTP.xml
+ace01674bccee230b95d853981110cb5ef008fbdf1778d6e8e670e435d262add *./watchdog/helios-node-autoheal.py
+99dc7abe006252501386acebe90f61b753b73c8dcb5130feb110dc8df026900c *./watchdog/helios-vmpower-agent.py
+a67a3a8e5d282ecf8e6a66d9086b55ff47b293f90e5e5e9cbc3c375bb5db46b7 *./watchdog/helios-watchdog-http-only.py

@@ -1,0 +1,86 @@
+# =============================================================================
+# HELIOS — Alertmanager Configuration
+# =============================================================================
+# Copier vers /etc/alertmanager/alertmanager.yml sur la VM monitoring (.160)
+#
+# Routes :
+#   - CRITICAL -> email immediat + repeat 1h
+#   - WARNING  -> email groupe 5min + repeat 4h
+#   - Inhibition : un CRITICAL inhibe le WARNING du meme composant
+#
+# Le relais SMTP est deja configure sur l'hote (192.168.148.1:2526 -> Gmail)
+# Fallback MailHog sur .161:1025 pour la demo.
+# =============================================================================
+
+global:
+  smtp_smarthost: '192.168.148.1:2526'
+  smtp_from: 'helios-aiops@orange.tn'
+  smtp_require_tls: false
+  resolve_timeout: 5m
+
+# Templates personnalises (optionnel)
+# templates:
+#   - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'component', 'namespace']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'helios-email'
+
+  routes:
+    # Alertes CRITIQUES : notification immediate, repeat 1h
+    - match:
+        severity: critical
+      receiver: 'helios-critical'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Alertes WARNING : groupees, repeat 4h
+    - match:
+        severity: warning
+      receiver: 'helios-email'
+      group_wait: 5m
+      repeat_interval: 4h
+
+receivers:
+  - name: 'helios-email'
+    email_configs:
+      - to: 'houssamsalhi972@gmail.com'
+        send_resolved: true
+        headers:
+          Subject: '[HELIOS] {{ .Status | toUpper }} - {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>HELIOS AIOps — Alerte {{ .Status | toUpper }}</h2>
+          {{ range .Alerts }}
+          <p><b>{{ .Labels.alertname }}</b> ({{ .Labels.severity }})</p>
+          <p>{{ .Annotations.summary }}</p>
+          <p><small>{{ .Annotations.description }}</small></p>
+          <hr>
+          {{ end }}
+
+  - name: 'helios-critical'
+    email_configs:
+      - to: 'houssamsalhi972@gmail.com'
+        send_resolved: true
+        headers:
+          Subject: '[HELIOS CRITICAL] {{ .GroupLabels.alertname }}'
+        html: |
+          <h2 style="color:red">HELIOS — ALERTE CRITIQUE</h2>
+          {{ range .Alerts }}
+          <p><b>{{ .Labels.alertname }}</b></p>
+          <p>Composant : {{ .Labels.component }}</p>
+          <p>{{ .Annotations.summary }}</p>
+          <p>{{ .Annotations.description }}</p>
+          <p>Debut : {{ .StartsAt.Format "2006-01-02 15:04:05" }}</p>
+          <hr>
+          {{ end }}
+
+# Inhibition : un CRITICAL inhibe le WARNING du meme composant
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['component']

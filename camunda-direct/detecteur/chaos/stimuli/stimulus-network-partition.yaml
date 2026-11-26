@@ -1,0 +1,40 @@
+# Pod appelant en boucle 192.168.148.250 (IP libre du LAN)
+# STIMULUS-CATALOG-FIX-2 (2026-09-05) : commande RESTAUREE depuis
+# PHASE2-DATASET/inj-20260826-network-partition-0001/preuves/02-objets.json,
+# concordante sur 14/14 repertoires historiques.
+# L'ancienne version portait -T 5, sleep 5 et surtout `|| echo 'wget: download timed
+# out'` : cette sortie SYNTHETIQUE etait emise meme si wget echouait autrement, si bien
+# que la ligne de log cessait de prouver l'etat reseau reel. Elle est supprimee : seul
+# wget produit desormais son propre message.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-cible
+  namespace: {{NAMESPACE}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helios-cible
+  template:
+    metadata:
+      labels:
+        app: helios-cible
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{NODE}}
+      containers:
+      - name: c
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        # Aucune regle iptables, aucun tc, aucune modification reseau du cluster :
+        # le pod appelle une IP LIBRE du LAN. La partition est vue DEPUIS le pod,
+        # sans toucher au reseau des autres charges.
+        command:
+        - sh
+        - -c
+        - while true; do wget -T 3 -q -O- http://192.168.148.250/ ; sleep 2; done
+        resources:
+          limits:
+            cpu: 50m
+            memory: 32Mi

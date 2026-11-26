@@ -1,0 +1,174 @@
+--- a/backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
++++ b/backend/backend/src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
+@@ -69,6 +69,17 @@
+     private static final int CAMUNDA_COMMAND_RETRY_ATTEMPTS = 3;
+     private static final long CAMUNDA_COMMAND_RETRY_DELAY_MS = 1000L;
+ 
++    /**
++     * HA-155-20261122 : durée de l'attente longue (« long polling ») de CHAQUE worker. Sans ce réglage le client utilise
++     * camunda.request-timeout-seconds (60 s en production). Une requête d'activation encore EN ATTENTE sur la passerelle,
++     * émise par un pod dont la VM vient d'être éteinte brutalement (aucun FIN TCP), reste valide jusqu'à cette durée : un
++     * job créé dans la fenêtre lui est LIVRÉ puis verrouillé pour la durée du job (5 min par défaut) et l'action de
++     * rallumage reste inexécutée ≈ 5 min (actions 823, 1550 et 1749 : 301-306 s au lieu de 4-23 s). La détection d'un arrêt
++     * (VmPowerWatch ≥ 30 s, nœud NotReady ≥ 40 s) est toujours postérieure à 10 s : la fenêtre est fermée avant la création
++     * du job. Ne change NI le délai des commandes (completeJob, createInstance…) NI la durée de verrouillage des jobs.
++     */
++    static final Duration WORKER_LONG_POLL_TIMEOUT = Duration.ofSeconds(10);
++
+     private static final int NODE_READY_MAX_ATTEMPTS = 18;
+     private static final long NODE_READY_INTERVAL_MS = 15_000L;
+     // Points de contrôle package-private pour les tests unitaires.
+@@ -180,6 +191,7 @@
+                     .jobType("execute-remediation")
+                     .handler(this::handleExecuteRemediation)
+                     .name("backend-execute-remediation")
++                    .requestTimeout(WORKER_LONG_POLL_TIMEOUT)
+                     .maxJobsActive(16)
+                     .fetchVariables(
+                             "workflowId",
+@@ -203,6 +215,7 @@
+                     .jobType("verify-remediation")
+                     .handler(this::handleVerifyRemediation)
+                     .name("backend-verify-remediation")
++                    .requestTimeout(WORKER_LONG_POLL_TIMEOUT)
+                     .maxJobsActive(16)
+                     .timeout(Duration.ofMinutes(6))
+                     .fetchVariables(
+@@ -218,6 +231,7 @@
+                     .jobType("auto-escalate-incident")
+                     .handler(this::handleAutoEscalateIncident)
+                     .name("backend-auto-escalate")
++                    .requestTimeout(WORKER_LONG_POLL_TIMEOUT)
+                     .maxJobsActive(2)
+                     .fetchVariables(
+                             "workflowId",
+@@ -231,6 +245,7 @@
+                     .jobType("handle-incident-rejection")
+                     .handler(this::handleRejectionFeedback)
+                     .name("backend-rejection-feedback")
++                    .requestTimeout(WORKER_LONG_POLL_TIMEOUT)
+                     .maxJobsActive(2)
+                     .fetchVariables(
+                             "workflowId",
+@@ -246,6 +261,7 @@
+                     .jobType("ai-classify")
+                     .handler(this::handleAiClassify)
+                     .name("backend-ai-classify")
++                    .requestTimeout(WORKER_LONG_POLL_TIMEOUT)
+                     .maxJobsActive(8)
+                     .timeout(Duration.ofSeconds(60))
+                     .fetchVariables("namespace", "app", "kind", "detail")
+--- /dev/null
++++ b/backend/backend/src/test/java/com/orange/pfe/backend/service/CamundaWorkerLongPollTest.java
+@@ -0,0 +1,111 @@
++package com.orange.pfe.backend.service;
++
++import com.orange.pfe.backend.config.RemediationProperties;
++import com.orange.pfe.backend.repository.HumanTaskRepository;
++import com.orange.pfe.backend.repository.IncidentActionRepository;
++import com.orange.pfe.backend.service.remediation.HostCpuVerificationService;
++import com.orange.pfe.backend.service.remediation.HostDiskVerificationService;
++import com.orange.pfe.backend.service.remediation.HostMemoryVerificationService;
++import com.orange.pfe.backend.service.remediation.RecoveryVerificationService;
++import com.orange.pfe.backend.service.remediation.RemediationExecutor;
++import com.orange.pfe.backend.service.remediation.RemediationMetricsService;
++import io.camunda.client.CamundaClient;
++import io.camunda.client.api.worker.JobWorkerBuilderStep1;
++import org.junit.jupiter.api.Test;
++import org.mockito.invocation.Invocation;
++import org.springframework.beans.factory.ObjectProvider;
++
++import java.time.Duration;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.Set;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.mockingDetails;
++import static org.mockito.Mockito.when;
++import static org.mockito.Mockito.withSettings;
++
++/**
++ * HA-155-20261122 : le rallumage automatique d'une VM qui porte un pod backend restait inexécuté ≈ 5 min (actions 823,
++ * 1550, 1749 : 301-306 s au lieu de 4-23 s). Cause : le job « execute-remediation » est LIVRÉ à la requête d'activation
++ * encore en attente (long polling, 60 s = camunda.request-timeout-seconds) du pod dont la VM vient de s'éteindre sans
++ * fermer sa connexion, puis verrouillé 5 min (durée de job par défaut). La fenêtre se ferme si chaque worker a une attente
++ * longue plus courte que la détection d'un arrêt (≥ 30 s). Ce test échoue tant qu'un worker garde la valeur par défaut.
++ */
++class CamundaWorkerLongPollTest {
++
++    /** Strictement inférieur à la détection d'un arrêt (VmPowerWatch ≥ 30 s, nœud NotReady ≥ 40 s). */
++    private static final Duration ATTENTE_LONGUE_MAX = Duration.ofSeconds(15);
++    /** Évite une boucle d'interrogation serrée sur la passerelle. */
++    private static final Duration ATTENTE_LONGUE_MIN = Duration.ofSeconds(2);
++
++    @SuppressWarnings("unchecked")
++    @Test
++    void chaque_worker_a_une_attente_longue_plus_courte_que_la_detection_d_un_arret() {
++        // Un seul constructeur partagé : toute méthode dont le type de retour est une étape du constructeur renvoie lui-même.
++        JobWorkerBuilderStep1.JobWorkerBuilderStep3 builder = mock(
++                JobWorkerBuilderStep1.JobWorkerBuilderStep3.class,
++                withSettings()
++                        .extraInterfaces(JobWorkerBuilderStep1.class, JobWorkerBuilderStep1.JobWorkerBuilderStep2.class)
++                        .defaultAnswer(inv -> inv.getMethod().getReturnType().isInstance(inv.getMock()) ? inv.getMock() : null));
++        CamundaClient client = mock(CamundaClient.class);
++        when(client.newWorker()).thenReturn((JobWorkerBuilderStep1) builder);
++
++        CamundaJobWorkerLifecycle lifecycle = new CamundaJobWorkerLifecycle(
++                client,
++                mock(CamundaWorkflowService.class),
++                mock(WorkflowService.class),
++                mock(IncidentActionRepository.class),
++                mock(ActionService.class),
++                mock(RemediationExecutor.class),
++                mock(RecoveryVerificationService.class),
++                mock(HostCpuVerificationService.class),
++                mock(HostDiskVerificationService.class),
++                mock(HostMemoryVerificationService.class),
++                mock(RemediationMetricsService.class),
++                mock(HumanTaskRepository.class),
++                mock(HumanTaskService.class),
++                mock(RemediationProperties.class),
++                mock(IncidentHistoryService.class),
++                mock(AIOpsClientService.class),
++                mock(NotificationService.class),
++                (ObjectProvider<AIOpsOrchestrationService>) mock(ObjectProvider.class),
++                (ObjectProvider<InfrastructureHealthScheduler>) mock(ObjectProvider.class),
++                mock(IncidentCardService.class));
++
++        lifecycle.startWorkers();
++
++        Map<String, Duration> attenteParType = new LinkedHashMap<>();
++        String type = null;
++        Duration courant = null;
++        for (Invocation invocation : mockingDetails(builder).getInvocations()) {
++            switch (invocation.getMethod().getName()) {
++                case "jobType" -> {
++                    type = invocation.getArgument(0);
++                    courant = null;
++                }
++                case "requestTimeout" -> courant = invocation.getArgument(0);
++                case "open" -> attenteParType.put(type, courant);
++                default -> {
++                }
++            }
++        }
++
++        assertEquals(
++                Set.of("execute-remediation", "verify-remediation", "auto-escalate-incident",
++                        "handle-incident-rejection", "ai-classify"),
++                attenteParType.keySet(),
++                "workers ouverts par startWorkers()");
++        attenteParType.forEach((jobType, attente) -> {
++            assertNotNull(attente, "worker « " + jobType + " » : requestTimeout non défini -> le client applique "
++                    + "camunda.request-timeout-seconds (60 s) : un job peut être livré à un pod dont la VM est éteinte");
++            assertTrue(attente.compareTo(ATTENTE_LONGUE_MAX) <= 0,
++                    "worker « " + jobType + " » : attente longue " + attente + " > " + ATTENTE_LONGUE_MAX);
++            assertTrue(attente.compareTo(ATTENTE_LONGUE_MIN) >= 0,
++                    "worker « " + jobType + " » : attente longue " + attente + " < " + ATTENTE_LONGUE_MIN);
++        });
++    }
++}

@@ -1,0 +1,4 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.167-cooldown5 (établie le 2026-11-18 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:\Users\houss\helios-minimal-build-0.2.167-cooldown5\target\classes
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+contenu-0.2.167-cooldown5 = c4f3ac015952c6c39467bdef105d147a8f2e1105c3a859429c460077a98e84c0   # 305 fichiers (classes + ressources)

@@ -1,0 +1,61 @@
+diff --git a/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java b/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
+index 7883c90..1eb4669 100644
+--- a/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
++++ b/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
+@@ -59,7 +59,9 @@ import java.util.concurrent.ConcurrentHashMap;
+  *       que si {@link VmPowerPolicy#authorize} l'autorise (VM éteinte confirmée, sondes en échec, hors maintenance,
+  *       hors épisode RESOLUTION_FAILED ouvert, hors cooldown, aucune action pour cet incident) ET que la VM est
+  *       activée ({@code enabled && !dryRun && activeVms}). Exécution par la chaîne Camunda existante
+- *       (incident-remediation → execute-remediation → watchdog hôte). Sinon : MODE OMBRE — rien n'est demandé.</li>
++ *       (incident-remediation → execute-remediation → watchdog hôte). Sinon : MODE OMBRE — rien n'est demandé.
++ *       Depuis le 2026-11-21, si la détection Kubernetes n'a pas créé l'incident NODE_NOT_READY d'un nœud PROUVÉ éteint,
++ *       le backend le crée lui-même (voir {@code workerFlow}).</li>
+  *   <li>DETECT_ONLY ({@code k8s-monitoring}, .160 — consigne finale du 2026-11-06 : VM de supervision, donc PAS
+  *       d'auto-rallumage) : incident VM_DOWN créé, interface seulement (aucun e-mail), rappel d'historique espacé ; AUCUNE
+  *       action, AUCUN workflow Camunda, AUCUN appel du watchdog, même si le nom figurait dans {@code activeVms}.
+@@ -214,7 +216,8 @@ public class VmPowerWatch {
+             try {
+                 switch (e.vmClass()) {
+                     // .153 (plan de contrôle) : AUTO depuis le 2026-11-17 — même flux que les workers (incident NODE_NOT_READY de la
+-                    // détection Kubernetes, décision de power-on ici) ; un mode non AUTO (DENY_RESTART conservé) est refusé par la politique.
++                    // détection Kubernetes, ou créé ici dès l'arrêt confirmé depuis le 2026-11-21 ; décision de power-on ici) ; un mode
++                    // non AUTO (DENY_RESTART conservé) est refusé par la politique.
+                     case K8S_WORKER, K8S_CONTROL_PLANE -> workerFlow(e, t, nowMs, events);
+                     case INFRA_LB, INFRA_MONITORING -> infraAutoFlow(e, t, nowMs, events);
+                 }
+@@ -237,10 +240,34 @@ public class VmPowerWatch {
+ 
+     // ── Flux par classe de VM ────────────────────────────────────────────────────────────────────
+ 
+-    /** Workers : l'incident NODE_NOT_READY vient de la détection Kubernetes ; ici on décide seulement du power-on. */
++    /**
++     * Workers et plan de contrôle : l'incident NODE_NOT_READY vient en principe de la détection Kubernetes ; ici on décide
++     * du power-on.
++     *
++     * <p>2026-11-21 (« rien ne se passe » lors d'un arrêt de .158) : si Kubernetes n'a PAS (encore) créé l'incident alors que
++     * la VM est PROUVÉE éteinte (vmrun list ×2 espacés d'au moins 30 s ET toutes les sondes réseau en échec), le backend le
++     * crée LUI-MÊME, comme pour .162, au lieu d'attendre. Sinon un nœud qui portait le bail du controller-manager (60 s) puis
++     * la période de grâce des nœuds (40 s) restait invisible ≈ 2 min et l'arrêt n'était jamais traité s'il durait moins.
++     * Déduplication : recherche préalable + index unique {@code ux_incident_open_dedup} (namespace, app, type) ; la détection
++     * Kubernetes, si elle passe plus tard, voit l'incident ouvert et n'en crée pas. Jamais pour un mode non AUTO.
++     */
+     private void workerFlow(Entry e, Track t, long nowMs, List<String> events) {
+         Optional<Incident> found = latestNotClosed(e, e.incidentType());
+         if (found.isEmpty()) {
++            if (e.mode() != VmPowerPolicy.Mode.AUTO || !t.confirmedOff()) {
++                return;
++            }
++            Incident created = createIncident(e, e.incidentType(), IncidentSeverity.CRITICAL,
++                    "Infrastructure DOWN: " + e.incidentNamespace() + "/" + e.name(),
++                    "VM '" + e.name() + "' (" + e.ip() + ") éteinte : arrêt confirmé par vmrun list (" + t.offCount
++                            + " observations sur " + (t.offSpanMs() / 1000) + " s) et toutes les sondes réseau en échec. "
++                            + "Incident créé par la surveillance de puissance sans attendre la détection Kubernetes (NotReady).",
++                    false);
++            if (created == null) {
++                return;   // doublon : un incident est déjà ouvert pour ce nœud (index unique)
++            }
++            events.add("INCIDENT_CREATED:" + e.name());
++            considerLaunch(e, t, created, nowMs, events);
+             return;
+         }
+         Incident i = found.get();

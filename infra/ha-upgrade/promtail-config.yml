@@ -1,0 +1,101 @@
+# =============================================================================
+# HELIOS — Promtail Configuration
+# =============================================================================
+# Promtail collecte les logs des containers Kubernetes et les envoie a Loki.
+# Deploye comme DaemonSet sur chaque noeud du cluster.
+#
+# Copier ce fichier dans un ConfigMap puis deployer le DaemonSet
+# (voir promtail-daemonset.yaml).
+# =============================================================================
+
+server:
+  http_listen_port: 3101
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://192.168.148.160:3100/loki/api/v1/push
+    tenant_id: helios
+    batchwait: 1s
+    batchsize: 1048576     # 1 Mo
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+scrape_configs:
+  # ── Logs des containers Kubernetes ──────────────────────────────────────────
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      # Garder le nom du namespace
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      # Garder le nom du pod
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      # Garder le nom du container
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+      # Nom de l'app (label app)
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+      # Label AIOps
+      - source_labels: [__meta_kubernetes_pod_label_aiops_io_monitor]
+        target_label: aiops_monitor
+      # Nom du noeud
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+      # Chemin du log
+      - source_labels:
+          - __meta_kubernetes_namespace
+          - __meta_kubernetes_pod_name
+          - __meta_kubernetes_pod_container_name
+        separator: /
+        target_label: __path__
+        replacement: /var/log/pods/$1/*.log
+
+    pipeline_stages:
+      # Parser le format CRI (timestamp stream F/P message)
+      - cri: {}
+      # Detecter les niveaux de log
+      - regex:
+          expression: '(?i)(?P<level>error|warn|info|debug|fatal|panic|critical)'
+      - labels:
+          level:
+      # Extraire les codes d'erreur Kubernetes
+      - regex:
+          expression: '(?P<status_code>\b[45]\d{2}\b)'
+      - labels:
+          status_code:
+
+  # ── Logs systeme (journald) ─────────────────────────────────────────────────
+  - job_name: journal
+    journal:
+      max_age: 12h
+      labels:
+        job: systemd-journal
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: unit
+      - source_labels: ['__journal__hostname']
+        target_label: node
+    pipeline_stages:
+      - regex:
+          expression: '(?i)(?P<level>error|warn|info|debug|fatal|critical)'
+      - labels:
+          level:
+
+  # ── Logs kubelet ────────────────────────────────────────────────────────────
+  - job_name: kubelet
+    journal:
+      max_age: 12h
+      labels:
+        job: kubelet
+      matches: _SYSTEMD_UNIT=kubelet.service
+    relabel_configs:
+      - source_labels: ['__journal__hostname']
+        target_label: node

@@ -1,0 +1,27 @@
+# Reproduit a l'identique stimulus-inj-20260826-pod-crash-loop-0001.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-crash
+  namespace: {{NAMESPACE}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helios-crash
+  template:
+    metadata:
+      labels:
+        app: helios-crash
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: {{NODE}}
+      containers:
+      - name: crash
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        command: ["sh","-c","echo demarrage; exit 1"]
+        resources:
+          limits:
+            memory: 32Mi
+            cpu: 50m

@@ -1,0 +1,190 @@
+--- a/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerPolicy.java
++++ b/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerPolicy.java
+@@ -20,15 +20,16 @@
+  * <p>Table FERMÉE, identifiants EXACTS. Sa source de vérité est {@code infra/helios-vm-policy.yaml} ;
+  * la parité YAML = Java (= watchdog hôte) est verrouillée par {@code VmPowerPolicyParityTest}.
+  * <ul>
+- *   <li>{@code k8s-worker2} (.155), {@code k8s-worker1} (.158), {@code k8s-lb2} (.162) : {@link Mode#AUTO}, route
+- *       {@link Route#CAMUNDA} (chaîne Camunda existante) ;</li>
++ *   <li>{@code k8s-worker2} (.155), {@code k8s-worker1} (.158), {@code k8s-lb2} (.162) et — depuis la consigne de
++ *       l'utilisateur du 2026-11-17, qui INVERSE « .153 jamais cible » — {@code k8s-master} (.153, plan de contrôle) :
++ *       {@link Mode#AUTO}, route {@link Route#CAMUNDA} (chaîne Camunda existante) ;</li>
+  *   <li>{@code k8s-monitoring} (.160) : {@link Mode#DETECT_ONLY} (consigne finale de l'après-midi du 2026-11-06 :
+  *       c'est la VM de supervision, donc PAS d'auto-rallumage), route {@link Route#NONE}, notifications
+  *       {@link Notifications#UI_ONLY} (interface seulement : aucun e-mail, aucune escalade Camunda). La route
+  *       {@link Route#BACKEND_DIRECT} reste dans le langage de la politique (validée par un essai réel le 2026-11-06
+  *       13:28) mais DORMANTE : aucune ligne de la table ne l'utilise ;</li>
+- *   <li>{@code k8s-master} (.153) : {@link Mode#DENY_RESTART} — aucune autorisation de redémarrage, JAMAIS une cible
+- *       (elle peut rester un APPELANT du watchdog) ;</li>
++ *   <li>{@link Mode#DENY_RESTART} : mode CONSERVÉ et honoré (refus {@link Refusal#NOT_AUTHORIZED}) mais plus utilisé par
++ *       aucune ligne de la table depuis le 2026-11-17 (c'était celui de {@code k8s-master}) ;</li>
+  *   <li>toute autre cible (alias {@code lb2}/{@code monitoring}, adresse IP, {@code k8s-aiCamunda}, casse ou
+  *       espaces différents, valeur nulle ou injectée) : {@link Mode#DENY}.</li>
+  * </ul>
+@@ -41,6 +42,13 @@
+ 
+     private VmPowerPolicy() {
+     }
++
++    /**
++     * Révision de la table : MARQUEUR de version lu dans le bytecode de l'image DÉPLOYÉE par
++     * {@code infra/helios-sot/tools/policy_reconcile.py} (pool de constantes). 2026-11-17 : {@code k8s-master} (.153) passe
++     * de DENY_RESTART à AUTO (route CAMUNDA). Toute révision de la table doit changer cette valeur ET le marqueur de l'outil.
++     */
++    public static final String POLICY_REVISION = "2026-11-17-master-auto";
+ 
+     // ── Seuils (miroir de infra/helios-vm-policy.yaml, section "thresholds") ─────────────────────
+ 
+@@ -180,8 +188,11 @@
+         // automatique, aucun e-mail, aucune escalade Camunda. Rallumage par l'administrateur.
+         put(t, new Entry("k8s-monitoring", "192.168.148.160", Mode.DETECT_ONLY, VmClass.INFRA_MONITORING,
+                 "infra", "k8s-monitoring", "VM_DOWN", Route.NONE, Notifications.UI_ONLY));
+-        put(t, new Entry("k8s-master", "192.168.148.153", Mode.DENY_RESTART, VmClass.K8S_CONTROL_PLANE,
+-                "k8s-nodes", "k8s-master", "NODE_NOT_READY", Route.NONE, Notifications.EMAIL_AND_UI));
++        // .153 : AUTO depuis la consigne du 2026-11-17 (était DENY_RESTART / route NONE). Mêmes garde-fous que les workers
++        // (VM prouvée POWERED_OFF, sondes en échec, hors maintenance/cooldown/épisode) ; critères de reprise du plan de
++        // contrôle dans VmRecoveryVerifier.verifyWorker (apiserver 6443 en plus).
++        put(t, new Entry("k8s-master", "192.168.148.153", Mode.AUTO, VmClass.K8S_CONTROL_PLANE,
++                "k8s-nodes", "k8s-master", "NODE_NOT_READY", Route.CAMUNDA, Notifications.EMAIL_AND_UI));
+         PRODUCTION_TABLE = Collections.unmodifiableMap(t);
+         table = PRODUCTION_TABLE;
+     }
+--- a/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
++++ b/src/main/java/com/orange/pfe/backend/service/vmpower/VmPowerWatch.java
+@@ -54,7 +54,8 @@
+  * <b>backend → watchdog hôte → {@code vmrun start} → preuves de santé → résultat au backend</b>.
+  *
+  * <ul>
+- *   <li>AUTO, route CAMUNDA ({@code k8s-worker1}, {@code k8s-worker2}, {@code k8s-lb2}) : un redémarrage n'est demandé
++ *   <li>AUTO, route CAMUNDA ({@code k8s-worker1}, {@code k8s-worker2}, {@code k8s-lb2} et, depuis la consigne du 2026-11-17,
++ *       {@code k8s-master} — plan de contrôle, même flux que les workers) : un redémarrage n'est demandé
+  *       que si {@link VmPowerPolicy#authorize} l'autorise (VM éteinte confirmée, sondes en échec, hors maintenance,
+  *       hors épisode RESOLUTION_FAILED ouvert, hors cooldown, aucune action pour cet incident) ET que la VM est
+  *       activée ({@code enabled && !dryRun && activeVms}). Exécution par la chaîne Camunda existante
+@@ -67,8 +68,8 @@
+  *       2026-11-06 13:28 avant le retour de .160 en détection seule) : mêmes autorisations et MÊMES verrous que la route
+  *       Camunda, mais le backend exécute lui-même (action RESTART_VM persistée, UN SEUL POST au watchdog, jamais rejoué) et
+  *       vérifie la récupération par preuves, sans workflow Camunda ni e-mail.</li>
+- *   <li>DENY_RESTART ({@code k8s-master}) : ignoré ici (la détection NODE_NOT_READY existante est conservée) ;
+- *       JAMAIS une cible.</li>
++ *   <li>DENY_RESTART : mode conservé (aucune VM de la table ne l'utilise depuis le 2026-11-17, {@code k8s-master} est AUTO) :
++ *       ignoré ici (la détection NODE_NOT_READY existante est conservée) ; JAMAIS une cible.</li>
+  * </ul>
+  *
+  * <p>État en mémoire (leader unique) : un changement de leader repart de zéro et doit reconfirmer l'arrêt
+@@ -212,9 +213,10 @@
+             Track t = tracks.get(e.name());
+             try {
+                 switch (e.vmClass()) {
+-                    case K8S_WORKER -> workerFlow(e, t, nowMs, events);
++                    // .153 (plan de contrôle) : AUTO depuis le 2026-11-17 — même flux que les workers (incident NODE_NOT_READY de la
++                    // détection Kubernetes, décision de power-on ici) ; un mode non AUTO (DENY_RESTART conservé) est refusé par la politique.
++                    case K8S_WORKER, K8S_CONTROL_PLANE -> workerFlow(e, t, nowMs, events);
+                     case INFRA_LB, INFRA_MONITORING -> infraAutoFlow(e, t, nowMs, events);
+-                    case K8S_CONTROL_PLANE -> { /* DENY_RESTART : aucune décision ici, jamais une cible */ }
+                 }
+             } catch (Exception ex) {
+                 events.add("ERROR:" + e.name() + ":" + ex.getClass().getSimpleName());
+@@ -661,15 +663,9 @@
+             if (o == null) {
+                 return null;
+             }
+-            if (e.vmClass() == VmPowerPolicy.VmClass.K8S_WORKER) {
+-                // Workers (cibles de rallumage) : Ready ne suffit pas — kubelet, SSH, etcd, CNPG et backend aussi.
+-                return verifier.verifyWorker(e, o);
+-            }
+-            // .153 (jamais une cible) : détection existante conservée, fermeture par deux lectures Ready.
+-            boolean ready = o.apiAvailable() && o.ready() && "True".equalsIgnoreCase(o.conditionStatus());
+-            Map<String, Boolean> c = new java.util.LinkedHashMap<>();
+-            c.put("node_ready", ready);
+-            return new PassResult(ready, c, e.name() + (ready ? " est Ready (API Kubernetes)" : " n'est pas Ready"));
++            // Nœuds Kubernetes cibles de rallumage (.155, .158 et, depuis le 2026-11-17, .153 plan de contrôle) : Ready ne
++            // suffit pas — kubelet, SSH, etcd, CNPG et backend aussi (+ apiserver 6443 pour le plan de contrôle).
++            return verifier.verifyWorker(e, o);
+         }
+         return states == null ? null : verifier.verifyInfra(e, states);
+     }
+--- a/src/main/java/com/orange/pfe/backend/service/vmpower/VmRecoveryVerifier.java
++++ b/src/main/java/com/orange/pfe/backend/service/vmpower/VmRecoveryVerifier.java
+@@ -101,11 +101,13 @@
+         return result(entry, c);
+     }
+ 
+-    // ── Workers (.155, .158) ─────────────────────────────────────────────────────────────────────
+-
+-    /**
+-     * Une passe pour un worker, à partir d'UNE lecture du nœud. Si le nœud n'est même pas Ready, les autres critères
+-     * ne sont pas évalués (inutile et sans valeur de preuve) : la passe échoue sur {@code node_ready} seul.
++    // ── Nœuds Kubernetes (workers .155/.158 ; plan de contrôle .153 depuis le 2026-11-17) ────────
++
++    /**
++     * Une passe pour un nœud Kubernetes cible de rallumage, à partir d'UNE lecture du nœud. Si le nœud n'est même pas
++     * Ready, les autres critères ne sont pas évalués (inutile et sans valeur de preuve) : la passe échoue sur
++     * {@code node_ready} seul. Le plan de contrôle ({@code K8S_CONTROL_PLANE}, .153) doit en plus répondre sur son
++     * apiserver (TCP 6443, critère {@code apiserver_6443}).
+      */
+     public PassResult verifyWorker(Entry entry, NodeReadinessObservation node) {
+         Map<String, Boolean> c = new LinkedHashMap<>();
+@@ -115,6 +117,9 @@
+         if (ready) {
+             c.put("kubelet_active", node.kubeletActive());
+             c.put("ssh", probes.tcp(entry.ip(), 22));
++            if (entry.vmClass() == VmClass.K8S_CONTROL_PLANE) {
++                c.put("apiserver_6443", probes.tcp(entry.ip(), 6443));
++            }
+             c.put("etcd_self", etcdHealthy(entry.ip()));
+             c.put("etcd_has_leader", etcdHasLeader(entry.ip()));
+             c.put("cnpg_healthy", cnpgHealthy());
+--- a/src/main/java/com/orange/pfe/backend/service/remediation/RemediationPolicyService.java
++++ b/src/main/java/com/orange/pfe/backend/service/remediation/RemediationPolicyService.java
+@@ -59,8 +59,8 @@
+                     : prediction.getIncidentType().trim().toUpperCase(Locale.ROOT);
+             switch (normalizedIncidentType) {
+                 // VMDOWN-POLICY-20261105 : RESTART_VM UNIQUEMENT pour une cible AUTO de la politique VM_DOWN
+-                // (noms exacts : k8s-worker1, k8s-worker2). Le control-plane (.153, DENY_RESTART) et toute
+-                // autre cible ne produisent JAMAIS de power-on : escalade (détection + notification existantes).
++                // (noms exacts : k8s-worker1, k8s-worker2 et, depuis la consigne du 2026-11-17, k8s-master). Toute
++                // autre cible (ou un mode non AUTO) ne produit JAMAIS de power-on : escalade (détection + notification existantes).
+                 case "NODE_NOT_READY", "VM_DOWN", "VM_POWERED_OFF" ->
+                         actionType = VmPowerPolicy.isCamundaRestartable(request.getApp())
+                                 ? ActionType.RESTART_VM : ActionType.ESCALATION;
+--- a/src/main/java/com/orange/pfe/backend/service/InfrastructureHealthScheduler.java
++++ b/src/main/java/com/orange/pfe/backend/service/InfrastructureHealthScheduler.java
+@@ -328,7 +328,8 @@
+      * l'API Kubernetes), crée l'incident et notifie, puis laisse la DÉCISION à {@link VmPowerWatch} :
+      * un power-on n'est demandé que si la VM est prouvée éteinte (vmrun list, 2 observations espacées de 30 s),
+      * les sondes réseau en échec, hors maintenance/cooldown/épisode, et si la politique l'autorise.
+-     * Cibles : k8s-worker1/k8s-worker2 = AUTO ; k8s-master (.153) = aucune autorisation (détection seule).
++     * Cibles : k8s-worker1/k8s-worker2 et k8s-master (.153, depuis la consigne du 2026-11-17) = AUTO ; toute autre VM ou
++     * tout mode non AUTO = aucune autorisation (détection seule).
+      */
+     private void handleNodeOutageRecovery(Incident incident, ComponentStatus status) {
+         if (!"k8s-nodes".equals(status.namespace())) {
+@@ -346,7 +347,7 @@
+                         + "maintenance/cooldown) ; aucun démarrage tant que l'arrêt n'est pas prouvé.");
+             } else {
+                 historyService.record(incident, incident.getStatus(),
+-                        "Politique VM_DOWN : " + status.app() + " (control-plane) n'a AUCUNE autorisation de "
++                        "Politique VM_DOWN : " + status.app() + " n'a AUCUNE autorisation de "
+                         + "redémarrage automatique — détection et notification uniquement ; "
+                         + "redémarrage laissé à l'administrateur.");
+             }
+--- a/src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
++++ b/src/main/java/com/orange/pfe/backend/service/CamundaJobWorkerLifecycle.java
+@@ -697,11 +697,13 @@
+                         );
+                     }
+ 
+-                    // Workers cibles du rallumage automatique : « Ready » ne suffit pas (kubelet, SSH, etcd, CNPG,
+-                    // backend). La lecture effective porte le verdict complet : la preuve persistée ci-dessous le reflète.
++                    // Nœuds Kubernetes cibles du rallumage automatique (workers et, depuis le 2026-11-17, plan de contrôle .153) :
++                    // « Ready » ne suffit pas (kubelet, SSH, etcd, CNPG, backend, + apiserver pour .153). La lecture effective porte
++                    // le verdict complet : la preuve persistée ci-dessous le reflète.
+                     if (vmRecoveryVerifier != null && VmPowerPolicy.isCamundaRestartable(targetName)) {
+                         VmPowerPolicy.Entry workerEntry = VmPowerPolicy.find(targetName).orElse(null);
+-                        if (workerEntry != null && workerEntry.vmClass() == VmPowerPolicy.VmClass.K8S_WORKER) {
++                        if (workerEntry != null && (workerEntry.vmClass() == VmPowerPolicy.VmClass.K8S_WORKER
++                                || workerEntry.vmClass() == VmPowerPolicy.VmClass.K8S_CONTROL_PLANE)) {
+                             observation = vmRecoveryVerifier.effectiveWorkerObservation(workerEntry, observation);
+                         }
+                     }
