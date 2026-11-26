@@ -39,7 +39,7 @@
     </select>
     <select *ngIf="users.length > 0" class="filter-select" [(ngModel)]="filters.assigneeId" (ngModelChange)="load(true)">
       <option [ngValue]="null">Tous les responsables</option>
-      <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
+      <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
     </select>
     <select class="filter-select" [(ngModel)]="filters.status" (ngModelChange)="load(true)">
       <option value="">Tous les statuts</option>
@@ -201,7 +201,7 @@
         <label>Responsable</label>
         <select class="form-input" [(ngModel)]="assigneeId">
           <option [ngValue]="null">— Retirer l'affectation —</option>
-          <option *ngFor="let m of assignMembers" [ngValue]="m.userId">{{ m.displayName }} (@{{ m.username }})</option>
+          <option *ngFor="let m of assignMembers" [ngValue]="m.userId">{{ m.displayName }} (&#64;{{ m.username }})</option>
         </select>
       </div>
     </div>

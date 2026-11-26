@@ -84,13 +84,13 @@
     <div *ngIf="canMembers && selected.active" class="filters-bar">
       <select class="filter-select" [(ngModel)]="addMemberId" style="min-width:260px">
         <option [ngValue]="null">Ajouter un membre…</option>
-        <option *ngFor="let u of candidates" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
+        <option *ngFor="let u of candidates" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
       </select>
       <button class="btn-primary" (click)="addMember()" [disabled]="addMemberId === null || busy"><i class="fas fa-user-plus"></i> Ajouter</button>
       <ng-container *ngIf="canUpdate">
         <select class="filter-select" [(ngModel)]="newLeadId" style="min-width:240px">
           <option [ngValue]="null">Changer de responsable…</option>
-          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
+          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
         </select>
         <button class="btn-secondary" (click)="changeLead()" [disabled]="newLeadId === null || busy"><i class="fas fa-crown"></i> Désigner</button>
       </ng-container>
@@ -99,7 +99,7 @@
       <thead><tr><th>Membre</th><th>Rôle HELIOS</th><th>Ajouté le</th><th>Par</th><th></th></tr></thead>
       <tbody>
         <tr *ngFor="let m of members">
-          <td><span class="text-strong">{{ m.displayName }}</span> <span class="text-muted">@{{ m.username }}</span>
+          <td><span class="text-strong">{{ m.displayName }}</span> <span class="text-muted">&#64;{{ m.username }}</span>
             <i *ngIf="m.lead" class="fas fa-crown lead-star" title="Responsable"></i></td>
           <td>{{ m.role }}</td>
           <td>{{ fmt(m.addedAt) }}</td>
@@ -149,7 +149,7 @@
         <label>Responsable</label>
         <select class="form-input" [(ngModel)]="form.leadId">
           <option [ngValue]="null">— Aucun —</option>
-          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (@{{ u.username }})</option>
+          <option *ngFor="let u of users" [ngValue]="u.id">{{ u.firstName }} {{ u.lastName }} (&#64;{{ u.username }})</option>
         </select>
         <div class="hint">Le responsable devient automatiquement membre de l'équipe.</div>
       </div>

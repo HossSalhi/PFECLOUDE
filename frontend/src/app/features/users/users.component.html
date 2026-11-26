@@ -69,7 +69,7 @@
               </div>
               <div>
                 <div class="user-name-cell">{{ u.firstName }} {{ u.lastName }}</div>
-                <div class="user-username">@{{ u.username }}</div>
+                <div class="user-username">&#64;{{ u.username }}</div>
               </div>
             </div>
           </td>
@@ -202,7 +202,7 @@
     </div>
     <div class="modal-body">
       <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Bloquer <strong>@{{ selectedUser?.username }}</strong> — précisez la raison :</p>
+      <p class="modal-desc">Bloquer <strong>&#64;{{ selectedUser?.username }}</strong> — précisez la raison :</p>
       <div class="form-group">
         <label>Raison <span class="required">*</span></label>
         <textarea [(ngModel)]="blockReason" rows="3" placeholder="Motif du blocage…" class="form-input"></textarea>
@@ -227,7 +227,7 @@
     </div>
     <div class="modal-body">
       <div *ngIf="modalError" class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
-      <p class="modal-desc">Nouveau mot de passe pour <strong>@{{ selectedUser?.username }}</strong> :</p>
+      <p class="modal-desc">Nouveau mot de passe pour <strong>&#64;{{ selectedUser?.username }}</strong> :</p>
       <div class="form-group">
         <label>Nouveau mot de passe <span class="required">*</span></label>
         <input type="password" [(ngModel)]="newPassword" placeholder="Minimum 8 caractères" class="form-input">
@@ -252,7 +252,7 @@
     </div>
     <div class="modal-body">
       <p class="modal-desc">
-        Voulez-vous vraiment supprimer <strong>@{{ selectedUser?.username }}</strong> ?<br>
+        Voulez-vous vraiment supprimer <strong>&#64;{{ selectedUser?.username }}</strong> ?<br>
         <span style="color:#c62828;font-size:13px;">Cette action est irréversible.</span>
       </p>
     </div>
