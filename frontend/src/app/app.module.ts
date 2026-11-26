@@ -1,6 +1,6 @@
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
-import { HttpClientModule, HTTP_INTERCEPTORS } from '@angular/common/http';
+import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { NgChartsModule } from 'ng2-charts';
 
@@ -31,43 +31,37 @@ import { AuditTrailComponent } from './features/audit-trail/audit-trail.componen
 import { ReportsComponent } from './features/reports/reports.component';
 import { ReportViewComponent } from './features/reports/report-view.component';
 
-@NgModule({
-  declarations: [
-    AppComponent,
-    LoginComponent,
-    DashboardComponent,
-    IncidentsComponent,
-    ApplicationsComponent,
-    InfrastructureComponent,
-    AiDecisionsComponent,
-    RemediationComponent,
-    HumanTasksComponent,
-    IncidentDetailComponent,
-    RegisterComponent,
-    ForgotPasswordComponent,
-    ResetPasswordComponent,
-    ActivateComponent,
-    NotFoundComponent,
-    UsersComponent,
-    OrangeLogoComponent,
-    MaintenanceComponent,
-    TeamsComponent,
-    TeamTasksComponent,
-    AuditTrailComponent,
-    ReportsComponent,
-    ReportViewComponent
-  ],
-  imports: [
-    BrowserModule,
-    HttpClientModule,
-    FormsModule,
-    ReactiveFormsModule,
-    AppRoutingModule,
-    NgChartsModule
-  ],
-  providers: [
-    { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true }
-  ],
-  bootstrap: [AppComponent]
-})
+@NgModule({ declarations: [
+        AppComponent,
+        LoginComponent,
+        DashboardComponent,
+        IncidentsComponent,
+        ApplicationsComponent,
+        InfrastructureComponent,
+        AiDecisionsComponent,
+        RemediationComponent,
+        HumanTasksComponent,
+        IncidentDetailComponent,
+        RegisterComponent,
+        ForgotPasswordComponent,
+        ResetPasswordComponent,
+        ActivateComponent,
+        NotFoundComponent,
+        UsersComponent,
+        OrangeLogoComponent,
+        MaintenanceComponent,
+        TeamsComponent,
+        TeamTasksComponent,
+        AuditTrailComponent,
+        ReportsComponent,
+        ReportViewComponent
+    ],
+    bootstrap: [AppComponent], imports: [BrowserModule,
+        FormsModule,
+        ReactiveFormsModule,
+        AppRoutingModule,
+        NgChartsModule], providers: [
+        { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+        provideHttpClient(withInterceptorsFromDi())
+    ] })
 export class AppModule {}

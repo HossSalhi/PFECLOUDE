@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { HTTP_INTERCEPTORS } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 import { ApiService } from './api.service';
 import { AuthInterceptor } from '../interceptors/auth.interceptor';
 import { AuthService } from './auth.service';
@@ -16,12 +16,14 @@ describe('ApiService', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [
+    imports: [],
+    providers: [
         ApiService,
-        { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true }
-      ]
-    });
+        { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting()
+    ]
+});
     service = TestBed.inject(ApiService);
     httpMock = TestBed.inject(HttpTestingController);
     // L'intercepteur n'ajoute `Authorization` que si un token existe : on simule un utilisateur
