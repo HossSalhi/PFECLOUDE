@@ -1,0 +1,4 @@
+# Empreinte de CONTENU attendue de l'image backend pfe-backend:0.2.172-e15b534 (établie le 2026-11-26 depuis le build local ci-dessous).
+# Calcul : python infra/helios-sot/tools/image_digest.py --local C:\Users\houss\AppData\Local\Temp\hl-img172-merged
+# Contrôle après déploiement : python infra/helios-sot/tools/image_digest.py --pod auto --expect <empreinte ci-dessous>   (code 0 = conforme)
+contenu-0.2.172-e15b534 = 54284cc8b5c939ea0512c3c8f242687e1219af977fa1c4c406cbee065682aa27   # 399 fichiers (classes + ressources)

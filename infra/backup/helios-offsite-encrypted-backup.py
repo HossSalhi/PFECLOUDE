@@ -19,6 +19,11 @@ def get_dest():
     return d or None
 def replicate(enc_path, dest):
     if not dest: return None
+    # Garde d'identite : la destination doit exister ET porter le marqueur cree a la configuration (disque debranche ou lettre reattribuee => refus)
+    mk = os.path.join(dest, '.helios-dest-marker'); ref = os.path.join(ROOT, 'dest-marker.txt')
+    if os.path.exists(ref):
+        if not os.path.isdir(dest) or not os.path.exists(mk) or open(mk, encoding='utf-8').read().strip() != open(ref, encoding='utf-8').read().strip():
+            raise RuntimeError('destination absente ou non reconnue (marqueur manquant/different) : copie hors site REFUSEE')
     os.makedirs(dest, exist_ok=True); out = None
     for suf in ('', '.sha256', '.manifest.json'):
         shutil.copy2(enc_path + suf, os.path.join(dest, os.path.basename(enc_path) + suf))
