@@ -1,4 +1,0 @@
-CV 5-fold best: LogisticRegression 0.9671+/-0.0011
-Tuned LogReg C=10 | test acc=0.9651 F1=0.9655
-Robustesse (0/25/50/100% log manquant): [0.965, 0.84, 0.723, 0.378]
-LightGBM corrige: 0.0036

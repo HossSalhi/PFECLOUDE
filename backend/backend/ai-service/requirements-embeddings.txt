@@ -1,3 +1,0 @@
-# Kept for backward compatibility with older setup docs.
-# Main dependency list already includes this package.
-sentence-transformers==3.2.0

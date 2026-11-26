@@ -1,6 +1,0 @@
-event_id,scenario,namespace,app,window_minutes,end_time,incident,incident_type,severity,recommended_action,notes
-1,CPU_STRESS,pfe,backend,5,2026-04-10T20:00:00Z,true,CPU_STRESS,HIGH,RESTART_OR_SCALE,CPU stress test enabled
-2,MEMORY_STRESS,pfe,backend,5,2026-04-10T20:07:00Z,true,MEMORY_STRESS,HIGH,RESTART_OR_SCALE,Memory stress test enabled
-3,DB_POOL_EXHAUSTION,pfe,backend,5,2026-04-10T20:14:00Z,true,DATABASE_CONNECTIVITY,HIGH,CHECK_DB_CONNECTIVITY_AND_RESTART,DB pool exhaustion test
-4,HIGH_LATENCY,pfe,backend,5,2026-04-10T20:21:00Z,true,GENERAL_DEGRADATION,MEDIUM,INVESTIGATE,High latency filter enabled
-5,,pfe,backend,5,2026-04-10T20:28:00Z,false,NO_INCIDENT,LOW,NO_ACTION,Normal period without injected fault

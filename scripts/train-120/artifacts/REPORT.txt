@@ -1,9 +1,0 @@
-MODELE: LogisticRegression
-Accuracy: 0.9624
-F1 macro: 0.9625
-F1 weighted: 0.9622
-Precision macro: 0.9640
-Recall macro: 0.9627
-Classes F1>=0.60: 120/120
-Classes F1>=0.90: 104/120
-train/val/test: 8319/1783/1783
