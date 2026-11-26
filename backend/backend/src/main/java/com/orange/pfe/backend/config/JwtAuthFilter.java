@@ -30,6 +30,32 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     @Value("${helios.bridge.api-key:}")
     private String bridgeApiKey = "";
 
+    /** Jeton de scrape Prometheus (Authorization: Bearer). Fermé par défaut : vide = aucun accès. Fourni par l'environnement. */
+    @Value("${helios.metrics.scrape-token:}")
+    private String metricsScrapeToken = "";
+
+    private boolean isValidMetricsScrape(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod()) || metricsScrapeToken == null || metricsScrapeToken.isBlank()) {
+            return false;
+        }
+        String path = request.getServletPath();
+        if (path == null || path.isBlank()) { path = request.getRequestURI(); }
+        if (!"/actuator/prometheus".equals(path)) {
+            return false;
+        }
+        String h = request.getHeader("Authorization");
+        if (h == null || !h.startsWith("Bearer ")) {
+            return false;
+        }
+        try {
+            java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+            return MessageDigest.isEqual(sha.digest(metricsScrapeToken.getBytes(StandardCharsets.UTF_8)),
+                    sha.digest(h.substring(7).getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return false;
+        }
+    }
+
     public JwtAuthFilter(JwtService jwtService, AppUserRepository userRepository) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
@@ -92,6 +118,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                             null,
                             List.of(new SimpleGrantedAuthority("ROLE_HELIOS_BRIDGE")));
             SecurityContextHolder.getContext().setAuthentication(bridgeAuth);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Identité technique de supervision : uniquement GET /actuator/prometheus avec le jeton dédié.
+        if (isValidMetricsScrape(request)) {
+            SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                    "HELIOS_METRICS", null, List.of(new SimpleGrantedAuthority("ROLE_METRICS"))));
             filterChain.doFilter(request, response);
             return;
         }

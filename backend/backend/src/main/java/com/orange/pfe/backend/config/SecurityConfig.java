@@ -111,11 +111,13 @@ public class SecurityConfig {
                         "/api/test/health-liveness",
                         "/actuator/health",
                         "/actuator/health/**",
-                        "/actuator/prometheus",
                         "/actuator/info",
-                        "/api/events/**",
-                        "/api/webhooks/falco"   // ingestion Falco (trafic interne cluster)
+                        "/api/events/stream",   // flux SSE : accès par TICKET à usage unique validé dans le contrôleur
+                        "/api/webhooks/falco"   // authentifié par jeton partagé dans le contrôleur (fermé par défaut)
                 ).permitAll();
+
+                // Supervision : uniquement le jeton de scrape dédié (ROLE_METRICS, voir JwtAuthFilter) ou un SUPER_ADMIN.
+                auth.requestMatchers(HttpMethod.GET, "/actuator/prometheus").hasAnyRole("METRICS", "SUPER_ADMIN");
 
                 // Swagger (si activé)
                 if (props.isExposeApiDocs()) {

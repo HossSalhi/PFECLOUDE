@@ -1,0 +1,59 @@
+import { TestBed } from '@angular/core/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { SseService } from './sse.service';
+import { AuthService } from './auth.service';
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  onopen: any; onerror: any; onmessage: any;
+  constructor(public url: string) { FakeEventSource.instances.push(this); }
+  addEventListener(): void {}
+  close(): void {}
+}
+
+describe('SseService (accès par ticket)', () => {
+  let http: HttpTestingController;
+  const realES = (window as any).EventSource;
+  let loggedIn = true;
+
+  function create(): SseService {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [{ provide: AuthService, useValue: { isLoggedIn: () => loggedIn } }]
+    });
+    http = TestBed.inject(HttpTestingController);
+    return TestBed.inject(SseService);
+  }
+
+  beforeEach(() => { FakeEventSource.instances = []; (window as any).EventSource = FakeEventSource; loggedIn = true; });
+  afterEach(() => { (window as any).EventSource = realES; });
+
+  it("demande un ticket puis ouvre le flux avec ce ticket, sans jeton permanent dans l'URL", () => {
+    const s = create();
+    const req = http.expectOne(r => r.url.endsWith('/api/events/ticket'));
+    expect(req.request.method).toBe('POST');
+    req.flush({ ticket: 't1.n1.sig' });
+    expect(FakeEventSource.instances.length).toBe(1);
+    expect(FakeEventSource.instances[0].url).toContain('/api/events/stream?ticket=t1.n1.sig');
+    expect(FakeEventSource.instances[0].url).not.toContain('Bearer');
+    s.ngOnDestroy();
+  });
+
+  it("n'ouvre aucune connexion et ne demande rien tant que l'utilisateur n'est pas connecté", () => {
+    loggedIn = false;
+    const s = create();
+    http.expectNone(r => r.url.endsWith('/api/events/ticket'));
+    expect(FakeEventSource.instances.length).toBe(0);
+    s.ngOnDestroy();
+  });
+
+  it('en cas de refus du ticket, ne se connecte pas et signale la déconnexion', () => {
+    const s = create();
+    let state: boolean | undefined;
+    s.onConnected().subscribe(v => state = v);
+    http.expectOne(r => r.url.endsWith('/api/events/ticket')).flush('refus', { status: 403, statusText: 'Forbidden' });
+    expect(FakeEventSource.instances.length).toBe(0);
+    expect(state).toBe(false);
+    s.ngOnDestroy();
+  });
+});

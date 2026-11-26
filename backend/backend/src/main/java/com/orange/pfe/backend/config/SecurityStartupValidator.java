@@ -47,6 +47,12 @@ public class SecurityStartupValidator {
      * Set SECURITY_STRICT_MODE=true in production K8s secrets.
      * CI smoke tests leave this false so they can boot with default credentials.
      */
+    @Value("${helios.falco.webhook-token:}")
+    private String falcoWebhookToken;
+
+    @Value("${helios.metrics.scrape-token:}")
+    private String metricsScrapeToken;
+
     @Value("${security.strict-mode:false}")
     private boolean strictMode;
 
@@ -68,6 +74,14 @@ public class SecurityStartupValidator {
                 && (bridgeApiKey == null || bridgeApiKey.isBlank())) {
             violations.add(
                     "HELIOS_BRIDGE_API_KEY est requis lorsque HELIOS_BRIDGE_AUTH_REQUIRED=true");
+        }
+
+        // Fermés par défaut : un jeton absent ne bloque PAS le démarrage mais refuse l'accès (voir contrôleurs/filtre).
+        if (falcoWebhookToken == null || falcoWebhookToken.isBlank()) {
+            log.warn("HELIOS_FALCO_WEBHOOK_TOKEN absent : le webhook Falco refusera toutes les requêtes (détection Falco inactive).");
+        }
+        if (metricsScrapeToken == null || metricsScrapeToken.isBlank()) {
+            log.warn("HELIOS_METRICS_SCRAPE_TOKEN absent : /actuator/prometheus sera inaccessible à Prometheus (supervision inactive).");
         }
 
         if (violations.isEmpty()) {

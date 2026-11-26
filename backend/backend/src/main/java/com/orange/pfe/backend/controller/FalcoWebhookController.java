@@ -10,9 +10,13 @@ import com.orange.pfe.backend.service.AIOpsOrchestrationService;
 import com.orange.pfe.backend.service.IncidentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -48,8 +52,38 @@ public class FalcoWebhookController {
         this.incidentRepository = incidentRepository;
     }
 
+    /**
+     * Jeton partagé Falcosidekick -> backend (en-tête {@value #TOKEN_HEADER}). FERMÉ PAR DÉFAUT : aucun jeton par défaut ;
+     * tant que {@code HELIOS_FALCO_WEBHOOK_TOKEN} n'est pas fourni par l'environnement, TOUTES les requêtes sont refusées.
+     */
+    @Value("${helios.falco.webhook-token:}")
+    private String webhookToken = "";
+
+    static final String TOKEN_HEADER = "X-Helios-Falco-Token";
+
+    private boolean tokenAccepted(String supplied) {
+        if (webhookToken == null || webhookToken.isBlank() || supplied == null) {
+            return false;
+        }
+        // Comparaison en temps constant des condensats : pas de fuite sur la longueur ni sur le préfixe.
+        try {
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            byte[] a = sha.digest(webhookToken.getBytes(StandardCharsets.UTF_8));
+            byte[] b = sha.digest(supplied.getBytes(StandardCharsets.UTF_8));
+            return MessageDigest.isEqual(a, b);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return false;
+        }
+    }
+
     @PostMapping
-    public ResponseEntity<Map<String, Object>> ingest(@RequestBody Map<String, Object> event) {
+    public ResponseEntity<Map<String, Object>> ingest(@RequestBody Map<String, Object> event,
+            @RequestHeader(value = TOKEN_HEADER, required = false) String token) {
+        if (!tokenAccepted(token)) {
+            // Jamais le jeton (ni reçu ni attendu) dans les journaux.
+            log.warn("Webhook Falco refusé : authentification absente, invalide ou non configurée");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("status", "unauthorized"));
+        }
         // Toujours répondre 200 : Falcosidekick ne doit pas re-tenter en boucle sur une erreur.
         try {
             String rule = str(event.get("rule"));

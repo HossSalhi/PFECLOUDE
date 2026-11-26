@@ -1,4 +1,6 @@
 import { Injectable, OnDestroy } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { AuthService } from './auth.service';
 import { Subject, Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
@@ -19,7 +21,7 @@ export class SseService implements OnDestroy {
   private incidentUpdated$ = new Subject<any>();
   private connected$ = new Subject<boolean>();
 
-  constructor() {
+  constructor(private http: HttpClient, private auth: AuthService) {
     this.connect();
   }
 
@@ -28,7 +30,23 @@ export class SseService implements OnDestroy {
       this.eventSource.close();
     }
 
-    const url = `${this.baseUrl}/api/events/stream`;
+    // Le flux SSE n'est plus public : EventSource ne peut pas envoyer d'en-tête Authorization, on obtient donc un TICKET
+    // court (30 s), à usage unique, via une requête authentifiée ; le JWT n'est jamais placé dans l'URL.
+    if (!this.auth.isLoggedIn()) {
+      this.scheduleReconnect();
+      return;
+    }
+    this.http.post<{ ticket: string }>(`${this.baseUrl}/api/events/ticket`, {}).subscribe({
+      next: res => this.openStream(res.ticket),
+      error: () => {
+        this.connected$.next(false);
+        this.scheduleReconnect();
+      }
+    });
+  }
+
+  private openStream(ticket: string): void {
+    const url = `${this.baseUrl}/api/events/stream?ticket=${encodeURIComponent(ticket)}`;
 
     try {
       this.eventSource = new EventSource(url);
