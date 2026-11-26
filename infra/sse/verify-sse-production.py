@@ -6,7 +6,10 @@ evenement injecte dans l outbox sse_event puis supprime). Une seule tentative de
 import json,subprocess,base64,re,time,os,tempfile
 def sh(*a,inp=None): return subprocess.run(list(a),input=inp,capture_output=True,text=True)
 def kget(ns,n,key): return base64.b64decode(json.loads(sh('kubectl','-n',ns,'get','secret',n,'-o','json').stdout)['data'][key]).decode()
-user=os.environ['HELIOS_TEST_USER']; pw=os.environ['HELIOS_TEST_PASSWORD']; ing='https://helios.orange.tn'; res='helios.orange.tn:443:10.97.134.39'
+user=os.environ.get('HELIOS_TEST_USER'); pw=os.environ.get('HELIOS_TEST_PASSWORD')
+if not user or not pw:
+    print('BLOQUE - COMPTE DE TEST AUTORISE MANQUANT : definir HELIOS_TEST_USER et HELIOS_TEST_PASSWORD (et, pour l isolation, HELIOS_TEST_USER2 / HELIOS_TEST_PASSWORD2). Aucune requete envoyee.'); raise SystemExit(2)
+ing='https://helios.orange.tn'; res='helios.orange.tn:443:10.97.134.39'
 out=[]
 def chk(n,ok,x=''): out.append((n,ok)); print(('OK    ' if ok else 'ECART ')+n+(' '+x if x else ''))
 # 1) connexion via l'ingress HTTPS (UNE tentative)
@@ -42,6 +45,34 @@ ins=sh('kubectl','-n','pfe','exec','postgres-7','-c','postgres','--','psql','-U'
 for p in procs: p.wait()
 for name,fl in files:
     c=open(fl).read() if os.path.exists(fl) else ''; chk(f'abonné sur {name} reçoit l\'évènement injecté (outbox → poller du pod)',marker in c and c.count(marker)==1,f'(reçu {c.count(marker)} fois)')
+# 5) ISOLATION utilisateur / namespace (optionnelle) : second compte RESTREINT fourni par HELIOS_TEST_USER2 / HELIOS_TEST_PASSWORD2 (une seule tentative)
+#    Controle : un evenement destine a un namespace que le compte restreint ne possede pas ne doit PAS lui parvenir, alors que le compte principal (temoin) le recoit.
+iso_marker='DIAG-NS-'+str(int(time.time())); u2=os.environ.get('HELIOS_TEST_USER2'); p2=os.environ.get('HELIOS_TEST_PASSWORD2')
+if u2 and p2:
+    r=sh('curl','-sk','-m','15','--resolve',res,'-X','POST','-H','Content-Type: application/json','-d',json.dumps({'username':u2,'password':p2}),'-w','\n%{http_code}',ing+'/api/auth/login')
+    b2,c2=r.stdout.rsplit('\n',1); print('login compte restreint : HTTP',c2)
+    jw2=None
+    if c2=='200':
+        j2=json.loads(b2); jw2=next((j2.get(k) for k in ('accessToken','token','jwt') if j2.get(k)),None)
+    if jw2:
+        name,ip=pods[0]; fl_r=tempfile.mktemp(); fl_a=tempfile.mktemp(); pr=[]
+        for tok,fl in ((jw2,fl_r),(jwt,fl_a)):
+            t=sh('curl','-s','-m','10','-i','-X','POST','-H','Authorization: Bearer '+tok,'-H','Content-Type: application/json','-d','{}',f'http://{ip}:8080/api/events/ticket').stdout
+            m=re.search(r'helios_sse=([^;]+)',t)
+            if m: pr.append(subprocess.Popen(['curl','-s','-N','-m','12','-H','Cookie: helios_sse='+m.group(1),f'http://{ip}:8080/api/events/stream','-o',fl]))
+        time.sleep(4)
+        sql2="insert into sse_event(event_name,namespace,payload) values ('helios_diagnostic','ns-diag-interdit','{\"marker\":\""+iso_marker+"\"}')"
+        sh('kubectl','-n','pfe','exec','postgres-7','-c','postgres','--','psql','-U','postgres','-d','pfe_db','-Atc',sql2)
+        for p in pr: p.wait()
+        ca=open(fl_a).read() if os.path.exists(fl_a) else ''; cr=open(fl_r).read() if os.path.exists(fl_r) else ''
+        chk('isolation : le compte principal (temoin) recoit l\'evenement du namespace de diagnostic',iso_marker in ca)
+        chk('isolation : le compte RESTREINT ne recoit PAS l\'evenement d\'un namespace qui n\'est pas le sien',iso_marker not in cr and 'connected' in cr,'(flux ouvert: %s)'%('connected' in cr))
+        sh('kubectl','-n','pfe','exec','postgres-7','-c','postgres','--','psql','-U','postgres','-d','pfe_db','-Atc',"delete from sse_event where payload like '%"+iso_marker+"%'")
+        for fl in (fl_r,fl_a):
+            try: os.unlink(fl)
+            except: pass
+    else: print('isolation : NON EXECUTEE (connexion du compte restreint non aboutie, aucune nouvelle tentative)')
+else: print('isolation : NON EXECUTEE (HELIOS_TEST_USER2 / HELIOS_TEST_PASSWORD2 absents)')
 d=sh('kubectl','-n','pfe','exec','postgres-7','-c','postgres','--','psql','-U','postgres','-d','pfe_db','-Atc',"delete from sse_event where event_name='helios_diagnostic' and payload like '%"+marker+"%'"); print('nettoyage de la ligne de diagnostic :',d.stdout.strip())
 for _,fl in files+[('',f)]:
     try: os.unlink(fl)
