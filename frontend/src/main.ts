@@ -1,5 +1,4 @@
 import { provideZoneChangeDetection, importProvidersFrom } from "@angular/core";
-import { platformBrowserDynamic } from '@angular/platform-browser-dynamic';
 
 
 import { HTTP_INTERCEPTORS, provideHttpClient, withXhr, withInterceptorsFromDi } from "@angular/common/http";
@@ -15,6 +14,7 @@ bootstrapApplication(AppComponent, {
     providers: [
         importProvidersFrom(BrowserModule, FormsModule, ReactiveFormsModule, AppRoutingModule, NgChartsModule),
         { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+        provideZoneChangeDetection(),
         provideHttpClient(withXhr(), withInterceptorsFromDi())
     ]
 })
