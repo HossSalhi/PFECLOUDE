@@ -148,3 +148,6 @@ kubectl -n pfe set env deploy/backend HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS=true
 kubectl -n pfe rollout status deploy/backend --timeout=480s
 ```
 (le flag global `HELIOS_AI_ASSIST_ENABLED=true` est déjà posé). Désactiver : même commande avec `=false`. Limiter l'usage : la carte n'apparaît que sur la page Supervision, pour les admins et les chefs d'équipe. Rappel de la rétrospective : beaucoup de fenêtres seront « Couverture partielle » tant que Prometheus a des trous (gels de l'hôte) ; c'est voulu.
+
+### Analyse « que se passe-t-il dans HELIOS » : sonde de la stack (27 nov. 2026, NON commitée, NON déployée)
+L'analyse télémétrie sonde en plus, en lecture seule : cibles Prometheus (`up == 0`, cibles instables < 95 %), alertes Prometheus en cours, déploiements incomplets, redémarrages de conteneurs, pods arrêtés ou bloqués (kube-state-metrics) et santé de Prometheus, Loki et Grafana. Chaque constat est classé **Application** (composants applicatifs HELIOS) ou **Infrastructure** (machines, cluster, outils de supervision) ; la synthèse IA est rédigée en deux parties « Côté application / Côté infrastructure ». Une sonde en échec est nommée et rend la qualité « partielle ». Alertmanager n'est pas déployé : non sondé. Reste hors périmètre : incidents HELIOS de la base et état de Camunda au-delà de la cible Prometheus.
