@@ -1,3 +1,4 @@
+import { AiTeamPanelComponent } from '../ai-assist/ai-team-panel.component';
 import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { Observable } from 'rxjs';
 import { TeamService } from '../../core/services/team.service';
@@ -17,7 +18,7 @@ import { NgClass } from '@angular/common';
     selector: 'app-teams',
     templateUrl: './teams.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [RouterLink, FormsModule, NgClass]
+    imports: [RouterLink, FormsModule, NgClass, AiTeamPanelComponent]
 })
 export class TeamsComponent implements OnInit {
 

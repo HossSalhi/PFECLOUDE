@@ -27,6 +27,10 @@
         </div>
       }
 
+      @if (canViewAll) {
+        <app-ai-audit-anomalies />
+      }
+
       @if (success) {
         <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
       }

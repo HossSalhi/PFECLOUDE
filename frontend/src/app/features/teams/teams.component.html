@@ -101,6 +101,7 @@
               <div class="stat-tile"><div class="stat-label">Avancement</div><div class="stat-value">{{ summary.tasks.completionRate }}<span class="stat-unit">%</span></div></div>
             </div>
           }
+          <app-ai-team-panel [teamId]="selected.id"></app-ai-team-panel>
           <div class="section-title">Membres ({{ members.length }})</div>
           @if (canMembers && selected.active) {
             <div class="filters-bar">

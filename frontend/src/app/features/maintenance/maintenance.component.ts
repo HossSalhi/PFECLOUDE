@@ -1,3 +1,4 @@
+import { AiMaintenanceWindowComponent } from '../ai-assist/ai-maintenance-window.component';
 import { Component, Injector, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MaintenanceService } from '../../core/services/maintenance.service';
@@ -27,7 +28,7 @@ const FIELD_LABELS: Record<string, string> = {
     selector: 'app-maintenance',
     templateUrl: './maintenance.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [FormsModule, NgClass, SlicePipe, RouterLink]
+    imports: [FormsModule, NgClass, SlicePipe, RouterLink, AiMaintenanceWindowComponent]
 })
 export class MaintenanceComponent implements OnInit {
 

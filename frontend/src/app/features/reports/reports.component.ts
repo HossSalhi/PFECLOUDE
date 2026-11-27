@@ -10,6 +10,7 @@ import { PERIOD_PRESET_LABELS, PeriodPreset, presetRange, toBackendPeriod, valid
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
 import { ReportViewComponent } from './report-view.component';
+import { AiReportSummaryComponent } from '../ai-assist/ai-report-summary.component';
 
 type Tab = 'reports' | 'stats' | 'schedules';
 
@@ -23,7 +24,7 @@ type Tab = 'reports' | 'stats' | 'schedules';
     selector: 'app-reports',
     templateUrl: './reports.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [FormsModule, NgClass, ReportViewComponent]
+    imports: [FormsModule, NgClass, ReportViewComponent, AiReportSummaryComponent]
 })
 export class ReportsComponent implements OnInit {
 

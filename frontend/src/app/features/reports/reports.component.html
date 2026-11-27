@@ -247,6 +247,7 @@
             }
             @if (!viewLoading && viewContent) {
               <app-report-view [content]="viewContent"></app-report-view>
+              <app-ai-report-summary [reportId]="viewing.report.id"></app-ai-report-summary>
             }
           </div>
           <div class="modal-footer">

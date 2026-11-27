@@ -1,3 +1,4 @@
+import { AiAuditAnomaliesComponent } from '../ai-assist/ai-audit-anomalies.component';
 import { Component, OnInit, ChangeDetectionStrategy, Injector, inject } from '@angular/core';
 import { AuditTrailService } from '../../core/services/audit-trail.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
@@ -26,7 +27,7 @@ const RESULT_LABELS: Record<string, string> = { SUCCESS: 'Succès', FAILURE: 'É
     selector: 'app-audit-trail',
     templateUrl: './audit-trail.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [FormsModule, NgClass]
+    imports: [FormsModule, NgClass, AiAuditAnomaliesComponent]
 })
 export class AuditTrailComponent implements OnInit {
 

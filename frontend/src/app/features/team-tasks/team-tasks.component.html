@@ -213,6 +213,8 @@
             }
           </div>
         </div>
+        <app-ai-task-advisor [teamId]="form.teamId" [title]="form.title" [description]="form.description" [priority]="form.priority"
+                             (chosen)="form.assigneeId = $event"></app-ai-task-advisor>
         <div class="form-row-2">
           <div class="form-group">
             <label>Priorité</label>

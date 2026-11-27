@@ -1,3 +1,4 @@
+import { AiTaskAdvisorComponent } from '../ai-assist/ai-task-advisor.component';
 import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TeamService } from '../../core/services/team.service';
@@ -22,7 +23,7 @@ import { NgClass } from '@angular/common';
     selector: 'app-team-tasks',
     templateUrl: './team-tasks.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [RouterLink, FormsModule, NgClass]
+    imports: [RouterLink, FormsModule, NgClass, AiTaskAdvisorComponent]
 })
 export class TeamTasksComponent implements OnInit {
 
