@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import { ChartConfiguration } from 'chart.js';
 import { NgChartsModule } from 'ng2-charts';
@@ -8,10 +7,13 @@ import { AuthService } from '../../core/services/auth.service';
 import { SupervisionService } from '../../core/services/supervision.service';
 import { CHART_PALETTE } from '../../shared/chart.util';
 import {
-  CamundaIncidents, CamundaInstances, CamundaOverview, CamundaSteps, Correlation, GrafanaConfig, GrafanaDashboard, HostsOverview,
+  CamundaOverview, Correlation, HostsOverview,
   LogStats, MeaningEntry, SeriesLine, SeriesResponse, SupPoint, SupervisionMetric, TopErrors
 } from '../../core/models/supervision.models';
 import { MonitoringLinksComponent } from '../infrastructure/monitoring-links.component';
+import { CamundaPanelComponent } from './camunda-panel.component';
+import { GrafanaPanelComponent } from './grafana-panel.component';
+import { LogsViewerComponent } from './logs-viewer.component';
 
 export type SupTab = 'overview' | 'metrics' | 'logs' | 'camunda' | 'grafana';
 
@@ -30,11 +32,10 @@ const empty = <T>(): Section<T> => ({ loading: false, data: null, error: '' });
   standalone: true,
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './supervision.component.html',
-  imports: [NgChartsModule, DecimalPipe, DatePipe, RouterLink, MonitoringLinksComponent]
+  imports: [NgChartsModule, DecimalPipe, DatePipe, RouterLink, MonitoringLinksComponent, CamundaPanelComponent, GrafanaPanelComponent, LogsViewerComponent]
 })
 export class SupervisionComponent implements OnInit {
   private api = inject(SupervisionService);
-  private sanitizer = inject(DomSanitizer);
   readonly auth = inject(AuthService);
 
   readonly tabs: { id: SupTab; label: string; icon: string }[] = [
@@ -49,13 +50,11 @@ export class SupervisionComponent implements OnInit {
   readonly metrics: { id: SupervisionMetric; label: string }[] = [
     { id: 'CPU', label: 'CPU' }, { id: 'MEMORY', label: 'Mémoire' }, { id: 'DISK', label: 'Disque' }
   ];
-  readonly instanceStates = ['', 'ACTIVE', 'COMPLETED', 'TERMINATED'];
 
   tab: SupTab = 'overview';
   logMinutes = 60;
   metricMinutes = 60;
   metric: SupervisionMetric = 'CPU';
-  instanceState = '';
 
   hosts = empty<HostsOverview>();
   correlation = empty<Correlation>();
@@ -64,13 +63,6 @@ export class SupervisionComponent implements OnInit {
   topErrors = empty<TopErrors>();
   meanings = empty<MeaningEntry[]>();
   camunda = empty<CamundaOverview>();
-  instances = empty<CamundaInstances>();
-  camundaIncidents = empty<CamundaIncidents>();
-  steps = empty<CamundaSteps>();
-  stepsFor: string | null = null;
-  grafana = empty<GrafanaConfig>();
-  selectedDashboard: GrafanaDashboard | null = null;
-  dashboardUrl: SafeResourceUrl | null = null;
 
   metricChart: ChartConfiguration<'line'>['data'] | null = null;
   correlationChart: ChartConfiguration<'line'>['data'] | null = null;
@@ -114,20 +106,12 @@ export class SupervisionComponent implements OnInit {
         if (force || !this.logs.data) { this.loadLogs(); }
         break;
       case 'camunda':
-        if (force || !this.camunda.data) { this.fetch(this.camunda, this.api.camundaOverview()); }
-        if (force || !this.instances.data) { this.loadInstances(); }
-        if (force || !this.camundaIncidents.data) { this.fetch(this.camundaIncidents, this.api.camundaIncidents(10)); }
-        break;
       case 'grafana':
-        if (force || !this.grafana.data) {
-          this.fetch(this.grafana, this.api.grafana(), g => {
-            if (!this.selectedDashboard && g.dashboards.length) { this.chooseDashboard(g.dashboards[0]); }
-          });
-        }
-        break;
+        break;   // panneaux autonomes : ils chargent leurs données eux-mêmes
     }
   }
 
+  /** Actualise l'onglet courant ; les panneaux Camunda et Grafana ont leur propre bouton. */
   refresh(): void { this.load(this.tab, true); }
 
   private fetch<T>(section: Section<T>, call: { subscribe: (o: any) => any }, after?: (d: T) => void): void {
@@ -191,34 +175,6 @@ export class SupervisionComponent implements OnInit {
         { label: 'CPU max (%)', data: labels.map(l => cpuAt.get(l) ?? null) as number[], borderColor: '#1565c0', borderWidth: 2, pointRadius: 0, tension: 0.25, yAxisID: 'y1' }
       ]
     };
-  }
-
-  // ── Camunda ────────────────────────────────────────────────────────────────
-
-  setInstanceState(s: string): void { this.instanceState = s; this.loadInstances(); }
-
-  loadInstances(): void { this.fetch(this.instances, this.api.camundaInstances(this.instanceState, 15)); }
-
-  showSteps(definitionKey: string): void {
-    if (this.stepsFor === definitionKey) { this.stepsFor = null; return; }
-    this.stepsFor = definitionKey;
-    this.steps = empty<CamundaSteps>();
-    this.fetch(this.steps, this.api.camundaSteps(definitionKey));
-  }
-
-  duration(ms: number | null): string {
-    if (ms == null) { return '—'; }
-    if (ms < 1000) { return `${ms} ms`; }
-    const s = Math.round(ms / 1000);
-    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
-  }
-
-  // ── Grafana ────────────────────────────────────────────────────────────────
-
-  chooseDashboard(d: GrafanaDashboard): void {
-    this.selectedDashboard = d;
-    // seule une adresse http(s) fournie par le serveur est intégrée ; sinon rien n'est affiché
-    this.dashboardUrl = d.embedUrl && /^https?:\/\//i.test(d.embedUrl) ? this.sanitizer.bypassSecurityTrustResourceUrl(d.embedUrl) : null;
   }
 
   // ── Aides d'affichage ──────────────────────────────────────────────────────

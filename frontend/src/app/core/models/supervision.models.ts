@@ -54,3 +54,26 @@ export interface CamundaSteps { available: boolean; error: string | null; defini
 
 export interface GrafanaDashboard { title: string; uid: string; embedUrl: string | null; }
 export interface GrafanaConfig { embedEnabled: boolean; dashboards: GrafanaDashboard[]; }
+
+// ── Visualiseur de logs (administrateurs) ────────────────────────────────────
+export type LogLevelFilter = 'ALL' | 'ERROR' | 'WARN';
+export interface LogSource { key: string; label: string; kind: 'HOST' | 'APP'; }
+export interface LogSources { available: boolean; error: string | null; sources: LogSource[]; }
+export interface LogLineView { at: string; text: string; level: 'INFO' | 'WARN' | 'ERROR'; category: string | null; label: string | null; }
+export interface LogLines {
+  available: boolean; error: string | null; source: string; level: string; query: string; minutes: number;
+  from: string; to: string; truncated: boolean; count: number; lines: LogLineView[];
+}
+
+// ── Diagramme de processus Camunda ───────────────────────────────────────────
+export interface ElementStats { completed: number; active: number; canceled: number; incidents: number; }
+export interface DiagramNode {
+  id: string; type: string; shape: 'EVENT_START' | 'EVENT_END' | 'EVENT' | 'TASK' | 'GATEWAY' | 'SUBPROCESS'; name: string;
+  x: number; y: number; w: number; h: number; stats: ElementStats;
+}
+export interface DiagramPoint { x: number; y: number; }
+export interface DiagramEdge { id: string; from: string; to: string; label: string | null; points: DiagramPoint[]; }
+export interface ProcessDiagram {
+  available: boolean; error: string | null; definitionKey: string; name: string; version: number; autoLayout: boolean;
+  width: number; height: number; nodes: DiagramNode[]; edges: DiagramEdge[];
+}

@@ -1,0 +1,44 @@
+<section class="gp" aria-label="Grafana">
+  @if (loading) { <p class="sup-muted">Chargement…</p> }
+  @if (error) { <div class="alert-warning" role="alert">{{ error }}</div> }
+
+  @if (config && config.embedEnabled && config.dashboards.length) {
+    <div class="cp-card">
+      <div class="cp-card-head">
+        <div>
+          <h2 class="sup-h" style="margin:0"><i class="fas fa-chart-area"></i> Dashboards Grafana</h2>
+          <div class="sup-muted">Lecture seule · actualisation automatique toutes les 30 s</div>
+        </div>
+        <div class="cp-tools">
+          <div class="lv-pills" role="group" aria-label="Période">
+            @for (r of ranges; track r.id) { <button class="sup-period" [class.active]="range === r.id" (click)="setRange(r.id)">{{ r.label }}</button> }
+          </div>
+          <label class="lv-auto"><input type="checkbox" [checked]="refresh" (change)="toggleRefresh()"> Auto</label>
+          <button class="btn-secondary" (click)="reload()" title="Recharger le dashboard"><i class="fas fa-rotate-right"></i></button>
+          @if (openUrl) { <a class="btn-secondary" [href]="openUrl" target="_blank" rel="noopener noreferrer" style="text-decoration:none"><i class="fas fa-up-right-from-square"></i> Ouvrir dans Grafana</a> }
+        </div>
+      </div>
+
+      <div class="lv-pills gp-tabs" role="tablist" aria-label="Dashboards">
+        @for (d of config.dashboards; track d.uid) {
+          <button role="tab" class="sup-period" [class.active]="selected?.uid === d.uid" [attr.aria-selected]="selected?.uid === d.uid" (click)="choose(d)">{{ d.title }}</button>
+        }
+      </div>
+
+      @if (mixedContent) {
+        <div class="alert-warning" role="alert">
+          Cette page est ouverte en HTTPS alors que Grafana est servi en HTTP : le navigateur bloque l'intégration.
+          Ouvrez HELIOS en HTTP ou utilisez « Ouvrir dans Grafana ».
+        </div>
+      }
+      @if (frameUrl) {
+        <iframe class="gp-frame" [src]="frameUrl" [title]="selected?.title || 'Dashboard Grafana'" referrerpolicy="no-referrer" loading="lazy"></iframe>
+      }
+    </div>
+  } @else if (config) {
+    <div class="alert-warning" role="status">
+      Les dashboards Grafana ne sont pas encore intégrés dans HELIOS : l'intégration n'est pas activée ou aucun dashboard n'est configuré.
+      Les onglets Métriques et Logs montrent les mêmes données directement dans HELIOS.
+    </div>
+  }
+</section>

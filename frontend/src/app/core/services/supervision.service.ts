@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   CamundaIncidents, CamundaInstances, CamundaOverview, CamundaSteps, Correlation, GrafanaConfig, HostsOverview, LogStats,
-  MeaningEntry, SeriesResponse, SupervisionMetric, TopErrors
+  LogLevelFilter, LogLines, LogSources, MeaningEntry, ProcessDiagram, SeriesResponse, SupervisionMetric, TopErrors
 } from '../models/supervision.models';
 
 /** Supervision en lecture seule (API {@code /api/supervision}) : ouverte à tout utilisateur connecté. */
@@ -50,4 +50,18 @@ export class SupervisionService {
   }
 
   grafana(): Observable<GrafanaConfig> { return this.http.get<GrafanaConfig>(`${this.base}/grafana`); }
+
+  camundaDiagram(definitionKey: string): Observable<ProcessDiagram> {
+    return this.http.get<ProcessDiagram>(`${this.base}/camunda/definitions/${encodeURIComponent(definitionKey)}/diagram`);
+  }
+
+  /** Machines et applications dont les logs sont consultables (administrateurs). */
+  logSources(): Observable<LogSources> { return this.http.get<LogSources>(`${this.base}/logs/sources`); }
+
+  /** Lignes de logs d'une source (administrateurs) ; le mot cherché est toujours pris littéralement par le serveur. */
+  logLines(source: string, level: LogLevelFilter, q: string, minutes: number, limit: number): Observable<LogLines> {
+    const params: Record<string, string | number> = { source, level, minutes, limit };
+    if (q.trim()) { params['q'] = q.trim(); }
+    return this.http.get<LogLines>(`${this.base}/logs/lines`, { params });
+  }
 }

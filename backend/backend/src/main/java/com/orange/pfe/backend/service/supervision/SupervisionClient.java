@@ -64,6 +64,15 @@ public class SupervisionClient {
         return data(infra.getPrometheusUrl(), "/api/v1/rules", params(), "Prometheus").path("groups");
     }
 
+    /** {@code /loki/api/v1/label/<étiquette>/values} : valeurs d'une étiquette sur la période ({@code data}, tableau de textes). */
+    public JsonNode lokiLabelValues(String label, long startSec, long endSec) {
+        if (!label.matches("[a-z_]{1,32}")) {
+            throw new IllegalArgumentException("Étiquette Loki invalide");
+        }
+        return data(infra.getLokiUrl(), "/loki/api/v1/label/" + label + "/values",
+                params("start", startSec + "000000000", "end", endSec + "000000000"), "Loki");
+    }
+
     /** {@code /loki/api/v1/query} (requête de métrique instantanée) : renvoie {@code data.result}. */
     public JsonNode lokiInstant(String logql, long timeSec) {
         return get(infra.getLokiUrl(), "/loki/api/v1/query",

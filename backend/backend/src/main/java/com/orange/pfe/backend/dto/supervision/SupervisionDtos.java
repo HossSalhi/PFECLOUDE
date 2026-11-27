@@ -75,4 +75,30 @@ public final class SupervisionDtos {
 
     /** {@code embedEnabled} : Grafana autorise l'intégration (réglage fait sur la VM) ; sinon l'interface explique la marche à suivre. */
     public record GrafanaConfig(boolean embedEnabled, List<GrafanaDashboard> dashboards) {}
+
+    // ── Visualiseur de logs (administrateurs) ─────────────────────────────────
+    /** {@code kind} : HOST (machine) ou APP (application de conteneur). */
+    public record LogSource(String key, String label, String kind) {}
+
+    public record LogSources(boolean available, String error, List<LogSource> sources) {}
+
+    /** {@code level} : INFO, WARN ou ERROR ; {@code category}/{@code label} renseignés pour les erreurs connues du catalogue. */
+    public record LogLineView(LocalDateTime at, String text, String level, String category, String label) {}
+
+    public record LogLines(boolean available, String error, String source, String level, String query, int minutes,
+                           LocalDateTime from, LocalDateTime to, boolean truncated, int count, List<LogLineView> lines) {}
+
+    // ── Diagramme de processus Camunda ────────────────────────────────────────
+    public record ElementStats(long completed, long active, long canceled, long incidents) {}
+
+    /** {@code shape} : EVENT_START, EVENT_END, EVENT, TASK, GATEWAY ou SUBPROCESS. */
+    public record DiagramNode(String id, String type, String shape, String name, double x, double y, double w, double h,
+                              ElementStats stats) {}
+
+    public record DiagramPoint(double x, double y) {}
+
+    public record DiagramEdge(String id, String from, String to, String label, List<DiagramPoint> points) {}
+
+    public record ProcessDiagram(boolean available, String error, String definitionKey, String name, int version, boolean autoLayout,
+                                 double width, double height, List<DiagramNode> nodes, List<DiagramEdge> edges) {}
 }

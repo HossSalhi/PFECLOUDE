@@ -101,6 +101,12 @@ public class SupervisionController {
         return camunda.incidents(limit);
     }
 
+    @Operation(summary = "Camunda : diagramme d'un processus avec les compteurs par étape")
+    @GetMapping("/camunda/definitions/{key}/diagram")
+    public com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram camundaDiagram(@PathVariable String key) {
+        return camunda.diagram(key);
+    }
+
     @Operation(summary = "Camunda : étapes d'un processus, lues dans son BPMN")
     @GetMapping("/camunda/definitions/{key}/steps")
     public CamundaSteps camundaSteps(@PathVariable String key) {

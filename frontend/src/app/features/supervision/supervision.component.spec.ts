@@ -28,7 +28,7 @@ describe('SupervisionComponent', () => {
 
   function create(role = 'USER'): HTMLElement {
     api = jasmine.createSpyObj<SupervisionService>('SupervisionService',
-      ['hosts', 'series', 'logStats', 'topErrors', 'meanings', 'correlation', 'camundaOverview', 'camundaInstances', 'camundaIncidents', 'camundaSteps', 'grafana']);
+      ['hosts', 'series', 'logStats', 'topErrors', 'meanings', 'correlation', 'camundaOverview', 'camundaInstances', 'camundaIncidents', 'camundaSteps', 'camundaDiagram', 'grafana', 'logSources', 'logLines']);
     api.hosts.and.returnValue(of(hosts));
     api.camundaOverview.and.returnValue(of(camundaOverview));
     api.correlation.and.returnValue(of({ available: true, error: null, minutes: 60, stepSeconds: 30, errorSeries: pts, cpuSeries: pts,
@@ -48,6 +48,8 @@ describe('SupervisionComponent', () => {
     api.camundaSteps.and.returnValue(of({ available: true, error: null, definitionKey: '55', steps: [
       { id: 'S', type: 'startEvent', kind: 'Début', name: 'Incident détecté' }, { id: 'T', type: 'serviceTask', kind: 'Tâche automatique', name: 'Analyser' }] }));
     api.grafana.and.returnValue(of({ embedEnabled: false, dashboards: [] }));
+    api.camundaDiagram.and.returnValue(of({ available: false, error: 'test', definitionKey: '55', name: '', version: 1, autoLayout: true, width: 0, height: 0, nodes: [], edges: [] }));
+    api.logSources.and.returnValue(of({ available: false, error: 'test', sources: [] }));
 
     TestBed.configureTestingModule({
       imports: [SupervisionComponent],
@@ -137,27 +139,21 @@ describe('SupervisionComponent', () => {
     expect(api.series).toHaveBeenCalledWith('DISK', 60);
   });
 
-  it("l'onglet Camunda liste les processus, les instances, les incidents et les étapes d'un processus", () => {
-    create();
+  it("les onglets Camunda et Grafana montent leurs panneaux dédiés", () => {
+    const el = create();
     click('Camunda');
-
-    expect(text()).toContain('Cycle complet');
-    expect(text()).toContain('1 s');          // durée 1226 ms
-    expect(text()).toContain('JOB_NO_RETRIES');
-    click('Voir les étapes');
-    expect(api.camundaSteps).toHaveBeenCalledWith('55');
-    expect(text()).toContain('Incident détecté');
-    expect(text()).toContain('Tâche automatique');
-    click('Masquer les étapes');
-    expect(text()).not.toContain('Incident détecté');
+    expect(el.querySelector('app-camunda-panel')).not.toBeNull();
+    click('Grafana');
+    expect(el.querySelector('app-camunda-panel')).toBeNull();
+    expect(el.querySelector('app-grafana-panel')).not.toBeNull();
   });
 
-  it("filtre les instances Camunda par état", () => {
-    create();
-    click('Camunda');
-    component.setInstanceState('ACTIVE');
-
-    expect(api.camundaInstances).toHaveBeenCalledWith('ACTIVE', 15);
+  it("le visualiseur de logs n'est proposé qu'aux administrateurs", () => {
+    expect(create('USER').querySelector('app-logs-viewer')).toBeNull();
+    TestBed.resetTestingModule();
+    const el = create('ADMIN');
+    click('Logs');
+    expect(el.querySelector('app-logs-viewer')).not.toBeNull();
   });
 
   it("affiche un message quand un outil est indisponible, sans casser le reste de la page", () => {
@@ -178,27 +174,6 @@ describe('SupervisionComponent', () => {
     expect(text()).toContain("Le serveur n'a pas pu répondre");
   });
 
-  it("Grafana non intégré : explication claire, aucune iframe", () => {
-    const el = create();
-    click('Grafana');
-
-    expect(text()).toContain('ne sont pas encore intégrés');
-    expect(el.querySelector('iframe')).toBeNull();
-  });
-
-  it("Grafana intégré : une iframe par dashboard choisi, adresse http(s) seulement", () => {
-    const el = create();
-    api.grafana.and.returnValue(of({ embedEnabled: true, dashboards: [
-      { title: 'Cluster', uid: 'k8s', embedUrl: 'http://graf.test:3000/d/k8s?orgId=1&kiosk' },
-      { title: 'Piégé', uid: 'bad', embedUrl: 'javascript:alert(1)' }] }));
-    click('Grafana');
-
-    expect(el.querySelector('iframe')).not.toBeNull();
-    expect(el.querySelectorAll('.sup-period').length).toBe(2);
-    click('Piégé');
-    expect(el.querySelector('iframe')).toBeNull();
-  });
-
   it("les boutons directs vers les outils ne sont proposés qu'aux administrateurs", () => {
     expect(create('USER').querySelector('app-monitoring-links')).toBeNull();
     TestBed.resetTestingModule();
@@ -207,10 +182,6 @@ describe('SupervisionComponent', () => {
 
   it("formate les durées", () => {
     create();
-    expect(component.duration(null)).toBe('—');
-    expect(component.duration(850)).toBe('850 ms');
-    expect(component.duration(42_000)).toBe('42 s');
-    expect(component.duration(125_000)).toBe('2 min 5 s');
     expect(component.periodLabel(15)).toBe('15 min');
     expect(component.periodLabel(180)).toBe('3 h');
   });

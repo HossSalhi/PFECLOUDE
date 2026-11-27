@@ -277,3 +277,77 @@
   .sup-alert .badge { margin-right: 4px; }
   .sup-steps li.is-error { color: #c62828; }
 }
+
+/* Visualiseur de logs, panneau Camunda (diagramme SVG) et panneau Grafana. */
+.org-scope {
+  /* ── Logs ── */
+  .lv { margin-bottom: 26px; }
+  .lv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .lv-auto { font-size: 12px; color: var(--text-secondary, #666); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .lv-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; padding: 12px 14px; border: 1px solid var(--border, #e5e5e5); border-radius: 10px; background: var(--bg-surface, #fff); margin-bottom: 10px; }
+  .lv-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; color: var(--text-secondary, #666); text-transform: uppercase; letter-spacing: .03em; }
+  .lv-search { flex: 1; min-width: 180px; }
+  .lv-input { padding: 7px 10px; border: 1px solid var(--border, #d8d8d8); border-radius: 8px; background: var(--bg-surface, #fff); color: var(--text-primary, #1a1a1a); font-size: 13px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .lv-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lv-summary { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; margin: 6px 0; }
+  .lv-chip { padding: 2px 10px; border-radius: 12px; font-weight: 700; background: var(--bg-subtle, #eee); }
+  .lv-chip.is-error { background: #fdecea; color: #c62828; }
+  .lv-chip.is-warn { background: #fff3e0; color: #b45f00; }
+  .lv-console { background: #14171c; color: #d7dae0; border-radius: 10px; max-height: 460px; overflow: auto; padding: 6px 0; font-size: 12px; }
+  .lv-line { display: flex; gap: 8px; padding: 2px 12px; align-items: baseline; border-left: 3px solid transparent; }
+  .lv-line:hover { background: #1d2128; }
+  .lv-line.is-error { border-left-color: #ef5350; background: #2a1a1c; }
+  .lv-line.is-warn { border-left-color: #ffb74d; }
+  .lv-time { color: #7f8794; flex: 0 0 62px; }
+  .lv-level { flex: 0 0 38px; font-weight: 800; font-size: 10px; text-align: center; border-radius: 4px; padding: 1px 0; background: #2b3038; color: #9aa3b2; }
+  .lv-level[data-level='ERROR'] { background: #c62828; color: #fff; }
+  .lv-level[data-level='WARN'] { background: #f9a825; color: #1a1a1a; }
+  .lv-text { white-space: pre-wrap; word-break: break-all; flex: 1; font-family: Consolas, 'Courier New', monospace; }
+  .lv-text mark { background: #fdd835; color: #14171c; padding: 0 2px; border-radius: 2px; }
+  .lv-meaning { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: #3a2024; color: #ff8a80; }
+  .lv-empty { padding: 22px; text-align: center; color: #9aa3b2; }
+
+  /* ── Camunda ── */
+  .cp-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .cp-kpi { border: 1px solid var(--border, #e5e5e5); border-left: 4px solid #9e9e9e; border-radius: 10px; padding: 12px 14px; background: var(--bg-surface, #fff); }
+  .cp-kpi.is-ok { border-left-color: #2e7d32; } .cp-kpi.is-info { border-left-color: #1565c0; } .cp-kpi.is-bad { border-left-color: #c62828; }
+  .cp-kpi-label { font-size: 11px; font-weight: 800; color: var(--text-secondary, #777); text-transform: uppercase; letter-spacing: .04em; }
+  .cp-kpi-value { font-size: 26px; font-weight: 800; color: var(--text-primary, #1a1a1a); line-height: 1.2; }
+  .cp-kpi.is-bad .cp-kpi-value { color: #c62828; }
+  .cp-kpi-sub { font-size: 12px; color: var(--text-secondary, #888); }
+  .cp-card { border: 1px solid var(--border, #e5e5e5); border-radius: 12px; padding: 16px; background: var(--bg-surface, #fff); margin-bottom: 16px; }
+  .cp-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cp-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .cp-zoom { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+  .cp-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; color: var(--text-secondary, #666); align-items: center; }
+  .cp-dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 2px solid; margin-right: 4px; vertical-align: -1px; }
+  .cp-dot.is-done { background: #e8f5e9; border-color: #2e7d32; } .cp-dot.is-active { background: #e3f2fd; border-color: #1565c0; }
+  .cp-dot.is-incident { background: #fdecea; border-color: #c62828; } .cp-dot.is-idle { background: #f5f5f5; border-color: #9e9e9e; }
+  .cp-canvas { overflow: auto; max-height: 640px; border: 1px solid var(--border, #e5e5e5); border-radius: 10px; background: #fff; background-image: radial-gradient(#e3e6eb 1px, transparent 1px); background-size: 20px 20px; padding: 4px; }
+  .cp-canvas svg { display: block; }
+  .cp-edge { fill: none; stroke: #8a8f98; stroke-width: 1.6; }
+  .cp-edge-label { font-size: 10px; fill: #5b616b; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .cp-node rect, .cp-node polygon, .cp-node circle { stroke-width: 2; fill: #f5f5f5; stroke: #9e9e9e; }
+  .cp-node[data-state='done'] rect, .cp-node[data-state='done'] polygon, .cp-node[data-state='done'] circle { fill: #e8f5e9; stroke: #2e7d32; }
+  .cp-node[data-state='active'] rect, .cp-node[data-state='active'] polygon, .cp-node[data-state='active'] circle { fill: #e3f2fd; stroke: #1565c0; }
+  .cp-node[data-state='incident'] rect, .cp-node[data-state='incident'] polygon, .cp-node[data-state='incident'] circle { fill: #fdecea; stroke: #c62828; }
+  .cp-node circle.is-end { stroke-width: 4; }
+  .cp-label { font-size: 11px; fill: #1a1a1a; font-weight: 600; pointer-events: none; }
+  .cp-label.is-outside { font-size: 10px; font-weight: 500; fill: #444; }
+  .cp-badge { font-size: 10px; font-weight: 800; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+  .cp-badge.is-done { fill: #2e7d32; } .cp-badge.is-active { fill: #1565c0; } .cp-badge.is-incident { fill: #c62828; }
+  .cp-table td { vertical-align: middle; }
+  .cp-pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 800; background: #eee; color: #555; }
+  .cp-pill[data-state='ACTIVE'] { background: #e3f2fd; color: #1565c0; } .cp-pill[data-state='COMPLETED'] { background: #e8f5e9; color: #2e7d32; }
+  .cp-pill[data-state='TERMINATED'] { background: #fff3e0; color: #b45f00; } .cp-pill[data-state='INCIDENT'] { background: #fdecea; color: #c62828; }
+  .cp-bar { width: 120px; height: 6px; border-radius: 3px; background: var(--bg-subtle, #eee); display: inline-block; vertical-align: middle; margin-right: 8px; overflow: hidden; }
+  .cp-bar > span { display: block; height: 100%; background: #1565c0; }
+  .cp-group { border-top: 1px solid var(--border, #eee); padding: 10px 0; }
+  .cp-group-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+  .cp-incident { font-size: 12px; padding: 4px 0 4px 12px; border-left: 3px solid #f5b7b1; margin: 4px 0; }
+  .cp-incident-msg { color: var(--text-secondary, #777); word-break: break-word; }
+
+  /* ── Grafana ── */
+  .gp-tabs { margin-bottom: 12px; }
+  .gp-frame { width: 100%; height: 720px; border: 1px solid var(--border, #e5e5e5); border-radius: 10px; background: #fff; }
+}

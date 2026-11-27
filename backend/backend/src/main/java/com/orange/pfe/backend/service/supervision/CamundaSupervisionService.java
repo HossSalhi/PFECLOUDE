@@ -205,6 +205,50 @@ public class CamundaSupervisionService {
         }, InstanceDetail::available);
     }
 
+    /**
+     * Diagramme d'un processus (formes, flèches, coordonnées) avec, sur chaque étape, le nombre d'exécutions terminées, en
+     * cours, annulées et en incident. Lecture seule : fichier BPMN + statistiques par élément.
+     */
+    public com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram diagram(String definitionKey) {
+        if (definitionKey == null || !KEY.matcher(definitionKey).matches()) {
+            throw new IllegalArgumentException("Identifiant de processus invalide");
+        }
+        return cached("diagram:" + definitionKey, () -> {
+            try {
+                JsonNode meta = get("/v2/process-definitions/" + definitionKey);
+                String xml = getText("/v2/process-definitions/" + definitionKey + "/xml");
+                Map<String, com.orange.pfe.backend.dto.supervision.SupervisionDtos.ElementStats> stats = new LinkedHashMap<>();
+                try {
+                    JsonNode s = post("/v2/process-definitions/" + definitionKey + "/statistics/element-instances", "{}");
+                    for (JsonNode e : s.path("items")) {
+                        stats.put(e.path("elementId").asText(), new com.orange.pfe.backend.dto.supervision.SupervisionDtos.ElementStats(
+                                e.path("completed").asLong(), e.path("active").asLong(), e.path("canceled").asLong(), e.path("incidents").asLong()));
+                    }
+                } catch (UnavailableException ignored) {
+                    // les statistiques sont un plus : le diagramme s'affiche sans compteurs
+                }
+                BpmnLayout.Parsed parsed;
+                try {
+                    parsed = BpmnLayout.parse(xml);
+                } catch (Exception e) {
+                    throw new UnavailableException("Camunda : le fichier du processus est inexploitable", e);
+                }
+                if (parsed.nodes().isEmpty()) {
+                    return new com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram(false, "Ce processus ne contient aucune étape",
+                            definitionKey, meta.path("name").asText(""), meta.path("version").asInt(), false, 0, 0, List.of(), List.of());
+                }
+                BpmnLayout.Laid laid = BpmnLayout.build(parsed, stats);
+                String name = meta.path("name").asText("");
+                return new com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram(true, null, definitionKey,
+                        name.isBlank() ? meta.path("processDefinitionId").asText("") : name, meta.path("version").asInt(), laid.auto(),
+                        laid.width(), laid.height(), laid.nodes(), laid.edges());
+            } catch (UnavailableException e) {
+                return new com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram(false, e.getMessage(), definitionKey, "", 0,
+                        false, 0, 0, List.of(), List.of());
+            }
+        }, com.orange.pfe.backend.dto.supervision.SupervisionDtos.ProcessDiagram::available);
+    }
+
     // ── BPMN ──────────────────────────────────────────────────────────────────
 
     private static final Map<String, String> KINDS = Map.ofEntries(
@@ -251,8 +295,8 @@ public class CamundaSupervisionService {
     }
 
     private JsonNode post(String path, String searchJson) {
-        // POST utilisé UNIQUEMENT pour les recherches (/search) : ce sont des lectures
-        if (!path.endsWith("/search")) {
+        // POST utilisé UNIQUEMENT pour les recherches (/search) et les statistiques par élément : ce sont des lectures
+        if (!path.endsWith("/search") && !path.endsWith("/statistics/element-instances")) {
             throw new IllegalArgumentException("Chemin non autorisé");
         }
         return readJson(send(HttpRequest.newBuilder().header("Content-Type", "application/json"), path)

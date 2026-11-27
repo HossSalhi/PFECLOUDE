@@ -1,0 +1,151 @@
+<section class="cp" aria-label="Camunda">
+  @if (overview.loading && !overview.data) { <p class="sup-muted">Chargement de Camunda…</p> }
+  @if (overview.error) { <div class="alert-warning" role="alert">{{ overview.error }}</div> }
+  @if (overview.data && !overview.data.available) { <div class="alert-warning" role="status">Camunda indisponible : {{ overview.data.error }}</div> }
+
+  @if (overview.data?.available) {
+    <!-- ═════ Indicateurs ═════ -->
+    <div class="cp-kpis">
+      <div class="cp-kpi" [class.is-ok]="overview.data!.healthy" [class.is-bad]="!overview.data!.healthy">
+        <div class="cp-kpi-label">Moteur</div>
+        <div class="cp-kpi-value">{{ overview.data!.healthy ? 'Sain' : 'À vérifier' }}</div>
+        <div class="cp-kpi-sub">Camunda {{ overview.data!.version }} · {{ overview.data!.clusterSize }} nœud</div>
+      </div>
+      <div class="cp-kpi is-info"><div class="cp-kpi-label">En cours</div><div class="cp-kpi-value">{{ overview.data!.active | number }}</div><div class="cp-kpi-sub">instances actives</div></div>
+      <div class="cp-kpi is-ok"><div class="cp-kpi-label">Terminées</div><div class="cp-kpi-value">{{ overview.data!.completed | number }}</div><div class="cp-kpi-sub">depuis le début</div></div>
+      <div class="cp-kpi"><div class="cp-kpi-label">Annulées</div><div class="cp-kpi-value">{{ overview.data!.terminated | number }}</div><div class="cp-kpi-sub">instances</div></div>
+      <div class="cp-kpi" [class.is-bad]="overview.data!.incidents > 0"><div class="cp-kpi-label">Incidents</div><div class="cp-kpi-value">{{ overview.data!.incidents | number }}</div><div class="cp-kpi-sub">à traiter</div></div>
+    </div>
+
+    <!-- ═════ Diagramme du processus ═════ -->
+    <div class="cp-card">
+      <div class="cp-card-head">
+        <div>
+          <h2 class="sup-h" style="margin:0"><i class="fas fa-diagram-project"></i> Processus</h2>
+          <div class="sup-muted">Chaque étape affiche son nombre d'exécutions terminées, en cours et en incident.</div>
+        </div>
+        <div class="cp-tools">
+          <select class="lv-input" [value]="selectedKey" (change)="chooseProcess($any($event.target).value)" aria-label="Processus">
+            @for (d of overview.data!.definitions; track d.key) { <option [value]="d.key" [selected]="d.key === selectedKey">{{ d.name }} (v{{ d.version }})</option> }
+          </select>
+          <div class="cp-zoom" role="group" aria-label="Zoom">
+            <button class="btn-icon" title="Réduire" (click)="zoomOut()" aria-label="Réduire"><i class="fas fa-minus"></i></button>
+            <span>{{ zoom * 100 | number:'1.0-0' }} %</span>
+            <button class="btn-icon" title="Agrandir" (click)="zoomIn()" aria-label="Agrandir"><i class="fas fa-plus"></i></button>
+          </div>
+        </div>
+      </div>
+
+      @if (diagram.loading) { <p class="sup-muted">Chargement du diagramme…</p> }
+      @if (diagram.error) { <div class="alert-warning" role="alert">{{ diagram.error }}</div> }
+      @if (diagram.data && !diagram.data.available) { <div class="alert-warning" role="status">Diagramme indisponible : {{ diagram.data.error }}</div> }
+
+      @if (diagram.data?.available) {
+        <div class="cp-legend">
+          <span><i class="cp-dot is-done"></i> exécutée</span>
+          <span><i class="cp-dot is-active"></i> en cours</span>
+          <span><i class="cp-dot is-incident"></i> en incident</span>
+          <span><i class="cp-dot is-idle"></i> jamais exécutée</span>
+          @if (diagram.data!.autoLayout) { <span class="sup-muted">Disposition automatique</span> }
+        </div>
+        <div class="cp-canvas" tabindex="0" aria-label="Diagramme du processus">
+          <svg [attr.width]="diagram.data!.width * zoom" [attr.height]="diagram.data!.height * zoom"
+               [attr.viewBox]="'0 0 ' + diagram.data!.width + ' ' + diagram.data!.height" role="img" [attr.aria-label]="diagram.data!.name">
+            <defs>
+              <marker id="cp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#8a8f98"></path>
+              </marker>
+            </defs>
+            @for (e of diagram.data!.edges; track e.id) {
+              <path class="cp-edge" [attr.d]="path(e)" marker-end="url(#cp-arrow)"></path>
+              @if (e.label) { <text class="cp-edge-label" [attr.x]="labelAt(e).x" [attr.y]="labelAt(e).y" text-anchor="middle">{{ e.label }}</text> }
+            }
+            @for (d of drawn; track d.node.id) {
+              <g class="cp-node" [attr.data-state]="d.state" [attr.data-shape]="d.node.shape">
+                <title>{{ d.title }}</title>
+                @switch (d.node.shape) {
+                  @case ('GATEWAY') { <polygon [attr.points]="diamond(d.node)"></polygon> }
+                  @case ('EVENT_START') { <circle [attr.cx]="d.node.x + d.node.w / 2" [attr.cy]="d.node.y + d.node.h / 2" [attr.r]="d.node.w / 2"></circle> }
+                  @case ('EVENT_END') { <circle class="is-end" [attr.cx]="d.node.x + d.node.w / 2" [attr.cy]="d.node.y + d.node.h / 2" [attr.r]="d.node.w / 2"></circle> }
+                  @case ('EVENT') { <circle [attr.cx]="d.node.x + d.node.w / 2" [attr.cy]="d.node.y + d.node.h / 2" [attr.r]="d.node.w / 2"></circle> }
+                  @default { <rect [attr.x]="d.node.x" [attr.y]="d.node.y" [attr.width]="d.node.w" [attr.height]="d.node.h" rx="9"></rect> }
+                }
+                @if (d.node.shape === 'TASK' || d.node.shape === 'SUBPROCESS') {
+                  @for (l of d.lines; track $index) {
+                    <text class="cp-label" [attr.x]="d.node.x + d.node.w / 2" [attr.y]="d.node.y + d.node.h / 2 + ($index - (d.lines.length - 1) / 2) * 13 + 4" text-anchor="middle">{{ l }}</text>
+                  }
+                } @else {
+                  @for (l of d.lines; track $index) {
+                    <text class="cp-label is-outside" [attr.x]="d.node.x + d.node.w / 2" [attr.y]="d.node.y + d.node.h + 14 + $index * 12" text-anchor="middle">{{ l }}</text>
+                  }
+                }
+                @if (d.node.stats.completed || d.node.stats.active || d.node.stats.incidents) {
+                  <g class="cp-badges" [attr.transform]="'translate(' + (d.node.x + d.node.w / 2) + ',' + (d.node.y - 9) + ')'">
+                    @if (d.node.stats.completed) { <text class="cp-badge is-done" x="-4" text-anchor="end">✓ {{ d.node.stats.completed | number }}</text> }
+                    @if (d.node.stats.active) { <text class="cp-badge is-active" x="0" text-anchor="middle">● {{ d.node.stats.active }}</text> }
+                    @if (d.node.stats.incidents) { <text class="cp-badge is-incident" x="4" text-anchor="start">⚠ {{ d.node.stats.incidents }}</text> }
+                  </g>
+                }
+              </g>
+            }
+          </svg>
+        </div>
+        <div class="sup-muted">Total des exécutions d'étapes : {{ totals.completed | number }} terminées · {{ totals.active }} en cours · {{ totals.incidents }} en incident.</div>
+      }
+    </div>
+
+    <!-- ═════ Instances récentes ═════ -->
+    <div class="cp-card">
+      <div class="cp-card-head">
+        <h2 class="sup-h" style="margin:0"><i class="fas fa-list-check"></i> Instances récentes</h2>
+        <div class="lv-pills">
+          @for (s of states; track s.id) { <button class="sup-period" [class.active]="instanceState === s.id" (click)="setInstanceState(s.id)">{{ s.label }}</button> }
+        </div>
+      </div>
+      @if (instances.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (instances.error) { <div class="alert-warning" role="alert">{{ instances.error }}</div> }
+      @if (instances.data?.available) {
+        <table class="org-table cp-table">
+          <thead><tr><th>Processus</th><th>État</th><th>Démarrée</th><th>Durée</th><th>Incident</th></tr></thead>
+          <tbody>
+            @for (i of instances.data!.items; track i.key) {
+              <tr>
+                <td><strong>{{ i.definitionName }}</strong> <span class="sup-muted">v{{ i.version }} · #{{ i.key }}</span></td>
+                <td><span class="cp-pill" [attr.data-state]="i.state">{{ stateLabel(i.state) }}</span></td>
+                <td>{{ i.startedAt | date:'dd/MM HH:mm:ss' }}</td>
+                <td><div class="cp-bar" [title]="duration(i.durationMs)"><span [style.width.%]="barWidth(i)"></span></div><span class="sup-muted">{{ duration(i.durationMs) }}</span></td>
+                <td>@if (i.hasIncident) { <span class="cp-pill" data-state="INCIDENT">Oui</span> } @else { — }</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="sup-muted">Aucune instance pour ce filtre.</td></tr>
+            }
+          </tbody>
+        </table>
+        <div class="sup-muted">{{ instances.data!.total | number }} instance(s) au total pour ce filtre.</div>
+      }
+    </div>
+
+    <!-- ═════ Incidents Camunda ═════ -->
+    <div class="cp-card">
+      <div class="cp-card-head">
+        <h2 class="sup-h" style="margin:0"><i class="fas fa-triangle-exclamation"></i> Incidents Camunda actifs</h2>
+        @if (incidents.data?.available) { <span class="cp-pill" [attr.data-state]="incidents.data!.total ? 'INCIDENT' : 'COMPLETED'">{{ incidents.data!.total | number }} au total</span> }
+      </div>
+      @if (incidents.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (incidents.error) { <div class="alert-warning" role="alert">{{ incidents.error }}</div> }
+      @if (incidents.data?.available) {
+        @if (groups.length === 0) { <p class="sup-muted"><i class="fas fa-circle-check"></i> Aucun incident actif.</p> }
+        @for (g of groups; track g.type) {
+          <div class="cp-group">
+            <div class="cp-group-head"><span class="cp-pill" data-state="INCIDENT">{{ g.type }}</span> <strong>{{ g.count }}</strong> <span class="sup-muted">{{ g.meaning }}</span></div>
+            @for (i of g.items.slice(0, 3); track i.key) {
+              <div class="cp-incident"><code>{{ i.elementId }}</code> · {{ i.definitionId }} · <span class="sup-muted">{{ i.createdAt | date:'dd/MM/yyyy HH:mm' }}</span><div class="cp-incident-msg">{{ i.errorMessage }}</div></div>
+            }
+            @if (g.items.length > 3) { <div class="sup-muted">… et {{ g.items.length - 3 }} autre(s) de ce type.</div> }
+          </div>
+        }
+        @if (incidents.data!.total > (incidents.data!.items.length)) { <p class="sup-muted">Les 50 incidents les plus récents sont analysés sur {{ incidents.data!.total | number }}.</p> }
+      }
+    </div>
+  }
+</section>

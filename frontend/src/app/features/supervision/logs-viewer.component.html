@@ -1,0 +1,73 @@
+<section class="lv" aria-label="Visualiseur de logs">
+  <div class="lv-head">
+    <div>
+      <h2 class="sup-h" style="margin:0"><i class="fas fa-terminal"></i> Journaux en direct</h2>
+      <div class="sup-muted">Lignes réelles de Loki · lecture seule · secrets masqués · réservé aux administrateurs</div>
+    </div>
+    <label class="lv-auto"><input type="checkbox" [checked]="auto" (change)="toggleAuto()"> Actualisation automatique (10 s)</label>
+  </div>
+
+  @if (sourcesError) {
+    <div class="alert-warning" role="alert">Les sources de logs ne sont pas disponibles : {{ sourcesError }}</div>
+  } @else {
+    <div class="lv-toolbar">
+      <label class="lv-field">Source
+        <select class="lv-input" [(ngModel)]="source" (ngModelChange)="load()" aria-label="Source des logs">
+          <optgroup label="Machines">
+            @for (s of hosts; track s.key) { <option [value]="s.key">{{ s.label }}</option> }
+          </optgroup>
+          <optgroup label="Applications">
+            @for (s of apps; track s.key) { <option [value]="s.key">{{ s.label }}</option> }
+          </optgroup>
+        </select>
+      </label>
+      <div class="lv-field">Niveau
+        <div class="lv-pills">
+          @for (l of levels; track l.id) {
+            <button class="sup-period" [class.active]="level === l.id" (click)="setLevel(l.id)">{{ l.label }}</button>
+          }
+        </div>
+      </div>
+      <label class="lv-field">Période
+        <select class="lv-input" [(ngModel)]="minutes" (ngModelChange)="load()" aria-label="Période">
+          @for (p of periods; track p.m) { <option [ngValue]="p.m">{{ p.label }}</option> }
+        </select>
+      </label>
+      <label class="lv-field">Lignes
+        <select class="lv-input" [(ngModel)]="limit" (ngModelChange)="load()" aria-label="Nombre de lignes">
+          @for (n of limits; track n) { <option [ngValue]="n">{{ n }}</option> }
+        </select>
+      </label>
+      <label class="lv-field lv-search">Rechercher
+        <input class="lv-input" type="search" maxlength="80" placeholder="mot ou phrase…" [(ngModel)]="query" (keyup.enter)="load()" aria-label="Rechercher dans les logs">
+      </label>
+      <button class="btn-primary" (click)="load()" [disabled]="loading || !source"><i class="fas fa-rotate-right"></i> Actualiser</button>
+    </div>
+
+    @if (error) { <div class="alert-warning" role="alert">{{ error }}</div> }
+    @if (result && !result.available) { <div class="alert-warning" role="status">Loki indisponible : {{ result.error }}</div> }
+
+    @if (result?.available) {
+      <div class="lv-summary">
+        <span><strong>{{ result!.count }}</strong> ligne(s)</span>
+        <span class="lv-chip is-error">{{ count('ERROR') }} erreur(s)</span>
+        <span class="lv-chip is-warn">{{ count('WARN') }} avertissement(s)</span>
+        @if (result!.truncated) { <span class="sup-muted">Limite atteinte : affinez la période ou le filtre.</span> }
+        @if (loading) { <span class="sup-muted">Actualisation…</span> }
+      </div>
+      <div class="lv-console" role="log" aria-live="off" tabindex="0">
+        @for (l of result!.lines; track $index) {
+          <div class="lv-line" [class.is-error]="l.level === 'ERROR'" [class.is-warn]="l.level === 'WARN'">
+            <span class="lv-time">{{ time(l.at) }}</span>
+            <span class="lv-level" [attr.data-level]="l.level">{{ l.level === 'ERROR' ? 'ERR' : l.level === 'WARN' ? 'WARN' : 'INFO' }}</span>
+            <code class="lv-text">@for (s of segments(l); track $index) { @if (s.hit) { <mark>{{ s.text }}</mark> } @else { {{ s.text }} } }</code>
+            @if (l.label) { <span class="lv-meaning" [title]="l.category || ''">{{ l.label }}</span> }
+          </div>
+        } @empty {
+          <div class="lv-empty"><i class="fas fa-circle-check"></i> Aucune ligne ne correspond à ces critères sur la période.</div>
+        }
+      </div>
+    }
+    @if (loading && !result) { <p class="sup-muted">Chargement des logs…</p> }
+  }
+</section>

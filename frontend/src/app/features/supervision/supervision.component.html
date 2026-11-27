@@ -102,6 +102,8 @@
 
     <!-- ═════════ Logs ═════════ -->
     @if (tab === 'logs') {
+      @if (isAdmin) { <app-logs-viewer /> }
+      <h2 class="sup-h">Statistiques des logs</h2>
       <div class="sup-periods">
         @for (p of logPeriods; track p) { <button class="sup-period" [class.active]="logMinutes === p" (click)="setLogMinutes(p)">{{ periodLabel(p) }}</button> }
         <span class="sup-muted">Au-delà de 3 h, Loki serait trop lent pour une consultation.</span>
@@ -166,95 +168,12 @@
 
     <!-- ═════════ Camunda ═════════ -->
     @if (tab === 'camunda') {
-      @if (camunda.loading) { <p class="sup-muted">Chargement…</p> }
-      @if (camunda.error) { <div class="alert-warning" role="alert">{{ camunda.error }}</div> }
-      @if (camunda.data && !camunda.data.available) { <div class="alert-warning" role="alert">Camunda indisponible : {{ camunda.data.error }}</div> }
-      @if (camunda.data?.available) {
-        <div class="sup-tiles">
-          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.healthy ? 'Sain' : 'À vérifier' }}</div><div>Moteur {{ camunda.data!.version }} ({{ camunda.data!.clusterSize }} nœud)</div></div>
-          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.active | number }}</div><div>Actives</div></div>
-          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.completed | number }}</div><div>Terminées</div></div>
-          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.terminated | number }}</div><div>Annulées</div></div>
-          <div class="sup-tile" [class.is-bad]="camunda.data!.incidents > 0"><div class="sup-tile-v">{{ camunda.data!.incidents | number }}</div><div>Incidents</div></div>
-        </div>
-
-        <h2 class="sup-h">Processus déployés</h2>
-        <table class="org-table">
-          <thead><tr><th>Processus</th><th>Version</th><th></th></tr></thead>
-          <tbody>
-            @for (d of camunda.data!.definitions; track d.key) {
-              <tr><td>{{ d.name }} <span class="sup-muted">{{ d.id }}</span></td><td>{{ d.version }}</td>
-                <td><button class="btn-secondary" (click)="showSteps(d.key)">{{ stepsFor === d.key ? 'Masquer les étapes' : 'Voir les étapes' }}</button></td></tr>
-              @if (stepsFor === d.key) {
-                <tr><td colspan="3">
-                  @if (steps.loading) { Chargement… }
-                  @if (steps.data && !steps.data.available) { <span class="sup-muted">{{ steps.data.error }}</span> }
-                  @if (steps.data?.available) {
-                    <ol class="sup-steps">
-                      @for (s of steps.data!.steps; track s.id) { <li><span class="badge st-planned">{{ s.kind }}</span> {{ s.name }}</li> }
-                    </ol>
-                  }
-                </td></tr>
-              }
-            }
-          </tbody>
-        </table>
-      }
-
-      <h2 class="sup-h">Instances récentes</h2>
-      <div class="sup-periods">
-        @for (s of instanceStates; track s) { <button class="sup-period" [class.active]="instanceState === s" (click)="setInstanceState(s)">{{ s || 'Toutes' }}</button> }
-      </div>
-      @if (instances.data?.available) {
-        <table class="org-table">
-          <thead><tr><th>Processus</th><th>État</th><th>Démarrée</th><th>Durée</th><th>Incident</th></tr></thead>
-          <tbody>
-            @for (i of instances.data!.items; track i.key) {
-              <tr><td>{{ i.definitionName }} <span class="sup-muted">v{{ i.version }} · {{ i.key }}</span></td><td>{{ i.state }}</td>
-                <td>{{ i.startedAt | date:'dd/MM HH:mm:ss' }}</td><td>{{ duration(i.durationMs) }}</td><td>{{ i.hasIncident ? 'Oui' : '—' }}</td></tr>
-            }
-          </tbody>
-        </table>
-        <p class="sup-muted">{{ instances.data!.total | number }} instances au total pour ce filtre.</p>
-      }
-
-      <h2 class="sup-h">Incidents Camunda actifs</h2>
-      @if (camundaIncidents.data?.available) {
-        @if (camundaIncidents.data!.items.length) {
-          <table class="org-table">
-            <thead><tr><th>Type</th><th>Étape</th><th>Message</th><th>Depuis</th></tr></thead>
-            <tbody>
-              @for (i of camundaIncidents.data!.items; track i.key) {
-                <tr><td>{{ i.errorType }}</td><td>{{ i.elementId }}</td><td>{{ i.errorMessage }}</td><td>{{ i.createdAt | date:'dd/MM/yyyy HH:mm' }}</td></tr>
-              }
-            </tbody>
-          </table>
-          <p class="sup-muted">{{ camundaIncidents.data!.total | number }} incidents actifs au total.</p>
-        } @else { <p class="sup-muted">Aucun incident actif.</p> }
-      }
+      <app-camunda-panel />
     }
 
     <!-- ═════════ Grafana ═════════ -->
     @if (tab === 'grafana') {
-      @if (grafana.loading) { <p class="sup-muted">Chargement…</p> }
-      @if (grafana.data) {
-        @if (grafana.data.embedEnabled && grafana.data.dashboards.length) {
-          <div class="sup-periods">
-            @for (d of grafana.data.dashboards; track d.uid) {
-              <button class="sup-period" [class.active]="selectedDashboard?.uid === d.uid" (click)="chooseDashboard(d)">{{ d.title }}</button>
-            }
-          </div>
-          @if (dashboardUrl) {
-            <iframe class="sup-frame" [src]="dashboardUrl" title="Dashboard Grafana" loading="lazy" referrerpolicy="no-referrer"></iframe>
-          }
-        } @else {
-          <div class="alert-warning" role="status">
-            Les dashboards Grafana ne sont pas encore intégrés dans HELIOS : Grafana doit d'abord autoriser l'affichage dans une
-            autre page (réglage à faire par un administrateur sur la VM de supervision). En attendant, utilisez les onglets
-            Métriques et Logs, qui montrent les mêmes données directement dans HELIOS.
-          </div>
-        }
-      }
+      <app-grafana-panel />
     }
   </div>
 </div>
