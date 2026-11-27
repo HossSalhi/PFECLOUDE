@@ -135,3 +135,16 @@ Attendre `rollout status` et contrôler la consommation dans la console Groq ent
 - **Concurrence** : aucune transaction pendant Prometheus/Loki/Groq ; limiteur en base (1 analyse par utilisateur, 3 au total, péremption 90 s), HTTP 429 sinon.
 - **Confidentialité** : le prompt ne contient ni IP, ni nom de machine/application, ni utilisateur, ni équipe, ni secret (alias « Machine A », « Application A »).
 - **Rétrospective** (lecture seule) : `mvnw test -Dtest=TelemetryRetrospectiveLiveTest "-DargLine=-Dhelios.retro=true -Dhelios.retro.out=target/retrospective.md"`.
+
+### État réel de la fonction « Analyse des logs et métriques » (27 nov. 2026)
+- Commits `bb99f8d` (V33 + durcissement), `71572c5` (backend), `e0220b4` (frontend), `801d359` (doc) ; non poussés.
+- Déployé : `pfe-backend:0.2.176-801d359`, `pfe-frontend:1.8.0-801d359` (SHA-256 des tars dans `helios-state\build-801d359\SHA256-images.txt`). Retour arrière : `kubectl -n pfe set image deploy/backend backend=pfe-backend:0.2.175-de17df1` et `deploy/frontend frontend=pfe-frontend:1.7.0-de17df1`.
+- Base : sauvegarde `helios-state\backups-v33-20261127\pfe_db-avant-V33.dump` ; V33 appliquée par Flyway au démarrage du nouveau backend (Flyway est actif en production : déployer l'image applique la migration), puis `telemetry_analysis_run_harden.sql` exécuté immédiatement en `postgres`. Vérifié : propriétaire `postgres`, déclencheurs UPDATE/DELETE/TRUNCATE `ENABLE ALWAYS`, déclencheur d'événement anti-DROP actif, `appuser` limité à SELECT et INSERT.
+- Flag **désactivé** (aucune variable `HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS` posée) ; accès anonyme aux nouvelles routes : 403.
+
+### Activer la fonction (par vous, quand vous voulez)
+```
+kubectl -n pfe set env deploy/backend HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS=true
+kubectl -n pfe rollout status deploy/backend --timeout=480s
+```
+(le flag global `HELIOS_AI_ASSIST_ENABLED=true` est déjà posé). Désactiver : même commande avec `=false`. Limiter l'usage : la carte n'apparaît que sur la page Supervision, pour les admins et les chefs d'équipe. Rappel de la rétrospective : beaucoup de fenêtres seront « Couverture partielle » tant que Prometheus a des trous (gels de l'hôte) ; c'est voulu.
