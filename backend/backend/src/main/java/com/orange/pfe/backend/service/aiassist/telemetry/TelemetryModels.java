@@ -72,4 +72,13 @@ public final class TelemetryModels {
             return findings.stream().filter(f -> severity.equals(f.severity())).count();
         }
     }
+
+    /** Côté d'un constat : les composants applicatifs de HELIOS d'un côté, tout le reste (machines, cluster, outils de supervision) de l'autre. */
+    public static String sideOf(String scope) {
+        return "APPLICATION".equals(scope) ? "APPLICATION" : "INFRASTRUCTURE";
+    }
+
+    public static String sideLabel(String scope) {
+        return "APPLICATION".equals(sideOf(scope)) ? "Application" : "Infrastructure";
+    }
 }

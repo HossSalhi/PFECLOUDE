@@ -100,6 +100,38 @@ public class SupervisionClient {
         return m;
     }
 
+    /**
+     * Santé des outils de supervision eux-mêmes (lecture seule, un GET chacun, 5 s maximum) : nom lisible, puis {@code null} si
+     * l'outil se déclare prêt, sinon le motif (HTTP, délai, injoignable). Alertmanager n'est pas déployé : non sondé.
+     */
+    public java.util.Map<String, String> probeReady() {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        out.put("Prometheus", ready(infra.getPrometheusUrl(), "/-/ready"));
+        out.put("Loki", ready(infra.getLokiUrl(), "/ready"));
+        out.put("Grafana", ready(infra.getGrafanaUrl(), "/api/health"));
+        return out;
+    }
+
+    private String ready(String base, String path) {
+        if (base == null || base.isBlank()) {
+            return "non configuré";
+        }
+        try {
+            HttpResponse<String> r = http.send(HttpRequest.newBuilder().uri(URI.create(base.replaceAll("/+$", "") + path))
+                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() == 200) {
+                return null;
+            }
+            String body = r.body() == null ? "" : r.body().strip();
+            return "HTTP " + r.statusCode() + (body.isEmpty() ? "" : " (" + body.substring(0, Math.min(80, body.length())).replaceAll("\s+", " ") + ")");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "interrompu";
+        } catch (java.io.IOException | RuntimeException e) {
+            return "injoignable (" + e.getClass().getSimpleName() + ")";
+        }
+    }
+
     private JsonNode get(String base, String path, Map<String, String> params, String tool) {
         return data(base, path, params, tool).path("result");
     }

@@ -40,13 +40,14 @@ final class TelemetryPromptBuilder {
                 p.append("… et ").append(d.findings().size() - 12).append(" autre(s) constat(s).\n");
                 break;
             }
-            p.append(i).append(". [").append(f.severity()).append("] ").append(names.alias(f.entity(), prefixOf(f.entity())))
+            p.append(i).append(". [").append(f.severity()).append("] [").append(TelemetryModels.sideLabel(f.scope())).append("] ")
+                    .append(names.alias(f.entity(), prefixOf(f.entity())))
                     .append(" — ").append(f.detail()).append('\n');
         }
         p.append("Qualité des sources :\n");
         d.quality().forEach(q -> p.append("- ").append(q.source()).append(q.available() ? "" : " (INDISPONIBLE)").append(" : ").append(q.note()).append('\n'));
         String text = sanitize(p.toString(), entities, names);
-        return text + "\nRédige une synthèse de 3 à 5 phrases : dis clairement s'il y a des anomalies ou non — et dis que l'absence d'anomalie n'est "
+        return text + "\nRédige une synthèse en deux parties courtes, « Côté application » puis « Côté infrastructure » (3 à 6 phrases en tout) : dis clairement s'il y a des anomalies ou non — et dis que l'absence d'anomalie n'est "
                 + "établie que si la qualité des données est complète —, résume les constats les plus importants avec leurs chiffres, et "
                 + "signale les données manquantes, les couvertures partielles et les sources indisponibles. Ne déduis aucune cause, ne conclus "
                 + "à aucune amélioration ni stabilité que les chiffres ne montrent pas, et ne propose aucune action.";
@@ -79,6 +80,9 @@ final class TelemetryPromptBuilder {
 
     /** Catégorie neutre d'une ressource : on ne transmet jamais son nom. */
     static String prefixOf(String entity) {
+        if (entity.startsWith("service ") || entity.startsWith("alerte ")) {
+            return "Service";
+        }
         if (entity.startsWith("hôte ") || !entity.contains("/")) {
             return "Machine";
         }

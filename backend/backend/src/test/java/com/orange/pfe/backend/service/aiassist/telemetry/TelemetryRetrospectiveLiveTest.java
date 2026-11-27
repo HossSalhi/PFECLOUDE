@@ -28,7 +28,8 @@ class TelemetryRetrospectiveLiveTest {
     void replayTheAvailableDaysAndReport() throws Exception {
         int days = Integer.getInteger("helios.retro.days", 7);
         Path out = Path.of(System.getProperty("helios.retro.out", "target/retrospective.md"));
-        TelemetryDetector detector = new TelemetryDetector(new SupervisionClient(new InfraHealthProperties()));
+        SupervisionClient client = new SupervisionClient(new InfraHealthProperties());
+        TelemetryDetector detector = new TelemetryDetector(client, new TelemetryStackProbe(client));
         Instant now = Instant.now().truncatedTo(ChronoUnit.MINUTES);
 
         StringBuilder md = new StringBuilder("# Rétrospective du détecteur (lecture seule)\n\nExécutée le " + now + " sur " + days + " jour(s).\n\n");

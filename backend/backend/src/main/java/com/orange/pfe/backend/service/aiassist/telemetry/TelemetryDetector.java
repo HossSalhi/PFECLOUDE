@@ -86,8 +86,30 @@ public class TelemetryDetector {
 
     private final SupervisionClient client;
 
+    private final TelemetryStackProbe probe;
+
+    /** Sans sonde de la stack (tests, ou usage restreint aux métriques et logs). */
     public TelemetryDetector(SupervisionClient client) {
+        this(client, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TelemetryDetector(SupervisionClient client, TelemetryStackProbe probe) {
         this.client = client;
+        this.probe = probe;
+    }
+
+    /** Sonde de la stack de supervision et des charges de travail (cibles, alertes, déploiements, pods, santé des outils). */
+    private Outcome stack(Run run, long windowStart, long end, Set<ResourceScope> scopes) {
+        TelemetryStackProbe.Result r = probe.probe(windowStart, end, scopes);
+        run.findings.addAll(r.findings());
+        run.queries.addAll(r.queries());
+        run.coverage.addAll(r.coverage());
+        r.findings().forEach(f -> run.entities.add(f.entity()));
+        String note = r.failures().isEmpty() ? "Cibles, alertes, déploiements, pods et outils de supervision sondés : " + r.findings().size() + " constat(s)."
+                : "Sonde(s) en échec : " + String.join(" ; ", r.failures()) + " — absence de mesure, pas absence d'anomalie.";
+        return new Outcome(true, r.failures().isEmpty(), r.anyOk(),
+                new SourceQuality("Supervision (cibles, alertes, charges de travail, outils)", r.anyOk(), r.failures().isEmpty() ? 1.0 : 0.5, note));
     }
 
     /** Résultat d'une source : demandée, complète (≥ 80 % partout, aucune requête en échec), exploitable, et sa qualité. */
@@ -125,7 +147,8 @@ public class TelemetryDetector {
         Outcome metrics = (scopes == null || scopes.contains(ResourceScope.VM))
                 ? analyseMetrics(run, end, windowSec, windowStart) : Outcome.notRequested();
         Outcome logs = analyseLogs(run, end, windowSec, scopes);
-        for (Outcome o : List.of(metrics, logs)) {
+        Outcome stack = probe == null ? Outcome.notRequested() : stack(run, windowStart, end, scopes);
+        for (Outcome o : List.of(metrics, logs, stack)) {
             if (o.requested() && o.quality() != null) {
                 quality.add(o.quality());
             }
@@ -134,8 +157,8 @@ public class TelemetryDetector {
         run.findings.sort(Comparator.comparingInt((Finding f) -> rank(f.severity())).reversed().thenComparing(Finding::end, Comparator.reverseOrder()));
         List<Finding> kept = run.findings.size() > MAX_FINDINGS ? new ArrayList<>(run.findings.subList(0, MAX_FINDINGS)) : run.findings;
 
-        boolean complete = metrics.complete() && logs.complete();
-        boolean usable = metrics.usable() || logs.usable();
+        boolean complete = metrics.complete() && logs.complete() && stack.complete();
+        boolean usable = metrics.usable() || logs.usable() || stack.usable();
         String verdict = !kept.isEmpty() ? TelemetryModels.ANOMALIES
                 : complete ? TelemetryModels.NO_ANOMALY
                 : usable ? TelemetryModels.PARTIAL_COVERAGE : TelemetryModels.INSUFFICIENT_DATA;

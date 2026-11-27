@@ -55,4 +55,23 @@ class TelemetryPromptBuilderTest {
         assertThat(TelemetryPromptBuilder.prefixOf("kube-system/coredns")).isEqualTo("Composant du cluster");
         assertThat(TelemetryPromptBuilder.prefixOf("infra/grafana")).isEqualTo("Service");
     }
+
+    @Test
+    void theFindingsAreSplitBetweenApplicationAndInfrastructureWithoutRevealingNames() {
+        var app = new TelemetryModels.Finding("APPLICATION", "pfe/backend", "WORKLOAD", "POD_RESTARTS", "HIGH", null, null, 7.0, 0.0, "redémarrage(s)",
+                "Le conteneur a redémarré 7 fois sur la période", "PromQL : q", "PROBE_RESTARTS");
+        var infra = new TelemetryModels.Finding("SERVICE", "service Loki", "MONITORING", "MONITORING_NOT_READY", "HIGH", null, null, 0.0, null, null,
+                "Loki n'est pas prêt : HTTP 503 sur 192.168.148.160:3100", "GET /ready", "PROBE_TOOLS_READY");
+        var vm = new TelemetryModels.Finding("VM", "k8s-lb2", "TARGET", "TARGET_DOWN", "HIGH", null, null, 0.0, null, null,
+                "Cible injoignable", "PromQL : up == 0", "PROBE_TARGETS_DOWN");
+        var trace = new TelemetryModels.Trace("r", java.time.LocalDateTime.now().minusHours(1), java.time.LocalDateTime.now(), null, null, null, null, null, null,
+                java.util.Map.of(), java.util.List.of(), java.util.List.of());
+        var d = new TelemetryModels.Detection("ANOMALIES", "COMPLETE", java.util.List.of(app, infra, vm), java.util.List.of(), trace, trace.windowStart(), trace.windowEnd(), 3);
+
+        String prompt = TelemetryPromptBuilder.build(d, "ALL", 60, new AiNames());
+
+        assertThat(prompt).contains("[Application] Application A").contains("[Infrastructure] Service A").contains("[Infrastructure] Machine A");
+        assertThat(prompt).contains("Côté application").contains("Côté infrastructure");
+        assertThat(prompt).doesNotContain("pfe/backend").doesNotContain("service Loki").doesNotContain("k8s-lb2").doesNotContain("192.168").doesNotContain(":3100");
+    }
 }

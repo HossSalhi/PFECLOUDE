@@ -488,4 +488,52 @@ class TelemetryDetectorTest {
         assertThat(d.quality().get(0).note()).contains("Référence : 30 min");
         assertThat(d.quality().get(1).note()).contains("au moins 1 h");
     }
+
+    // ── sonde de la stack de supervision (côté application / infrastructure) ────────────────────────────────────────
+
+    private static TelemetryStackProbe.Result probeResult(List<Finding> findings, List<String> failures, boolean anyOk) {
+        return new TelemetryStackProbe.Result(findings, List.of(new QueryTrace("PROBE_ALERTS", "Prometheus", "ALERT", "GET /api/v1/alerts", failures.isEmpty() ? "OK" : "FAILED",
+                failures.isEmpty() ? null : "Prometheus est injoignable", null, null, null, 0, 0)), List.of(), failures, anyOk, findings.size());
+    }
+
+    private Finding stackFinding(String scope, String entity) {
+        return new Finding(scope, entity, "WORKLOAD", "DEPLOYMENT_UNAVAILABLE", "HIGH", null, null, 1.0, null, null, "Déploiement incomplet", "PromQL : q", "PROBE_DEPLOYMENTS");
+    }
+
+    @Test
+    void aHealthyStackKeepsTheAllClearAndAddsItsQualityLineAndTrace() {
+        TelemetryStackProbe stack = mock(TelemetryStackProbe.class);
+        when(stack.probe(anyLong(), anyLong(), any())).thenReturn(probeResult(List.of(), List.of(), true));
+
+        Detection d = new TelemetryDetector(client, stack).detect(NOW, 60, null);
+
+        assertThat(d.verdict()).isEqualTo(TelemetryModels.NO_ANOMALY);
+        assertThat(d.quality()).hasSize(3);
+        assertThat(d.quality().get(2).source()).startsWith("Supervision").contains("outils");
+        assertThat(d.trace().queries()).extracting(QueryTrace::id).contains("PROBE_ALERTS");
+    }
+
+    @Test
+    void aStackFindingMakesTheVerdictAnomaliesAndCarriesItsSide() {
+        TelemetryStackProbe stack = mock(TelemetryStackProbe.class);
+        when(stack.probe(anyLong(), anyLong(), any())).thenReturn(probeResult(List.of(stackFinding("APPLICATION", "pfe/backend")), List.of(), true));
+
+        Detection d = new TelemetryDetector(client, stack).detect(NOW, 60, null);
+
+        assertThat(d.verdict()).isEqualTo(TelemetryModels.ANOMALIES);
+        assertThat(d.findings()).singleElement().satisfies(f -> assertThat(TelemetryModels.sideOf(f.scope())).isEqualTo("APPLICATION"));
+        assertThat(d.dataQuality()).isEqualTo(TelemetryModels.DATA_COMPLETE);
+    }
+
+    @Test
+    void aFailingStackProbeNeverAllowsTheAllClear() {
+        TelemetryStackProbe stack = mock(TelemetryStackProbe.class);
+        when(stack.probe(anyLong(), anyLong(), any())).thenReturn(probeResult(List.of(), List.of("PROBE_ALERTS (Prometheus est injoignable)"), true));
+
+        Detection d = new TelemetryDetector(client, stack).detect(NOW, 60, null);
+
+        assertThat(d.verdict()).isEqualTo(TelemetryModels.PARTIAL_COVERAGE);
+        assertThat(d.quality().get(2).note()).contains("Sonde(s) en échec").contains("PROBE_ALERTS").contains("pas absence d'anomalie");
+        assertThat(d.trace().queries().stream().filter(q -> q.status().equals("FAILED"))).hasSize(1);
+    }
 }
