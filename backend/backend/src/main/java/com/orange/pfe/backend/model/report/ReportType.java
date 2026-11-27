@@ -5,7 +5,7 @@ public enum ReportType {
     USER_ACTIVITY("Activité des utilisateurs",
             "Connexions, actions et répartition de l'activité par utilisateur (journal d'audit)."),
     MAINTENANCE("Opérations de maintenance",
-            "Maintenances de la période : statuts, ressources concernées, durées planifiées et réelles."),
+            "Maintenances planifiées et maintenances exécutées sur la période (deux compteurs distincts) : statuts, ressources concernées, durées planifiées et réelles."),
     TEAMS_TASKS("Équipes et tâches",
             "Tâches créées, terminées, ouvertes et en retard, par équipe et par membre."),
     PLATFORM_ACTIVITY("Activités de la plateforme",

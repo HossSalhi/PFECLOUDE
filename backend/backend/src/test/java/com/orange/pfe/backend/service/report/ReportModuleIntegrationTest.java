@@ -125,6 +125,21 @@ class ReportModuleIntegrationTest {
         throw new AssertionError("indicateur absent : " + label);
     }
 
+    /** Comme {@link #row} mais renvoie {@code null} si la ligne est absente (la section, elle, doit exister). */
+    private static JsonNode rowOrNull(JsonNode root, String sectionTitle, String firstCell) {
+        for (JsonNode s : root.path("sections")) {
+            if (sectionTitle.equals(s.path("title").asText())) {
+                for (JsonNode r : s.path("rows")) {
+                    if (firstCell.equals(r.get(0).asText())) {
+                        return r;
+                    }
+                }
+                return null;
+            }
+        }
+        throw new AssertionError("section absente : " + sectionTitle);
+    }
+
     private static JsonNode row(JsonNode root, String sectionTitle, String firstCell) {
         for (JsonNode s : root.path("sections")) {
             if (sectionTitle.equals(s.path("title").asText())) {
@@ -180,13 +195,14 @@ class ReportModuleIntegrationTest {
 
         JsonNode root = content(generate(ReportType.MAINTENANCE, false));
 
-        assertThat(metric(root, "Maintenances de la période").get("value").asLong()).isEqualTo(2);
+        assertThat(metric(root, "Maintenances planifiées dans la période").get("value").asLong()).isEqualTo(2);
+        assertThat(metric(root, "Maintenances exécutées dans la période").get("value").asLong()).isEqualTo(1);       // seule la première a été démarrée
         assertThat(metric(root, "Terminées").get("value").asLong()).isEqualTo(1);
         assertThat(metric(root, "Terminées dans les temps").get("value").asLong()).isEqualTo(1);
         JsonNode r = row(root, "Par ressource", "NODE — " + resource);
         assertThat(r.get(1).asLong()).isEqualTo(2);
         assertThat(r.get(2).asDouble()).isEqualTo(6.0);       // 2 h + 4 h planifiées
-        assertThat(row(root, "Détail des maintenances", String.valueOf(first.id())).get(5).asText()).isEqualTo("COMPLETED");
+        assertThat(row(root, "Détail des maintenances planifiées", String.valueOf(first.id())).get(5).asText()).isEqualTo("COMPLETED");
     }
 
     @Test
@@ -419,5 +435,89 @@ class ReportModuleIntegrationTest {
         r.setStatus(ReportStatus.COMPLETED);
         r.setGeneratedAt(LocalDateTime.now());
         return r;
+    }
+
+    // ── option C : deux compteurs distincts, dates PLANIFIÉES d'un côté, dates RÉELLES de l'autre ─────────────────────────
+
+    private JsonNode maintenanceReportFor(LocalDateTime periodFrom, LocalDateTime periodTo) throws Exception {
+        return content(reports.generate(admin, new GenerateRequest(ReportType.MAINTENANCE, periodFrom, periodTo, false)));
+    }
+
+    @Test
+    void aMaintenanceRunEarlyIsCountedAsExecutedTodayAndNotAsPlannedToday() throws Exception {
+        String resource = "early-" + tag;
+        LocalDateTime tomorrow = LocalDateTime.now().plusDays(1).withNano(0);
+        MaintenanceResponse m = maintenances.create(admin, new MaintenanceRequest("Executee en avance", null, null,
+                MaintenanceResourceType.NODE, resource, tomorrow, tomorrow.plusHours(1), null));
+        maintenances.start(admin, m.id());
+        maintenances.complete(admin, m.id());
+        LocalDateTime dayStart = LocalDate.now().atStartOfDay();
+
+        JsonNode today = maintenanceReportFor(dayStart, dayStart.plusDays(1));
+        JsonNode wide = maintenanceReportFor(dayStart, dayStart.plusDays(3));      // une période ne peut pas commencer dans le futur : on l'étend
+
+        // aujourd'hui : rien de PLANIFIÉ pour cette ressource, mais une maintenance EXÉCUTÉE et TERMINÉE
+        assertThat(rowOrNull(today, "Détail des maintenances planifiées", String.valueOf(m.id()))).isNull();
+        assertThat(row(today, "Maintenances exécutées dans la période", String.valueOf(m.id())).get(5).asText()).isEqualTo("COMPLETED");
+        assertThat(metric(today, "Maintenances exécutées dans la période").get("value").asLong()).isGreaterThanOrEqualTo(1);
+        assertThat(metric(today, "Terminées dans la période (heure réelle)").get("value").asLong()).isGreaterThanOrEqualTo(1);
+        // période élargie jusqu'à après-demain : la même maintenance est alors AUSSI comptée comme planifiée
+        assertThat(row(wide, "Détail des maintenances planifiées", String.valueOf(m.id())).get(5).asText()).isEqualTo("COMPLETED");
+        assertThat(row(wide, "Maintenances exécutées dans la période", String.valueOf(m.id())).get(5).asText()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void aPlannedMaintenanceThatNeverStartedIsPlannedButNotExecuted() throws Exception {
+        String resource = "never-" + tag;
+        LocalDateTime soon = LocalDateTime.now().plusHours(2).withNano(0);
+        MaintenanceResponse m = maintenances.create(admin, new MaintenanceRequest("Jamais demarree", null, null,
+                MaintenanceResourceType.NODE, resource, soon, soon.plusHours(1), null));
+
+        JsonNode root = maintenanceReportFor(LocalDate.now().atStartOfDay(), LocalDate.now().plusDays(2).atStartOfDay());
+
+        assertThat(row(root, "Détail des maintenances planifiées", String.valueOf(m.id())).get(5).asText()).isEqualTo("PLANNED");
+        assertThat(rowOrNull(root, "Maintenances exécutées dans la période", String.valueOf(m.id()))).isNull();
+    }
+
+    @Test
+    void aMaintenanceStillInProgressCountsAsExecutedWithOpenEnd() throws Exception {
+        String resource = "running-" + tag;
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        MaintenanceResponse m = maintenances.create(admin, new MaintenanceRequest("En cours", null, null,
+                MaintenanceResourceType.NODE, resource, now.plusDays(3), now.plusDays(3).plusHours(2), null));
+        maintenances.start(admin, m.id());
+
+        JsonNode root = maintenanceReportFor(LocalDate.now().atStartOfDay(), LocalDate.now().plusDays(1).atStartOfDay());
+
+        JsonNode r = row(root, "Maintenances exécutées dans la période", String.valueOf(m.id()));
+        assertThat(r.get(4).asText()).isEqualTo("en cours");
+        assertThat(r.get(5).asText()).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void theExecutedCounterAgreesWithTheSuspensionsSectionOfTheSameReport() throws Exception {
+        String resource = "susp-" + tag;
+        LocalDateTime tomorrow = LocalDateTime.now().plusDays(1).withNano(0);
+        MaintenanceResponse m = maintenances.create(admin, new MaintenanceRequest("Suspendue", null, null,
+                MaintenanceResourceType.NODE, resource, tomorrow, tomorrow.plusHours(1), null));
+        maintenances.start(admin, m.id());
+        maintenances.pause(admin, m.id(), null, "test");
+        LocalDateTime dayStart = LocalDate.now().atStartOfDay();
+
+        JsonNode root = maintenanceReportFor(dayStart, dayStart.plusDays(1));
+
+        // même horloge (réelle) : la maintenance suspendue aujourd'hui est aussi comptée comme exécutée aujourd'hui
+        assertThat(row(root, "Suspensions (pauses de la période)", String.valueOf(m.id()))).isNotNull();
+        assertThat(row(root, "Maintenances exécutées dans la période", String.valueOf(m.id()))).isNotNull();
+        assertThat(metric(root, "Maintenances exécutées dans la période").get("value").asLong())
+                .isGreaterThanOrEqualTo(metric(root, "Maintenances suspendues").get("value").asLong());
+    }
+
+    @Test
+    void thePlatformActivityReportNamesItsMaintenanceCounterAsPlanned() throws Exception {
+        JsonNode root = content(generate(ReportType.PLATFORM_ACTIVITY, false));
+
+        assertThat(metric(root, "Maintenances planifiées dans la période")).isNotNull();
+        assertThat(root.toString()).doesNotContain("\"Maintenances de la période\"");
     }
 }

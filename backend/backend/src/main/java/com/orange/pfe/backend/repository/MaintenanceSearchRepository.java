@@ -60,6 +60,23 @@ public class MaintenanceSearchRepository {
         return em.createQuery(cq).setMaxResults(maxRows).getResultList();
     }
 
+    /**
+     * Maintenances réellement EXÉCUTÉES pendant l'intervalle [from, to[ : démarrées avant la fin de l'intervalle et, soit encore en
+     * cours, soit terminées après son début (dates RÉELLES). Complète {@link #findInRange}, qui raisonne sur les dates PLANIFIÉES.
+     */
+    @Transactional(readOnly = true)
+    public List<Maintenance> findExecutedInRange(LocalDateTime from, LocalDateTime to, int maxRows) {
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery<Maintenance> cq = cb.createQuery(Maintenance.class);
+        Root<Maintenance> root = cq.from(Maintenance.class);
+        cq.select(root)
+                .where(cb.isNotNull(root.get("actualStartAt")),
+                        cb.lessThan(root.<LocalDateTime>get("actualStartAt"), to),
+                        cb.or(cb.isNull(root.get("actualEndAt")), cb.greaterThan(root.<LocalDateTime>get("actualEndAt"), from)))
+                .orderBy(cb.asc(root.get("actualStartAt")), cb.asc(root.get("id")));
+        return em.createQuery(cq).setMaxResults(maxRows).getResultList();
+    }
+
     private List<Predicate> predicates(CriteriaBuilder cb, Root<Maintenance> root, MaintenanceFilter f) {
         List<Predicate> list = new ArrayList<>();
         if (f.status() != null) {

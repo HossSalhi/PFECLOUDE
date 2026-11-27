@@ -237,13 +237,35 @@ public class ReportBuilders {
         }
     }
 
+    /** Maintenances EXÉCUTÉES dans la période (dates réelles) : nombre, terminées (fin réelle dans la période), heures réellement faites. */
+    private record ExecStats(List<Maintenance> list, long completedInPeriod, double actualHours) {}
+
+    private ExecStats execStats(ReportPeriod p) {
+        List<Maintenance> list = maintenanceSearch.findExecutedInRange(p.from(), p.to(), MAINTENANCE_SCAN_LIMIT);
+        long completed = 0;
+        double hours = 0;
+        for (Maintenance m : list) {
+            LocalDateTime end = m.getActualEndAt();
+            if (m.getStatus() == MaintenanceStatus.COMPLETED && end != null && !end.isBefore(p.from()) && end.isBefore(p.to())) {
+                completed++;
+            }
+            hours += overlapHours(m.getActualStartAt(), end == null ? LocalDateTime.now() : end, p);
+        }
+        return new ExecStats(list, completed, ReportContent.round1(hours));
+    }
+
     private ReportContent maintenance(ReportPeriod p, ReportPeriod prev) {
         MaintStats cur = maintStats(p);
         MaintStats old = prev == null ? null : maintStats(prev);
+        ExecStats exec = execStats(p);
+        ExecStats oldExec = prev == null ? null : execStats(prev);
         Suspensions susp = suspensions(p);
         Suspensions oldSusp = prev == null ? null : suspensions(prev);
         ReportContent c = new ReportContent()
-                .metric("Maintenances de la période", cur.list.size(), old == null ? null : old.list.size(), null)
+                .metric("Maintenances planifiées dans la période", cur.list.size(), old == null ? null : old.list.size(), null)
+                .metric("Maintenances exécutées dans la période", exec.list.size(), oldExec == null ? null : oldExec.list.size(), null)
+                .metric("Terminées dans la période (heure réelle)", exec.completedInPeriod, oldExec == null ? null : oldExec.completedInPeriod, null)
+                .metric("Heures réellement effectuées", exec.actualHours, oldExec == null ? null : oldExec.actualHours, "h")
                 .metric("Terminées", cur.byStatus.get(MaintenanceStatus.COMPLETED),
                         old == null ? null : old.byStatus.get(MaintenanceStatus.COMPLETED), null)
                 .metric("Annulées", cur.byStatus.get(MaintenanceStatus.CANCELLED),
@@ -283,8 +305,16 @@ public class ReportBuilders {
                     STAMP.format(m.getEndAt()), m.getStatus().name(),
                     m.getResponsible() == null ? "—" : m.getResponsible().getUsername()));
         }
-        c.section("Détail des maintenances", List.of("N°", "Titre", "Ressource", "Début", "Fin", "Statut", "Responsable"),
+        c.section("Détail des maintenances planifiées", List.of("N°", "Titre", "Ressource", "Début planifié", "Fin planifiée", "Statut", "Responsable"),
                 detail);
+        List<List<Object>> executedRows = new ArrayList<>();
+        for (Maintenance m : exec.list.stream().limit(DETAIL_LIMIT).toList()) {
+            executedRows.add(row(m.getId(), m.getTitle(), m.getResourceName(), STAMP.format(m.getActualStartAt()),
+                    m.getActualEndAt() == null ? "en cours" : STAMP.format(m.getActualEndAt()), m.getStatus().name(),
+                    m.getResponsible() == null ? "—" : m.getResponsible().getUsername()));
+        }
+        c.section("Maintenances exécutées dans la période", List.of("N°", "Titre", "Ressource", "Début réel", "Fin réelle", "Statut", "Responsable"),
+                executedRows);
         c.section("Suspensions (pauses de la période)", List.of("N°", "Titre", "Ressource", "Suspendue le", "Cause", "Motif"),
                 susp.rows);
 
@@ -432,7 +462,7 @@ public class ReportBuilders {
                 .metric("Activités d'audit", sum(auditByModule), prevAudit, null)
                 .metric("Incidents créés", sum(bySeverity), prevIncidents, null)
                 .metric("Actions de remédiation", sum(actions), prevActions, null)
-                .metric("Maintenances de la période", maintCount, prevMaint, null)
+                .metric("Maintenances planifiées dans la période", maintCount, prevMaint, null)
                 .metric("Tâches créées", tasksCreated, prevTasks, null);
 
         c.section("Activité d'audit par module", List.of("Module", "Activités"), countRows(auditByModule));
