@@ -138,7 +138,7 @@ Attendre `rollout status` et contrôler la consommation dans la console Groq ent
 
 ### État réel de la fonction « Analyse des logs et métriques » (27 nov. 2026)
 - Commits `bb99f8d` (V33 + durcissement), `71572c5` (backend), `e0220b4` (frontend), `801d359` (doc) ; non poussés.
-- Déployé : `pfe-backend:0.2.176-801d359`, `pfe-frontend:1.8.0-801d359` (SHA-256 des tars dans `helios-state\build-801d359\SHA256-images.txt`). Retour arrière : `kubectl -n pfe set image deploy/backend backend=pfe-backend:0.2.175-de17df1` et `deploy/frontend frontend=pfe-frontend:1.7.0-de17df1`.
+- Déployé : `pfe-backend:0.2.176-801d359`, `pfe-frontend:1.8.1-801d359` (SHA-256 des tars dans `helios-state\build-801d359\SHA256-images.txt`). Retour arrière : `kubectl -n pfe set image deploy/backend backend=pfe-backend:0.2.175-de17df1` et `deploy/frontend frontend=pfe-frontend:1.7.0-de17df1`.
 - Base : sauvegarde `helios-state\backups-v33-20261127\pfe_db-avant-V33.dump` ; V33 appliquée par Flyway au démarrage du nouveau backend (Flyway est actif en production : déployer l'image applique la migration), puis `telemetry_analysis_run_harden.sql` exécuté immédiatement en `postgres`. Vérifié : propriétaire `postgres`, déclencheurs UPDATE/DELETE/TRUNCATE `ENABLE ALWAYS`, déclencheur d'événement anti-DROP actif, `appuser` limité à SELECT et INSERT.
 - Flag **désactivé** (aucune variable `HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS` posée) ; accès anonyme aux nouvelles routes : 403.
 
