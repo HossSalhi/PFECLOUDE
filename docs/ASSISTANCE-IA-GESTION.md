@@ -31,12 +31,16 @@ super-administrateur : toutes les équipes. Chef d'équipe : uniquement l'équip
 | `HELIOS_AI_ASSIST_PROVIDER` | `…provider` | `groq` | `groq` (gratuit, très rapide) ou `mistral` |
 | `HELIOS_AI_ASSIST_API_KEY` | `…api-key` | vide | **Clé API (secret)** |
 | `HELIOS_AI_ASSIST_BASE_URL` | `…base-url` | selon le fournisseur | Surcharge facultative |
-| `HELIOS_AI_ASSIST_MODEL` | `…model` | `llama-3.1-8b-instant` (Groq) / `mistral-small-latest` | Surcharge facultative |
+| `HELIOS_AI_ASSIST_MODEL` | `…model` | `openai/gpt-oss-20b` (Groq) / `mistral-small-latest` | Surcharge facultative |
 | `HELIOS_AI_ASSIST_TIMEOUT_SECONDS` | `…timeout-seconds` | `10` | Délai d'un appel |
-| `HELIOS_AI_ASSIST_MAX_TOKENS` | `…max-tokens` | `250` | Longueur maximale de la réponse (économie de tokens) |
+| `HELIOS_AI_ASSIST_MAX_TOKENS` | `…max-tokens` | `400` | Longueur maximale de la réponse (économie de tokens) |
 
 Une fonction n'est utilisable que si l'interrupteur global **et** son drapeau sont à `true` **et** si la clé est présente.
 Désactivée, elle est invisible dans l'interface. Activée sans clé, elle s'affiche avec « non configurée » et son bouton est bloqué.
+
+### Modèle gratuit retenu
+
+`openai/gpt-oss-20b` sur Groq (gratuit : 30 req/min, 1 000 req/jour, 8 000 tokens/min, 200 000 tokens/jour sur le compte du projet). Un appel consomme environ 500-700 tokens : plus de 250 appels par jour. L'effort de raisonnement est réglé sur « low » pour garder la réponse courte et économique. Les modèles disponibles dépendent du compte : vérifier la liste dans la console Groq avant de changer `HELIOS_AI_ASSIST_MODEL`.
 
 ### Clé API : jamais en clair dans un fichier
 

@@ -28,7 +28,7 @@ public class AiAssistProperties {
     private String apiKey = "";
     private String model = "";
     private int timeoutSeconds = 10;
-    private int maxTokens = 250;
+    private int maxTokens = 400;
     private double temperature = 0.2;
 
     private Flag reportsSummary = new Flag();
@@ -67,7 +67,7 @@ public class AiAssistProperties {
         if (model != null && !model.isBlank()) {
             return model.trim();
         }
-        return "mistral".equalsIgnoreCase(provider == null ? "" : provider.trim()) ? "mistral-small-latest" : "llama-3.1-8b-instant";
+        return "mistral".equalsIgnoreCase(provider == null ? "" : provider.trim()) ? "mistral-small-latest" : "openai/gpt-oss-20b";
     }
 
     public boolean isEnabled() { return enabled; }

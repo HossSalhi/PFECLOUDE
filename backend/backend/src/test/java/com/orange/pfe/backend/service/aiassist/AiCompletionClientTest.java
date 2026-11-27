@@ -85,6 +85,17 @@ class AiCompletionClientTest {
     }
 
     @Test
+    void reasoningModelsGetALowReasoningEffortAndOthersDoNot() throws Exception {
+        AiAssistProperties gptOss = props(true, true, "k");
+        gptOss.setModel("openai/gpt-oss-20b");
+        client(gptOss).complete(AiFeature.REPORTS_SUMMARY, "s", "u");
+        assertThat(JSON.readTree(lastBody.get()).path("reasoning_effort").asText()).isEqualTo("low");
+
+        client(props(true, true, "k")).complete(AiFeature.REPORTS_SUMMARY, "s", "u");     // modèle « test-model »
+        assertThat(JSON.readTree(lastBody.get()).has("reasoning_effort")).isFalse();
+    }
+
+    @Test
     void disabledGloballyOrPerFeatureMakesNoCall() {
         assertThat(reasonOf(client(props(false, true, "k")).complete(AiFeature.REPORTS_SUMMARY, "s", "u"))).isEqualTo(Reason.DISABLED);
         assertThat(reasonOf(client(props(true, false, "k")).complete(AiFeature.REPORTS_SUMMARY, "s", "u"))).isEqualTo(Reason.DISABLED);
@@ -160,8 +171,8 @@ class AiCompletionClientTest {
     void providerDefaultsAndReadiness() {
         AiAssistProperties byDefault = new AiAssistProperties();          // gratuit et rapide par défaut : Groq, petit modèle
         assertThat(byDefault.effectiveBaseUrl()).isEqualTo("https://api.groq.com/openai/v1");
-        assertThat(byDefault.effectiveModel()).isEqualTo("llama-3.1-8b-instant");
-        assertThat(byDefault.getMaxTokens()).isEqualTo(250);
+        assertThat(byDefault.effectiveModel()).isEqualTo("openai/gpt-oss-20b");
+        assertThat(byDefault.getMaxTokens()).isEqualTo(400);
         assertThat(byDefault.getTimeoutSeconds()).isEqualTo(10);
 
         AiAssistProperties mistral = new AiAssistProperties();
