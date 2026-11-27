@@ -294,7 +294,7 @@ export interface AuditQuery {
 
 // ── Rapports ─────────────────────────────────────────────────────────────────
 
-export type ReportType = 'USER_ACTIVITY' | 'MAINTENANCE' | 'TEAMS_TASKS' | 'PLATFORM_ACTIVITY' | 'PERFORMANCE';
+export type ReportType = 'USER_ACTIVITY' | 'MAINTENANCE' | 'TEAMS_TASKS' | 'PLATFORM_ACTIVITY' | 'PERFORMANCE' | 'AUTO_REMEDIATION_CYCLE';
 export type ReportFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
 export interface ReportTypeInfo {

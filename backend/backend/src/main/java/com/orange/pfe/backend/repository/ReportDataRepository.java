@@ -190,6 +190,77 @@ public class ReportDataRepository {
         return out;
     }
 
+    // ── Cycle d'auto-remédiation (lecture seule, bornée) ──────────────────────
+
+    /** Incidents créés dans la période, du plus ancien au plus récent (au plus {@link #ROUTING_SCAN_LIMIT}). */
+    @Transactional(readOnly = true)
+    public List<com.orange.pfe.backend.model.core.Incident> incidentsCreatedBetween(LocalDateTime from, LocalDateTime to) {
+        return em.createQuery("select i from Incident i where i.createdAt >= :from and i.createdAt < :to "
+                + "order by i.createdAt", com.orange.pfe.backend.model.core.Incident.class)
+                .setParameter("from", from).setParameter("to", to).setMaxResults(ROUTING_SCAN_LIMIT).getResultList();
+    }
+
+    /** Actions de remédiation de ces incidents, dans l'ordre de création. */
+    @Transactional(readOnly = true)
+    public List<com.orange.pfe.backend.model.action.IncidentAction> actionsOfIncidents(java.util.Collection<Long> incidentIds) {
+        return chunked(incidentIds, ids -> em.createQuery("select a from IncidentAction a join fetch a.incident "
+                + "where a.incident.id in :ids order by a.createdAt", com.orange.pfe.backend.model.action.IncidentAction.class)
+                .setParameter("ids", ids).getResultList());
+    }
+
+    /** Vérifications finales de ces incidents, dans l'ordre chronologique. */
+    @Transactional(readOnly = true)
+    public List<com.orange.pfe.backend.model.core.IncidentVerification> verificationsOfIncidents(java.util.Collection<Long> incidentIds) {
+        return chunked(incidentIds, ids -> em.createQuery("select v from IncidentVerification v where v.incidentId in :ids "
+                + "order by v.verifiedAt", com.orange.pfe.backend.model.core.IncidentVerification.class)
+                .setParameter("ids", ids).getResultList());
+    }
+
+    /** Première entrée d'historique au statut donné, par incident : lignes [identifiant, date]. */
+    @Transactional(readOnly = true)
+    public Map<Long, LocalDateTime> firstHistoryAt(java.util.Collection<Long> incidentIds, IncidentStatus status) {
+        Map<Long, LocalDateTime> out = new LinkedHashMap<>();
+        for (Object[] r : chunked(incidentIds, ids -> em.createQuery("select h.incident.id, min(h.createdAt) from IncidentHistory h "
+                + "where h.status = :s and h.incident.id in :ids group by h.incident.id", Object[].class)
+                .setParameter("s", status).setParameter("ids", ids).getResultList())) {
+            out.put(((Number) r[0]).longValue(), (LocalDateTime) r[1]);
+        }
+        return out;
+    }
+
+    /** Incidents ayant une tâche humaine (validation, escalade) dans leur workflow. */
+    @Transactional(readOnly = true)
+    public java.util.Set<Long> incidentsWithHumanTask(java.util.Collection<Long> incidentIds) {
+        return new java.util.HashSet<>(chunked(incidentIds, ids -> em.createQuery("select distinct w.incident.id from HumanTask t "
+                + "join t.workflowInstance w where w.incident.id in :ids", Long.class).setParameter("ids", ids).getResultList()));
+    }
+
+    /** Tâches « décision » du routage de ces incidents. */
+    @Transactional(readOnly = true)
+    public List<TeamTask> decisionTasksOfIncidents(java.util.Collection<Long> incidentIds) {
+        return chunked(incidentIds, ids -> em.createQuery("select t from TeamTask t where t.sourceEvent = :ev "
+                + "and t.sourceIncidentId in :ids", TeamTask.class)
+                .setParameter("ev", TaskSourceEvent.DECISION).setParameter("ids", ids).getResultList());
+    }
+
+    /** Nombre de preuves terminal disponibles (relevés sur la VM) par incident et par phase : [incident, phase, nombre]. */
+    @Transactional(readOnly = true)
+    public List<Object[]> terminalEvidenceCounts(java.util.Collection<Long> incidentIds) {
+        return chunked(incidentIds, ids -> em.createQuery("select e.incidentId, e.phase, count(e) from IncidentTerminalEvidence e "
+                + "where e.available = true and e.incidentId in :ids group by e.incidentId, e.phase", Object[].class)
+                .setParameter("ids", ids).getResultList());
+    }
+
+    /** Exécute une requête par lots de 1 000 identifiants (limite de paramètres des SGBD) et regroupe les résultats. */
+    private static <T> List<T> chunked(java.util.Collection<Long> ids, java.util.function.Function<List<Long>, List<T>> query) {
+        List<T> out = new java.util.ArrayList<>();
+        List<Long> all = new java.util.ArrayList<>(ids);
+        for (int i = 0; i < all.size(); i += 1000) {
+            out.addAll(query.apply(all.subList(i, Math.min(i + 1000, all.size()))));
+        }
+        return out;
+    }
+
     // ── Outils ────────────────────────────────────────────────────────────────
 
     private static Map<String, Long> toCountMap(List<Object[]> rows) {

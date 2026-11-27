@@ -3,7 +3,15 @@ package com.orange.pfe.backend.service.report;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceFilter;
 import com.orange.pfe.backend.dto.team.TeamResponses.MemberTaskStats;
 import com.orange.pfe.backend.dto.team.TeamResponses.TaskSummaryResponse;
+import com.orange.pfe.backend.model.action.ActionStatus;
+import com.orange.pfe.backend.model.action.ActionType;
+import com.orange.pfe.backend.model.action.AutomationMode;
+import com.orange.pfe.backend.model.action.IncidentAction;
 import com.orange.pfe.backend.model.audit.AuditAction;
+import com.orange.pfe.backend.model.core.Incident;
+import com.orange.pfe.backend.model.core.IncidentVerification;
+import com.orange.pfe.backend.model.enums.IncidentStatus;
+import com.orange.pfe.backend.model.enums.TerminalEvidencePhase;
 import com.orange.pfe.backend.model.maintenance.Maintenance;
 import com.orange.pfe.backend.model.maintenance.MaintenanceStatus;
 import com.orange.pfe.backend.model.report.ReportType;
@@ -65,6 +73,7 @@ public class ReportBuilders {
             case TEAMS_TASKS -> teamsTasks(period, previous);
             case PLATFORM_ACTIVITY -> platformActivity(period, previous);
             case PERFORMANCE -> performance(period, previous);
+            case AUTO_REMEDIATION_CYCLE -> autoRemediationCycle(period, previous);
         };
     }
 
@@ -552,6 +561,208 @@ public class ReportBuilders {
         sets.put("Résolus", resolvedSeries);
         c.chart("bar", "Incidents créés et résolus par sévérité", labels, sets);
         c.chart("bar", "Temps de résolution moyen par sévérité (min)", labels, Map.of("Minutes", mttrSeries));
+        return c;
+    }
+
+    // ── Cycle d'auto-remédiation ──────────────────────────────────────────────
+
+    /** Types d'action qui ne sont pas de vraies remédiations : ils ne comptent pas comme « action lancée ». */
+    private static final Set<ActionType> NOT_REMEDIATION = EnumSet.of(ActionType.NOTIFICATION, ActionType.INVESTIGATION, ActionType.ESCALATION);
+
+    private static final String COMPLETE = "Cycle complet";
+    private static final String NO_ACTION = "Sans action";
+    private static final String NO_VERIFICATION = "Action sans vérification";
+    private static final String NO_RESOLUTION = "Vérifié sans résolution";
+    private static final String RESOLVED_FIRST = "Résolu avant la vérification";
+
+    /** Un incident et les horodatages de chaque phase de son cycle (une borne absente vaut {@code null}). */
+    private record Cycle(Incident incident, LocalDateTime detected, LocalDateTime decided, IncidentAction firstAction,
+                         LocalDateTime actionStart, LocalDateTime actionEnd, IncidentVerification verification,
+                         LocalDateTime resolved, String state, boolean automatic) {}
+
+    private record CycleStats(List<Cycle> cycles, long complete, long resolved, long automatic, double avgDetectToAction,
+                              double avgActionToVerification, double avgVerificationToResolution, long failedActions,
+                              double avgAttempts, long evidenceBefore, long evidenceAfter,
+                              Map<ActionType, long[]> byType, Map<String, Long> byState) {}
+
+    private CycleStats cycleStats(ReportPeriod p) {
+        List<Incident> incidents = data.incidentsCreatedBetween(p.from(), p.to());
+        List<Long> ids = incidents.stream().map(Incident::getId).toList();
+        Map<Long, List<IncidentAction>> actions = new LinkedHashMap<>();
+        Map<Long, List<IncidentVerification>> verifications = new LinkedHashMap<>();
+        Map<Long, LocalDateTime> resolvedAt = Map.of();
+        java.util.Set<Long> waiting = java.util.Set.of();
+        java.util.Set<Long> humans = java.util.Set.of();
+        Map<Long, TeamTask> decisions = new LinkedHashMap<>();
+        long evBefore = 0, evAfter = 0;
+        if (!ids.isEmpty()) {
+            for (IncidentAction a : data.actionsOfIncidents(ids)) {
+                if (!NOT_REMEDIATION.contains(a.getType())) {
+                    actions.computeIfAbsent(a.getIncident().getId(), k -> new ArrayList<>()).add(a);
+                }
+            }
+            for (IncidentVerification v : data.verificationsOfIncidents(ids)) {
+                if (v.getVerifiedAt() != null) {
+                    verifications.computeIfAbsent(v.getIncidentId(), k -> new ArrayList<>()).add(v);
+                }
+            }
+            resolvedAt = data.firstHistoryAt(ids, IncidentStatus.RESOLVED);
+            waiting = data.firstHistoryAt(ids, IncidentStatus.WAITING_FOR_APPROVAL).keySet();
+            humans = data.incidentsWithHumanTask(ids);
+            for (TeamTask t : data.decisionTasksOfIncidents(ids)) {
+                decisions.putIfAbsent(t.getSourceIncidentId(), t);
+            }
+            for (Object[] r : data.terminalEvidenceCounts(ids)) {
+                if (r[1] == TerminalEvidencePhase.BEFORE) {
+                    evBefore += ((Number) r[2]).longValue();
+                } else {
+                    evAfter += ((Number) r[2]).longValue();
+                }
+            }
+        }
+
+        List<Cycle> cycles = new ArrayList<>();
+        Map<String, Long> byState = new LinkedHashMap<>();
+        for (String s : List.of(COMPLETE, NO_ACTION, NO_VERIFICATION, NO_RESOLUTION, RESOLVED_FIRST)) {
+            byState.put(s, 0L);
+        }
+        List<Long> toAction = new ArrayList<>(), toVerification = new ArrayList<>(), toResolution = new ArrayList<>();
+        long complete = 0, resolvedCount = 0, automatic = 0;
+        for (Incident i : incidents) {
+            List<IncidentAction> acts = actions.getOrDefault(i.getId(), List.of());
+            IncidentAction first = acts.isEmpty() ? null : acts.get(0);
+            LocalDateTime actionStart = first == null ? null : first.getCreatedAt();
+            LocalDateTime actionEnd = first == null ? null : (first.getExecutedAt() != null ? first.getExecutedAt() : first.getCreatedAt());
+            IncidentVerification verification = null;
+            if (actionStart != null) {
+                for (IncidentVerification v : verifications.getOrDefault(i.getId(), List.of())) {
+                    if (!v.getVerifiedAt().isBefore(actionStart)) {
+                        verification = v;
+                        break;
+                    }
+                }
+            }
+            LocalDateTime resolved = resolvedAt.get(i.getId());
+            TeamTask decision = decisions.get(i.getId());
+            String state;
+            if (first == null) {
+                state = NO_ACTION;
+            } else if (verification == null) {
+                state = NO_VERIFICATION;
+            } else if (resolved == null) {
+                state = NO_RESOLUTION;
+            } else if (resolved.isBefore(verification.getVerifiedAt())) {
+                state = RESOLVED_FIRST;
+            } else {
+                state = COMPLETE;
+            }
+            byState.merge(state, 1L, Long::sum);
+            if (COMPLETE.equals(state)) {
+                complete++;
+            }
+            if (first != null) {
+                toAction.add(Math.max(0, Duration.between(i.getCreatedAt(), actionStart).toMinutes()));
+            }
+            if (first != null && verification != null) {
+                toVerification.add(Math.max(0, Duration.between(actionEnd, verification.getVerifiedAt()).toMinutes()));
+            }
+            if (verification != null && resolved != null && !resolved.isBefore(verification.getVerifiedAt())) {
+                toResolution.add(Duration.between(verification.getVerifiedAt(), resolved).toMinutes());
+            }
+            boolean auto = false;
+            if (resolved != null) {
+                resolvedCount++;
+                // résolu sans intervention humaine : toutes les remédiations en AUTO, aucune tâche humaine, aucune
+                // validation demandée, aucune décision d'équipe sollicitée par le routage
+                auto = !acts.isEmpty() && acts.stream().allMatch(a -> a.getAutomationMode() == AutomationMode.AUTO)
+                        && !humans.contains(i.getId()) && !waiting.contains(i.getId()) && decision == null;
+                if (auto) {
+                    automatic++;
+                }
+            }
+            cycles.add(new Cycle(i, i.getCreatedAt(), decision == null ? null : decision.getCompletedAt(), first, actionStart,
+                    actionEnd, verification, resolved, state, auto));
+        }
+
+        Map<ActionType, long[]> byType = new EnumMap<>(ActionType.class);   // [lancées, réussies, en échec, somme des tentatives]
+        long failed = 0, attempts = 0, actionCount = 0;
+        for (List<IncidentAction> list : actions.values()) {
+            for (IncidentAction a : list) {
+                long[] n = byType.computeIfAbsent(a.getType(), k -> new long[4]);
+                n[0]++;
+                n[3] += a.getAttemptCount();
+                if (a.getStatus() == ActionStatus.COMPLETED) {
+                    n[1]++;
+                }
+                if (a.getStatus() == ActionStatus.FAILED) {
+                    n[2]++;
+                    failed++;
+                }
+                attempts += a.getAttemptCount();
+                actionCount++;
+            }
+        }
+        return new CycleStats(cycles, complete, resolvedCount, automatic, avg(toAction), avg(toVerification), avg(toResolution),
+                failed, actionCount == 0 ? 0.0 : ReportContent.round1((double) attempts / actionCount), evBefore, evAfter, byType, byState);
+    }
+
+    private static double avg(List<Long> minutes) {
+        return minutes.isEmpty() ? 0.0 : ReportContent.round1(minutes.stream().mapToLong(Long::longValue).average().orElse(0));
+    }
+
+    private static String stamp(LocalDateTime t) {
+        return t == null ? "—" : STAMP.format(t);
+    }
+
+    private ReportContent autoRemediationCycle(ReportPeriod p, ReportPeriod prev) {
+        CycleStats cur = cycleStats(p);
+        CycleStats old = prev == null ? null : cycleStats(prev);
+        double rate = cur.resolved == 0 ? 0.0 : ReportContent.round1(cur.automatic * 100.0 / cur.resolved);
+        Double oldRate = old == null ? null : (old.resolved == 0 ? 0.0 : ReportContent.round1(old.automatic * 100.0 / old.resolved));
+        ReportContent c = new ReportContent()
+                .metric("Incidents de la période", cur.cycles.size(), old == null ? null : old.cycles.size(), null)
+                .metric("Cycles complets (action, vérification, résolution)", cur.complete, old == null ? null : old.complete, null)
+                .metric("Cycles incomplets", cur.cycles.size() - cur.complete, old == null ? null : old.cycles.size() - old.complete, null)
+                .metric("Résolutions automatiques sans intervention humaine", cur.automatic, old == null ? null : old.automatic, null)
+                .metric("Taux de résolution automatique", rate, oldRate, "%")
+                .metric("Durée moyenne détection → action", cur.avgDetectToAction, old == null ? null : old.avgDetectToAction, "min")
+                .metric("Durée moyenne action → vérification", cur.avgActionToVerification, old == null ? null : old.avgActionToVerification, "min")
+                .metric("Durée moyenne vérification → résolution", cur.avgVerificationToResolution, old == null ? null : old.avgVerificationToResolution, "min")
+                .metric("Actions de remédiation en échec", cur.failedActions, old == null ? null : old.failedActions, null)
+                .metric("Tentatives moyennes par action", cur.avgAttempts, old == null ? null : old.avgAttempts, null)
+                .metric("Relevés VM avant remédiation", cur.evidenceBefore, old == null ? null : old.evidenceBefore, null)
+                .metric("Relevés VM après remédiation", cur.evidenceAfter, old == null ? null : old.evidenceAfter, null);
+
+        List<List<Object>> rows = new ArrayList<>();
+        for (Cycle cy : cur.cycles.stream().limit(DETAIL_LIMIT).toList()) {
+            Incident i = cy.incident;
+            rows.add(row(i.getId(), i.getTitle(), i.getIncidentType() == null ? "—" : i.getIncidentType(),
+                    stamp(cy.detected), stamp(cy.decided),
+                    cy.firstAction == null ? "—" : cy.firstAction.getType() + " · " + cy.firstAction.getAutomationMode(),
+                    stamp(cy.actionStart),
+                    cy.verification == null ? "—" : (cy.verification.getResult() == null ? "?" : cy.verification.getResult()),
+                    stamp(cy.verification == null ? null : cy.verification.getVerifiedAt()), stamp(cy.resolved),
+                    cy.state + (cy.automatic ? " (automatique)" : "")));
+        }
+        c.section("Cycle par incident", List.of("N°", "Incident", "Type", "Détecté", "Décision d'équipe", "Action",
+                "Action le", "Vérification", "Vérifié le", "Résolu le", "Statut du cycle"), rows);
+
+        List<List<Object>> typeRows = new ArrayList<>();
+        cur.byType.entrySet().stream().sorted((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0])).forEach(e -> {
+            long[] n = e.getValue();
+            typeRows.add(row(e.getKey().name(), n[0], n[1], n[2], ReportContent.round1((double) n[3] / n[0])));
+        });
+        c.section("Par type d'action", List.of("Type d'action", "Lancées", "Réussies", "En échec", "Tentatives moyennes"), typeRows);
+
+        List<List<Object>> stateRows = new ArrayList<>();
+        cur.byState.forEach((s, n) -> stateRows.add(row(s, n)));
+        c.section("Où s'arrêtent les cycles", List.of("Étape", "Incidents"), stateRows);
+
+        c.chart("bar", "Durée moyenne de chaque phase (min)",
+                List.of("Détection → action", "Action → vérification", "Vérification → résolution"),
+                Map.of("Minutes", List.of(cur.avgDetectToAction, cur.avgActionToVerification, cur.avgVerificationToResolution)));
+        c.chart("doughnut", "Cycles complets et étape de blocage", new ArrayList<>(cur.byState.keySet()),
+                Map.of("Incidents", new ArrayList<>(cur.byState.values())));
         return c;
     }
 

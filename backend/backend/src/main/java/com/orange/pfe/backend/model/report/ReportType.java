@@ -10,6 +10,8 @@ public enum ReportType {
             "Tâches créées, terminées, ouvertes et en retard, par équipe et par membre."),
     PLATFORM_ACTIVITY("Activités de la plateforme",
             "Activité d'audit par module et par jour, incidents créés et actions de remédiation exécutées."),
+    AUTO_REMEDIATION_CYCLE("Cycle d'auto-remédiation",
+            "Cycle complet par incident : détection, décision, action, vérification, résolution ; durée de chaque phase, taux de résolution automatique, cycles bloqués."),
     PERFORMANCE("Performance sur une période",
             "Incidents créés/résolus, temps de résolution, taux de réussite des actions de remédiation.");
 
