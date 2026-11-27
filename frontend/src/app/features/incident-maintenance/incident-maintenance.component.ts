@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Observable } from 'rxjs';
 import { IncidentRoutingService } from '../../core/services/incident-routing.service';
@@ -12,6 +12,7 @@ import { ROUTING_STATE_LABELS, RoutingDecision, RoutingView } from '../../core/m
 @Component({
   selector: 'app-incident-maintenance',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './incident-maintenance.component.html',
   imports: [RouterLink]
 })

@@ -1,0 +1,130 @@
+<div class="org-scope">
+  <div class="org-page">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-clipboard-check"></i> Audit et activités</h1>
+        <p class="page-subtitle">Auto-remédiation : le cycle de self-healing relu dans les données réelles (incident, actions, vérifications, relevés de la VM, logs). Lecture seule, aucune écriture.</p>
+      </div>
+    </div>
+
+    <div class="sup-tabs" role="tablist">
+      <a class="sup-tab" routerLink="/audit-trail" style="text-decoration:none"><i class="fas fa-list"></i> Activités</a>
+      <a class="sup-tab active" routerLink="/audit-trail/self-healing" style="text-decoration:none"><i class="fas fa-heart-pulse"></i> Auto-remédiation</a>
+    </div>
+
+    @if (selectedId == null) {
+      <div class="sup-periods">
+        @for (p of periods; track p.hours) {
+          <button class="sup-period" [class.active]="hours === p.hours" (click)="setPeriod(p.hours)">{{ p.label }}</button>
+        }
+      </div>
+      @if (list.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (list.error) { <div class="alert-warning" role="alert">{{ list.error }}</div> }
+      @if (list.data) {
+        @if (list.data.items.length === 0) {
+          <p class="sup-muted">Aucune remédiation lancée sur cette période.</p>
+        } @else {
+          <table class="org-table">
+            <thead><tr><th>Incident</th><th>Type</th><th>Ressource</th><th>Statut</th><th>Actions</th><th>Dernière action</th><th></th></tr></thead>
+            <tbody>
+              @for (i of list.data.items; track i.incidentId) {
+                <tr>
+                  <td><strong>#{{ i.incidentId }}</strong> {{ i.title }}<div class="sup-muted">détecté le {{ fmt(i.createdAt) }}</div></td>
+                  <td>{{ i.type || '—' }}</td>
+                  <td>{{ i.resource || '—' }}</td>
+                  <td>{{ i.status }}</td>
+                  <td>{{ i.actions }} @if (i.failedActions > 0) { <span class="badge st-cancelled">{{ i.failedActions }} en échec</span> }</td>
+                  <td>{{ i.lastActionType }} <span class="sup-muted">{{ i.lastActionStatus }} · {{ fmt(i.lastActionAt) }}</span></td>
+                  <td><button class="btn-secondary" (click)="open(i)">Voir la trace</button></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (list.data.truncated) { <p class="sup-muted">Liste limitée aux incidents les plus récents : réduisez la période pour voir les autres.</p> }
+        }
+      }
+    }
+
+    @if (selectedId != null) {
+      <p><button class="btn-secondary" (click)="close()"><i class="fas fa-arrow-left"></i> Retour à la liste</button></p>
+      @if (trace.loading) { <p class="sup-muted">Chargement de la trace…</p> }
+      @if (trace.error) { <div class="alert-warning" role="alert">{{ trace.error }}</div> }
+      @if (trace.data) {
+        <h2 class="sup-h">Incident #{{ trace.data.incident.id }} — {{ trace.data.incident.title }}</h2>
+        <p class="sup-muted">{{ trace.data.incident.type }} · {{ trace.data.incident.namespace }}/{{ trace.data.incident.app }} · {{ trace.data.incident.severity }} · statut {{ trace.data.incident.status }}</p>
+
+        <h2 class="sup-h">Chronologie</h2>
+        <ol class="sup-timeline">
+          @for (e of trace.data.timeline; track $index) {
+            <li [attr.data-kind]="e.kind">
+              <span class="sup-time">{{ fmt(e.at) }}</span>
+              <i class="fas" [class]="kindIcon(e.kind)"></i>
+              <strong>{{ e.title }}</strong>
+              @if (e.detail) { <span class="sup-muted"> — {{ e.detail }}</span> }
+            </li>
+          }
+        </ol>
+
+        <h2 class="sup-h">Actions et logs de la VM</h2>
+        @for (a of trace.data.actions; track a.id) {
+          <div class="sup-error">
+            <div class="sup-error-head">
+              <span class="badge st-planned">{{ a.type }}</span>
+              <strong>{{ a.status }}</strong>
+              <span class="sup-muted">{{ a.mode }} · {{ a.attempts }} tentative(s) · {{ fmt(a.executedAt || a.createdAt) }}@if (a.executedBy) { · {{ a.executedBy }} }@if (a.target) { · cible {{ a.target }} }</span>
+            </div>
+            @if (a.failedReason) { <div class="sup-advice"><i class="fas fa-circle-exclamation"></i> {{ a.failedReason }}</div> }
+            @if (a.logSource) {
+              <button class="btn-secondary" (click)="toggleLogs(a)">{{ isOpen(a) ? 'Masquer' : 'Voir' }} les logs ({{ a.logSource }}, ±5 min)</button>
+            } @else {
+              <span class="sup-muted">Pas de logs Loki pour cette ressource.</span>
+            }
+            @if (isOpen(a) && logsOf(a); as block) {
+              @if (block.loading) { <p class="sup-muted">Chargement des logs…</p> }
+              @if (block.error) { <div class="alert-warning" role="alert">{{ block.error }}</div> }
+              @if (block.data && !block.data.available) { <div class="alert-warning" role="status">{{ block.data.reason }}</div> }
+              @if (block.data?.available) {
+                @if (block.data!.lines.length === 0) { <p class="sup-muted">Aucune ligne de log sur cette fenêtre.</p> }
+                <div class="sup-logs">
+                  @for (l of block.data!.lines; track $index) {
+                    <div class="sup-log" [class.is-error]="l.error">
+                      <span class="sup-time">{{ fmt(l.at) }}</span> <code>{{ l.text }}</code>
+                      @if (l.label) { <span class="badge st-cancelled" [title]="l.category || ''">{{ l.label }}</span> }
+                    </div>
+                  }
+                </div>
+                @if (block.data!.truncated) { <p class="sup-muted">Limité à 100 lignes : la fenêtre en contient peut-être davantage.</p> }
+              }
+            }
+          </div>
+        }
+
+        @if (trace.data.verifications.length) {
+          <h2 class="sup-h">Vérifications</h2>
+          <table class="org-table">
+            <thead><tr><th>Heure</th><th>Critère</th><th>Résultat</th><th>Motif</th></tr></thead>
+            <tbody>
+              @for (v of trace.data.verifications; track $index) {
+                <tr><td>{{ fmt(v.at) }}</td><td>{{ v.criteria || '—' }}</td><td>{{ v.result || '—' }}@if (!v.available) { <span class="sup-muted"> (non disponible)</span> }</td><td>{{ v.reason || '—' }}</td></tr>
+              }
+            </tbody>
+          </table>
+        }
+
+        @if (trace.data.evidence.length) {
+          <h2 class="sup-h">Relevés pris sur la VM</h2>
+          <table class="org-table">
+            <thead><tr><th>Heure</th><th>VM</th><th>Phase</th><th>Commande</th><th>Code retour</th></tr></thead>
+            <tbody>
+              @for (e of trace.data.evidence; track $index) {
+                <tr><td>{{ fmt(e.at) }}</td><td>{{ e.vm }}</td><td>{{ e.phase }}</td><td><code>{{ e.command }}</code></td><td>{{ e.exitCode ?? '—' }}@if (!e.available) { <span class="sup-muted"> (non disponible)</span> }</td></tr>
+              }
+            </tbody>
+          </table>
+          <p class="sup-muted">La sortie complète des commandes n'est pas reprise ici.</p>
+        }
+      }
+    }
+  </div>
+</div>

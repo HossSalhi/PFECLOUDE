@@ -256,3 +256,17 @@
   .sup-steps { margin: 6px 0; padding-left: 20px; font-size: 13px; line-height: 1.9; }
   .sup-frame { width: 100%; height: 640px; border: 1px solid var(--border, #e5e5e5); border-radius: 10px; }
 }
+
+/* Trace d'auto-remédiation de l'Audit-trail : chronologie et logs de la VM. */
+.org-scope {
+  .sup-timeline { list-style: none; margin: 0 0 12px; padding: 0 0 0 14px; border-left: 2px solid var(--border, #e5e5e5); }
+  .sup-timeline li { position: relative; padding: 4px 0 4px 10px; font-size: 13px; }
+  .sup-timeline li::before { content: ''; position: absolute; left: -20px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--brand, #ff7900); }
+  .sup-timeline li[data-kind='VERIFICATION']::before { background: #2e7d32; }
+  .sup-timeline li[data-kind='EVIDENCE']::before { background: #1565c0; }
+  .sup-time { display: inline-block; min-width: 118px; margin-right: 6px; font-size: 11px; color: var(--text-secondary, #888); }
+  .sup-logs { max-height: 320px; overflow: auto; margin-top: 8px; border: 1px solid var(--border, #e5e5e5); border-radius: 8px; background: var(--bg-subtle, #fafafa); }
+  .sup-log { padding: 3px 8px; font-size: 11px; border-bottom: 1px solid var(--border, #eee); }
+  .sup-log code { white-space: pre-wrap; word-break: break-all; }
+  .sup-log.is-error { background: #fdecea; }
+}

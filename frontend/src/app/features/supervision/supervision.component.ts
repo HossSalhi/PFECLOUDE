@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
@@ -28,6 +28,7 @@ const empty = <T>(): Section<T> => ({ loading: false, data: null, error: '' });
 @Component({
   selector: 'app-supervision',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './supervision.component.html',
   imports: [NgChartsModule, DecimalPipe, DatePipe, RouterLink, MonitoringLinksComponent]
 })

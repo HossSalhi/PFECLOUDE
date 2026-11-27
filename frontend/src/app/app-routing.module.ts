@@ -57,6 +57,7 @@ const routes: Routes = [
   { path: 'incidents/:id/maintenance', loadComponent: () => import('./features/incident-maintenance/incident-maintenance.component').then(m => m.IncidentMaintenanceComponent), canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['MAINTENANCE_VIEW'] } },
   { path: 'teams',       loadComponent: () => import('./features/teams/teams.component').then(m => m.TeamsComponent),       canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TEAMS_VIEW'] } },
   { path: 'team-tasks',  loadComponent: () => import('./features/team-tasks/team-tasks.component').then(m => m.TeamTasksComponent),   canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TASKS_VIEW'] } },
+  { path: 'audit-trail/self-healing', loadComponent: () => import('./features/audit-trail/self-healing-trace.component').then(m => m.SelfHealingTraceComponent), canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['AUDIT_VIEW_ALL'] } },
   { path: 'audit-trail', loadComponent: () => import('./features/audit-trail/audit-trail.component').then(m => m.AuditTrailComponent),  canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL'] } },
   { path: 'reports',     loadComponent: () => import('./features/reports/reports.component').then(m => m.ReportsComponent),     canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['REPORTS_VIEW'] } },
 

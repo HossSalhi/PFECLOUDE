@@ -1,4 +1,4 @@
-import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy, Injector, inject } from '@angular/core';
 import { AuditTrailService } from '../../core/services/audit-trail.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
 import { AuditEntry, AuditMeta, AuditQuery, AUDIT_ACTION_LABELS, AUDIT_MODULE_LABELS } from '../../core/models/org.models';
@@ -6,6 +6,7 @@ import { errorMessage, formatDateTime, toLocalIso } from '../../shared/date.util
 import { saveBlob } from '../../shared/download.util';
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
+import { Router } from '@angular/router';
 
 export interface AuditDiffRow {
   field: string;
@@ -51,6 +52,17 @@ export class AuditTrailComponent implements OnInit {
   readonly resultLabels = RESULT_LABELS;
 
   constructor(private service: AuditTrailService, public perms: OrgPermissionsService) {}
+
+  private injector = inject(Injector);
+
+  /** Onglet « Auto-remédiation » : navigation dans l'application ; sans routeur (tests isolés), le lien normal s'applique. */
+  openSelfHealing(event: Event): void {
+    try {
+      const router = this.injector.get(Router);
+      event.preventDefault();
+      void router.navigateByUrl('/audit-trail/self-healing');
+    } catch { /* lien ordinaire */ }
+  }
 
   get canViewAll(): boolean { return this.perms.can('AUDIT_VIEW_ALL'); }
   get canExport(): boolean { return this.perms.can('AUDIT_EXPORT'); }

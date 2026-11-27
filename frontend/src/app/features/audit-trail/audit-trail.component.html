@@ -20,6 +20,13 @@
         </div>
       </div>
 
+      @if (canViewAll) {
+        <div class="sup-tabs" role="tablist">
+          <a class="sup-tab active" href="/audit-trail" style="text-decoration:none" (click)="$event.preventDefault()"><i class="fas fa-list"></i> Activités</a>
+          <a class="sup-tab" href="/audit-trail/self-healing" style="text-decoration:none" (click)="openSelfHealing($event)"><i class="fas fa-heart-pulse"></i> Auto-remédiation</a>
+        </div>
+      }
+
       @if (success) {
         <div class="alert-success"><i class="fas fa-check-circle"></i> {{ success }}</div>
       }
