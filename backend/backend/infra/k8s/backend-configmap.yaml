@@ -101,3 +101,12 @@ data:
   MAIL_PORT: "2526"
   SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "false"
   SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "false"
+  # Assistance IA des modules de gestion (suggestions et textes explicatifs SEULEMENT, jamais d'action) : TOUT est
+  # DESACTIVE par defaut. Le drapeau global ET celui de la fonction doivent etre a "true", et la cle API doit etre
+  # presente. La cle HELIOS_AI_ASSIST_API_KEY n'est JAMAIS ici : elle vit dans le Secret backend-secret (hors Git).
+  # Fournisseur par defaut : Groq, modele openai/gpt-oss-20b (voir docs/ASSISTANCE-IA-GESTION.md).
+  HELIOS_AI_ASSIST_ENABLED: "false"
+  HELIOS_AI_ASSIST_REPORTS_SUMMARY: "false"
+  HELIOS_AI_ASSIST_AUDIT_ANOMALIES: "false"
+  HELIOS_AI_ASSIST_TASK_ASSIGNMENT: "false"
+  HELIOS_AI_ASSIST_MAINTENANCE_WINDOW: "false"

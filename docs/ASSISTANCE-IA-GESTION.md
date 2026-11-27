@@ -44,21 +44,48 @@ Désactivée, elle est invisible dans l'interface. Activée sans clé, elle s'af
 
 ### Clé API : jamais en clair dans un fichier
 
-La clé vient d'un **secret Kubernetes** créé par l'administrateur (la valeur ne transite jamais par le dépôt) :
+La clé est **ajoutée au Secret existant `backend-secret`** (namespace `pfe`), que le Deployment charge déjà en entier par
+`envFrom`. Le nom de la clé est identique à celui de la variable : `HELIOS_AI_ASSIST_API_KEY`. Aucun nouveau Secret n'est
+nécessaire. La valeur est saisie masquée et transmise par l'entrée standard : elle n'apparaît ni dans l'historique du
+shell ni dans la liste des processus.
 
 ```bash
-kubectl -n pfe create secret generic helios-ai-assist --from-literal=HELIOS_AI_ASSIST_API_KEY='<la clé>'
-kubectl -n pfe set env deployment/backend --from=secret/helios-ai-assist
-kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_ENABLED=true HELIOS_AI_ASSIST_REPORTS_SUMMARY=true
+read -rs GROQ_KEY
+printf '{"stringData":{"HELIOS_AI_ASSIST_API_KEY":"%s"}}' "$GROQ_KEY" \
+  | kubectl -n pfe patch secret backend-secret --type=merge --patch-file /dev/stdin
+unset GROQ_KEY
+
+# vérifier la présence de la clé sans afficher sa valeur
+kubectl -n pfe get secret backend-secret -o json | grep -o '"HELIOS_AI_ASSIST_API_KEY"'
 ```
+
+Le patch en fusion conserve toutes les autres clés du Secret. **N'appliquez jamais le dossier Kustomize en bloc**
+(`kubectl apply -k`) : `backend-secret.yaml` écraserait les valeurs réelles. `scripts/generate-production-secrets.sh`
+préserve cette clé et exige `--rotate` avec `--apply`, car il génère de nouveaux mots de passe de production.
 
 En développement, placer la clé dans `application-local.properties` (non versionné) ou dans la variable d'environnement.
 
 ### Activation progressive
 
-1. Créer le secret, puis activer **une** fonction (par exemple `HELIOS_AI_ASSIST_REPORTS_SUMMARY=true`) avec l'interrupteur global.
-2. Vérifier l'affichage, puis activer les autres une par une.
-3. Retour arrière immédiat : `HELIOS_AI_ASSIST_ENABLED=false` (ou retirer un drapeau) ; l'interface masque aussitôt les fonctions.
+La clé est lue au démarrage des pods : tout `set env` ci-dessous redémarre progressivement le backend (2 réplicas).
+Attendre `rollout status` et contrôler la consommation dans la console Groq entre deux étapes.
+
+1. **Résumés de rapports et d'équipe** (en premier) :
+   `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_ENABLED=true HELIOS_AI_ASSIST_REPORTS_SUMMARY=true`
+   puis `kubectl -n pfe rollout status deployment/backend`.
+2. **Anomalies d'audit** : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_AUDIT_ANOMALIES=true`
+3. **Assignation de tâche** : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_TASK_ASSIGNMENT=true`
+4. **Fenêtre de maintenance** : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_MAINTENANCE_WINDOW=true`
+
+### Retour arrière (ne supprime aucune clé préexistante)
+
+1. Une fonction : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_<FONCTION>=false`.
+2. Toute l'IA : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_ENABLED=false` ; l'interface masque aussitôt les fonctions.
+3. Retirer les variables posées : `kubectl -n pfe set env deployment/backend HELIOS_AI_ASSIST_ENABLED-` (et les autres
+   `HELIOS_AI_ASSIST_…-`). Cela ne retire que des variables du Deployment, jamais une clé du Secret ni du ConfigMap.
+4. Images : `kubectl -n pfe rollout undo deployment/backend` (et `frontend`).
+5. Optionnel, uniquement la clé IA :
+   `kubectl -n pfe patch secret backend-secret --type=json -p='[{"op":"remove","path":"/data/HELIOS_AI_ASSIST_API_KEY"}]'`.
 
 ## Garanties
 

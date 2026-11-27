@@ -11,6 +11,10 @@ Rappels :
     sont geres HORS de ce chart (un secret n'est jamais versionne). Les creer avant :
       kubectl apply -f backend/backend/infra/k8s/backend-configmap.yaml
       # + le Secret via scripts/generate-production-secrets.sh (valeurs reelles)
+  - Assistance IA (facultative, DESACTIVEE par defaut) : la cle HELIOS_AI_ASSIST_API_KEY s'ajoute AU Secret
+    "{{ .Values.backend.envFrom.secret }}" hors Git (kubectl patch, voir docs/ASSISTANCE-IA-GESTION.md), jamais dans ce chart.
+    Activation progressive, une fonction a la fois (global + fonction) :
+      kubectl -n {{ .Values.namespace }} set env deploy/backend HELIOS_AI_ASSIST_ENABLED=true HELIOS_AI_ASSIST_REPORTS_SUMMARY=true
   - Verifier le deploiement :
       helm status {{ .Release.Name }} -n {{ .Values.namespace }}
       kubectl -n {{ .Values.namespace }} rollout status deploy/backend
