@@ -85,6 +85,21 @@ class AiCompletionClientTest {
     }
 
     @Test
+    void groqReceivesMaxCompletionTokensAndMistralKeepsMaxTokens() throws Exception {
+        client(props(true, true, "k")).complete(AiFeature.REPORTS_SUMMARY, "s", "u");        // fournisseur par défaut : Groq
+        JsonNode groq = JSON.readTree(lastBody.get());
+        assertThat(groq.path("max_completion_tokens").asInt()).isEqualTo(400);
+        assertThat(groq.has("max_tokens")).isFalse();                                         // paramètre déprécié non envoyé
+
+        AiAssistProperties mistral = props(true, true, "k");
+        mistral.setProvider("mistral");
+        client(mistral).complete(AiFeature.REPORTS_SUMMARY, "s", "u");
+        JsonNode m = JSON.readTree(lastBody.get());
+        assertThat(m.path("max_tokens").asInt()).isEqualTo(400);
+        assertThat(m.has("max_completion_tokens")).isFalse();
+    }
+
+    @Test
     void reasoningModelsGetALowReasoningEffortAndOthersDoNot() throws Exception {
         AiAssistProperties gptOss = props(true, true, "k");
         gptOss.setModel("openai/gpt-oss-20b");

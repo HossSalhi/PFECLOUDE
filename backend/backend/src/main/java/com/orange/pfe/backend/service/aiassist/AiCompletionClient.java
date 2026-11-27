@@ -99,7 +99,10 @@ public class AiCompletionClient {
         ObjectNode root = mapper.createObjectNode();
         root.put("model", props.effectiveModel());
         root.put("temperature", props.getTemperature());
-        root.put("max_tokens", props.getMaxTokens());
+        // Groq : « max_tokens » est déprécié au profit de « max_completion_tokens » (limite de la réponse, raisonnement inclus).
+        // Mistral n'accepte que « max_tokens » : le nom du paramètre dépend du fournisseur configuré.
+        boolean mistral = "mistral".equalsIgnoreCase(props.getProvider() == null ? "" : props.getProvider().trim());
+        root.put(mistral ? "max_tokens" : "max_completion_tokens", props.getMaxTokens());
         if (props.effectiveModel().startsWith("openai/gpt-oss")) {
             // modèle à raisonnement : on limite la réflexion pour que le budget de tokens serve à la réponse (et reste économique)
             root.put("reasoning_effort", "low");
