@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 import { TeamService } from '../../core/services/team.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
-import { Team, TeamMember, TeamSummary } from '../../core/models/org.models';
+import { ResourceScope, Team, TeamMember, TeamRequest, TeamSummary } from '../../core/models/org.models';
 import { errorMessage, formatDateTime } from '../../shared/date.util';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -43,7 +43,18 @@ export class TeamsComponent implements OnInit {
   editing: Team | null = null;
   saving = false;
   modalError = '';
-  form = { name: '', description: '', leadId: null as number | null };
+  form = { name: '', description: '', leadId: null as number | null, specialty: null as ResourceScope | null };
+
+  readonly scopes: { value: ResourceScope; label: string }[] = [
+    { value: 'VM', label: 'Machines virtuelles (VM)' },
+    { value: 'CLUSTER', label: 'Cluster Kubernetes' },
+    { value: 'APPLICATION', label: 'Applications' },
+    { value: 'SERVICE', label: 'Services de supervision' }
+  ];
+
+  scopeLabel(scope: ResourceScope | null | undefined): string {
+    return this.scopes.find(s => s.value === scope)?.label ?? '';
+  }
 
   // Confirmation
   confirm: { title: string; message: string; label: string; danger: boolean; run: () => void } | null = null;
@@ -115,14 +126,15 @@ export class TeamsComponent implements OnInit {
 
   openCreate(): void {
     this.editing = null;
-    this.form = { name: '', description: '', leadId: null };
+    this.form = { name: '', description: '', leadId: null, specialty: null };
     this.modalError = '';
     this.showForm = true;
   }
 
   openEdit(team: Team): void {
     this.editing = team;
-    this.form = { name: team.name, description: team.description || '', leadId: team.lead ? team.lead.id : null };
+    this.form = { name: team.name, description: team.description || '', leadId: team.lead ? team.lead.id : null,
+      specialty: team.specialty ?? null };
     this.modalError = '';
     this.showForm = true;
   }
@@ -131,7 +143,10 @@ export class TeamsComponent implements OnInit {
 
   submit(): void {
     if (!this.form.name.trim()) { this.modalError = "Le nom de l'équipe est obligatoire."; return; }
-    const body = { name: this.form.name.trim(), description: this.form.description.trim() || null, leadId: this.form.leadId };
+    const body: TeamRequest = { name: this.form.name.trim(), description: this.form.description.trim() || null, leadId: this.form.leadId };
+    // La spécialité n'est envoyée que si elle est choisie, ou pour l'effacer d'une équipe qui en avait une
+    // (la modification est un remplacement complet côté serveur) : sinon la requête reste identique à l'ancienne.
+    if (this.form.specialty || (this.editing && this.editing.specialty)) { body.specialty = this.form.specialty; }
     this.saving = true;
     this.modalError = '';
     const call = this.editing ? this.service.updateTeam(this.editing.id, body) : this.service.createTeam(body);

@@ -87,7 +87,9 @@
                     <div class="flag-late text-small">Fin dépassée</div>
                   }</td>
                   <td><span class="badge" [ngClass]="'st-' + m.status.toLowerCase()">{{ statusLabels[m.status] }}</span></td>
-                  <td>{{ m.responsible ? m.responsible.displayName : '—' }}</td>
+                  <td>{{ m.responsible ? m.responsible.displayName : '—' }}@if (m.team) {
+                    <div class="text-muted text-small" title="Équipe porteuse"><i class="fas fa-people-group"></i> {{ m.team.name }}</div>
+                  }</td>
                   <td class="actions-cell" (click)="$event.stopPropagation()">
                     <button class="btn-icon btn-view" title="Détail" (click)="openDetail(m)"><i class="fas fa-eye"></i></button>
                     @if (canUpdate && isActive(m)) {
@@ -98,6 +100,10 @@
                     }
                     @if (canUpdate && m.status === 'IN_PROGRESS') {
                       <button class="btn-icon btn-ok" title="Terminer" (click)="askComplete(m)"><i class="fas fa-flag-checkered"></i></button>
+                      <button class="btn-icon btn-warn" title="Suspendre" (click)="askPause(m)"><i class="fas fa-pause"></i></button>
+                    }
+                    @if (canUpdate && m.status === 'SUSPENDED') {
+                      <button class="btn-icon btn-ok" title="Reprendre" (click)="askResume(m)"><i class="fas fa-play"></i></button>
                     }
                     @if (canCancel && isActive(m)) {
                       <button class="btn-icon btn-warn" title="Annuler" (click)="askCancel(m)"><i class="fas fa-ban"></i></button>
@@ -165,6 +171,7 @@
             <div class="legend">
               <span class="st-planned" style="background:none">Planifiée</span>
               <span class="st-in_progress" style="background:none">En cours</span>
+              <span class="st-suspended" style="background:none">Suspendue</span>
               <span class="st-completed" style="background:none">Terminée</span>
               <span class="st-cancelled" style="background:none">Annulée</span>
             </div>
@@ -175,7 +182,7 @@
   </div>
 
   <!-- ══ Détail ═══════════════════════════════════════════════════════════════ -->
-  @if (selected && !showCancel && !showDelete) {
+  @if (selected && !showCancel && !showDelete && !showPause) {
     <div class="modal-overlay" (click)="closeDetail()">
       <div class="modal modal-lg" (click)="$event.stopPropagation()">
         <div class="modal-header">
@@ -195,6 +202,10 @@
             <dt>Description</dt><dd>{{ selected.description || '—' }}</dd>
             <dt>Créée par</dt><dd>{{ selected.createdBy ? selected.createdBy.displayName : '—' }} le {{ fmt(selected.createdAt) }}</dd>
             <dt>Responsable</dt><dd>{{ selected.responsible ? selected.responsible.displayName : '—' }}</dd>
+            <dt>Équipe</dt><dd>@if (selected.team) {
+              {{ selected.team.name }}@if (selected.team.specialty) { <span class="text-muted"> · spécialité {{ selected.team.specialty }}</span> }
+              <div class="text-muted text-small">Responsable de l'équipe : {{ selected.team.lead ? selected.team.lead.displayName : '—' }}</div>
+            } @else { — }</dd>
             <dt>Dernière modification</dt><dd>{{ fmt(selected.updatedAt) }}</dd>
             @if (selected.cancelReason) {
               <dt>Motif d'annulation</dt>
@@ -202,6 +213,21 @@
               <dd>{{ selected.cancelReason }}</dd>
             }
           </dl>
+          @if (selected.status === 'SUSPENDED') {
+            <div class="alert-warning suspended-info">
+              <i class="fas fa-pause-circle"></i>
+              <div>
+                <strong>Maintenance suspendue</strong>@if (selected.suspendedAt) { depuis le {{ fmt(selected.suspendedAt) }}}.
+                <div>Motif : {{ selected.suspendReason || '—' }}</div>
+                <div>Incident lié :
+                  @if (selected.suspendIncidentId) {
+                    <a [routerLink]="['/incidents', selected.suspendIncidentId]">#{{ selected.suspendIncidentId }}</a>
+                  } @else { aucun }
+                </div>
+                <div class="text-muted text-small">La ressource reste réservée : aucune autre maintenance ne peut y être planifiée pendant la suspension.</div>
+              </div>
+            </div>
+          }
           @if (selected.status === 'IN_PROGRESS') {
             <div class="alert-info">
               <i class="fas fa-circle-info"></i> Maintenance en cours : information de gestion uniquement. La supervision et les mécanismes de sécurité restent actifs.
@@ -235,7 +261,11 @@
             <button class="btn-primary" (click)="askStart(selected)"><i class="fas fa-play"></i> Démarrer</button>
           }
           @if (canUpdate && selected.status === 'IN_PROGRESS') {
+            <button class="btn-secondary" (click)="askPause(selected)"><i class="fas fa-pause"></i> Suspendre</button>
             <button class="btn-primary" (click)="askComplete(selected)"><i class="fas fa-flag-checkered"></i> Terminer</button>
+          }
+          @if (canUpdate && selected.status === 'SUSPENDED') {
+            <button class="btn-primary" (click)="askResume(selected)"><i class="fas fa-play"></i> Reprendre</button>
           }
           @if (canCancel && isActive(selected)) {
             <button class="btn-secondary" (click)="askCancel(selected)"><i class="fas fa-ban"></i> Annuler</button>
@@ -307,6 +337,16 @@
               </select>
             </div>
             <div class="form-group">
+              <label>Équipe porteuse</label>
+              <select class="form-input" [(ngModel)]="form.teamId">
+                <option [ngValue]="null">— Aucune —</option>
+                @for (t of teamsForType(); track t.id) {
+                  <option [ngValue]="t.id">{{ t.name }}@if (t.specialty) { ({{ t.specialty }}) }</option>
+                }
+              </select>
+              <div class="hint">Seules les équipes actives dont la spécialité correspond au type de ressource sont proposées.</div>
+            </div>
+            <div class="form-group">
               <label>Motif</label>
               <input class="form-input" type="text" maxlength="500" [(ngModel)]="form.reason" placeholder="Raison de l'opération">
             </div>
@@ -329,6 +369,36 @@
     }
 
     <!-- ══ Annulation ═══════════════════════════════════════════════════════════ -->
+    @if (showPause && selected) {
+      <div class="modal-overlay" (click)="showPause = false">
+        <div class="modal modal-sm" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3><i class="fas fa-pause-circle"></i> Suspendre la maintenance</h3>
+            <button class="modal-close" (click)="showPause = false"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="modal-body">
+            @if (modalError) {
+              <div class="alert-error sm"><i class="fas fa-exclamation-circle"></i> {{ modalError }}</div>
+            }
+            <p class="modal-desc">Suspendre <strong>{{ selected.title }}</strong> ? La ressource reste réservée jusqu'à la reprise ou l'annulation.</p>
+            <div class="form-group">
+              <label>Motif</label>
+              <textarea class="form-input" rows="3" maxlength="500" [(ngModel)]="pauseReason" placeholder="Ex. incident critique sur la ressource"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Incident à l'origine (numéro, facultatif)</label>
+              <input class="form-input" type="number" min="1" [(ngModel)]="pauseIncident" placeholder="Ex. 13497">
+              <div class="hint">Indiquez au moins un motif ou un incident.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" (click)="showPause = false">Retour</button>
+            <button class="btn-primary" (click)="submitPause()" [disabled]="busy"><i class="fas fa-pause"></i> Suspendre</button>
+          </div>
+        </div>
+      </div>
+    }
+
     @if (showCancel && selected) {
       <div class="modal-overlay" (click)="showCancel = false">
         <div class="modal modal-sm" (click)="$event.stopPropagation()">

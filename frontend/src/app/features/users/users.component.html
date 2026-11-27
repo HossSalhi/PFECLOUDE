@@ -97,6 +97,9 @@
               }"></i>
                   {{ u.role === 'SUPER_ADMIN' ? 'Super Admin' : u.role === 'ADMIN' ? 'Admin' : 'Utilisateur' }}
                 </span>
+                @for (label of (u.roleLabels ?? []); track label) {
+                  <span class="team-role-label" [class.is-lead]="label.startsWith('Chef')" title="Rôle dans les équipes (calculé)">{{ label }}</span>
+                }
               </td>
               <td>
                 <span class="status-badge" [ngClass]="'status-' + getStatus(u)">

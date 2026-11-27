@@ -4,6 +4,7 @@ import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.CancelRequest;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.HistoryResponse;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.MaintenanceRequest;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.MaintenanceResponse;
+import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.PauseRequest;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.ResourceResponse;
 import com.orange.pfe.backend.model.maintenance.MaintenanceResourceType;
 import com.orange.pfe.backend.model.maintenance.MaintenanceStatus;
@@ -115,6 +116,20 @@ public class MaintenanceController {
     @PostMapping("/{id}/start")
     public MaintenanceResponse start(@AuthenticationPrincipal AppUser actor, @PathVariable Long id) {
         return service.start(actor, id);
+    }
+
+    @Operation(summary = "Suspendre une maintenance en cours (motif et/ou incident déclencheur obligatoire)")
+    @PostMapping("/{id}/pause")
+    public MaintenanceResponse pause(@AuthenticationPrincipal AppUser actor, @PathVariable Long id,
+                                     @Valid @RequestBody(required = false) PauseRequest request) {
+        return service.pause(actor, id, request == null ? null : request.incidentId(),
+                request == null ? null : request.reason());
+    }
+
+    @Operation(summary = "Reprendre une maintenance suspendue")
+    @PostMapping("/{id}/resume")
+    public MaintenanceResponse resume(@AuthenticationPrincipal AppUser actor, @PathVariable Long id) {
+        return service.resume(actor, id);
     }
 
     @Operation(summary = "Terminer une maintenance en cours")

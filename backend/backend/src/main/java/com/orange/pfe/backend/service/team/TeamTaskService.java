@@ -331,7 +331,8 @@ public class TeamTaskService {
                 : (t.getCreatedByUsername() == null ? null : new UserRef(null, t.getCreatedByUsername(), t.getCreatedByUsername()));
         return new TaskResponse(t.getId(), t.getTitle(), t.getDescription(), team, creator,
                 UserRef.of(t.getAssignee()), t.getPriority(), t.getStatus(), t.getDueDate(),
-                t.isOverdue(LocalDate.now()), t.getCompletedAt(), t.getCreatedAt(), t.getUpdatedAt());
+                t.isOverdue(LocalDate.now()), t.getCompletedAt(), t.getCreatedAt(), t.getUpdatedAt(),
+                t.getSourceIncidentId(), t.getSourceEvent());
     }
 
     private static Map<String, Object> values(TeamTask t) {

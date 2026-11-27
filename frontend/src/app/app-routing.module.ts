@@ -53,6 +53,7 @@ const routes: Routes = [
   // Modules « organisation » : l'accès suit les permissions calculées par le Backend (matrice par rôle existant).
   // Ce garde n'affiche que ce qui est utile : chaque appel d'API est de toute façon contrôlé côté Backend.
   { path: 'maintenance', loadComponent: () => import('./features/maintenance/maintenance.component').then(m => m.MaintenanceComponent), canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['MAINTENANCE_VIEW'] } },
+  { path: 'incidents/:id/maintenance', loadComponent: () => import('./features/incident-maintenance/incident-maintenance.component').then(m => m.IncidentMaintenanceComponent), canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['MAINTENANCE_VIEW'] } },
   { path: 'teams',       loadComponent: () => import('./features/teams/teams.component').then(m => m.TeamsComponent),       canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TEAMS_VIEW'] } },
   { path: 'team-tasks',  loadComponent: () => import('./features/team-tasks/team-tasks.component').then(m => m.TeamTasksComponent),   canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['TASKS_VIEW'] } },
   { path: 'audit-trail', loadComponent: () => import('./features/audit-trail/audit-trail.component').then(m => m.AuditTrailComponent),  canActivate: [AuthGuard, PermissionGuard], data: { permissions: ['AUDIT_VIEW_OWN', 'AUDIT_VIEW_ALL'] } },

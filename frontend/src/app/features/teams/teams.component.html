@@ -42,7 +42,8 @@
           <tbody>
             @for (t of teams; track t) {
               <tr class="clickable" [class.row-muted]="!t.active" (click)="select(t)">
-                <td><span class="text-strong">{{ t.name }}</span><div class="text-muted text-small">{{ t.description }}</div></td>
+                <td><span class="text-strong">{{ t.name }}</span><div class="text-muted text-small">{{ t.description }}</div>
+                  @if (t.specialty) { <span class="badge st-planned" title="Spécialité">{{ scopeLabel(t.specialty) }}</span> }</td>
                 <td>{{ t.lead ? t.lead.displayName : '—' }}</td>
                 <td>{{ t.memberCount }}</td>
                 <td>{{ t.openTaskCount }}</td>
@@ -130,7 +131,11 @@
                   @if (m.lead) {
                     <i class="fas fa-crown lead-star" title="Responsable"></i>
                   }</td>
-                  <td>{{ m.role }}</td>
+                  <td>{{ m.role }}
+                    @if (m.roleLabel) {
+                      <span class="team-role-label" [class.is-lead]="m.lead" title="Rôle dans l'équipe (calculé)">{{ m.roleLabel }}</span>
+                    }
+                  </td>
                   <td>{{ fmt(m.addedAt) }}</td>
                   <td>{{ m.addedBy || '—' }}</td>
                   <td class="actions-cell">
@@ -193,6 +198,16 @@
                 }
               </select>
               <div class="hint">Le responsable devient automatiquement membre de l'équipe.</div>
+            </div>
+            <div class="form-group">
+              <label>Spécialité</label>
+              <select class="form-input" [(ngModel)]="form.specialty">
+                <option [ngValue]="null">— Aucune —</option>
+                @for (s of scopes; track s.value) {
+                  <option [ngValue]="s.value">{{ s.label }}</option>
+                }
+              </select>
+              <div class="hint">Une seule spécialité. Sans spécialité, l'équipe n'est jamais sollicitée automatiquement pour un incident.</div>
             </div>
           </div>
           <div class="modal-footer">

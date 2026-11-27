@@ -1,7 +1,9 @@
-import { Component, OnInit, OnDestroy, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectionStrategy, Injector, inject } from '@angular/core';
 import { interval, Subscription } from 'rxjs';
 import { switchMap, startWith } from 'rxjs/operators';
 import { ApiService } from '../../core/services/api.service';
+import { AuthService } from '../../core/services/auth.service';
+import { MonitoringLinksComponent } from './monitoring-links.component';
 import { NgClass } from '@angular/common';
 
 export interface ComponentHealth {
@@ -33,7 +35,7 @@ export interface VmPolicyEntry {
     selector: 'app-infrastructure',
     templateUrl: './infrastructure.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [NgClass]
+    imports: [NgClass, MonitoringLinksComponent]
 })
 export class InfrastructureComponent implements OnInit, OnDestroy {
   loading = true;
@@ -61,7 +63,22 @@ export class InfrastructureComponent implements OnInit, OnDestroy {
     'k8s-worker2': { ip: '192.168.148.155', role: 'K8s Worker 2',       services: ['kubelet', 'kube-proxy'] },
   };
 
+  private injector = inject(Injector);
+
   constructor(private api: ApiService) {}
+
+  /**
+   * Section « Supervision » réservée aux administrateurs. Le rôle est lu paresseusement : sans service d'authentification
+   * disponible (tests isolés) la section reste simplement masquée. L'API refuse de toute façon les autres rôles.
+   */
+  get canSupervise(): boolean {
+    try {
+      const auth = this.injector.get(AuthService);
+      return auth.isAdmin() || auth.isSuperAdmin();
+    } catch {
+      return false;
+    }
+  }
 
   ngOnInit(): void {
     // Auto-refresh every 60s

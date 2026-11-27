@@ -47,6 +47,8 @@
   .alert-success { display: flex; align-items: center; gap: 8px; background: #e8f5e9; border-left: 3px solid #2e7d32; color: #2e7d32; padding: 12px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 16px; }
   .alert-error   { display: flex; align-items: center; gap: 8px; background: #ffebee; border-left: 3px solid #c62828; color: #c62828; padding: 12px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 16px; }
   .alert-info    { display: flex; align-items: center; gap: 8px; background: #e3f2fd; border-left: 3px solid #1565c0; color: #1565c0; padding: 12px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 16px; }
+  .alert-warning { display: flex; align-items: flex-start; gap: 10px; background: #fff8e1; border-left: 3px solid #f9a825; color: #6d4c00; padding: 12px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 16px; }
+  .alert-warning a { color: #6d4c00; font-weight: 700; text-decoration: underline; }
   .alert-error.sm, .alert-success.sm { margin-bottom: 12px; }
 
   /* Onglets */
@@ -97,6 +99,7 @@
   .st-planned, .st-todo         { background: #e3f2fd; color: #1565c0; }
   .st-in_progress, .st-running  { background: #fff3e0; color: #e65100; }
   .st-on_hold                   { background: #f3e8ff; color: #7b2ff7; }
+  .st-suspended                 { background: #fff8e1; color: #8d6e00; }
   .st-completed, .st-done, .st-success { background: #e8f5e9; color: #2e7d32; }
   .st-cancelled, .st-inactive   { background: #eeeeee; color: #757575; }
   .st-failure                   { background: #ffebee; color: #c62828; }
@@ -199,3 +202,15 @@
     .cal-cell { min-height: 70px; }
   }
 }
+
+/* Badge de rôle calculé (« Chef VM », « Technicien Cluster »…), utilisé aussi hors .org-scope (page Utilisateurs). */
+.team-role-label { display: inline-flex; align-items: center; gap: 4px; margin: 2px 4px 2px 0; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; background: #fff3e0; color: #b45f00; white-space: nowrap; }
+.team-role-label.is-lead { background: #ffe0b2; color: #8a4500; }
+
+/* Section « Supervision » de la page Infrastructure (liens vers Prometheus, Grafana, Loki, Camunda). */
+.supervision-links { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--border, #e5e5e5); border-radius: 10px; background: var(--bg-surface, #fff); }
+.supervision-head { font-size: 13px; font-weight: 800; color: var(--text-primary, #1a1a1a); }
+.supervision-head i { color: var(--brand, #ff7900); margin-right: 6px; }
+.supervision-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.supervision-actions a { text-decoration: none; }
+.supervision-error { font-size: 12px; color: #c62828; }

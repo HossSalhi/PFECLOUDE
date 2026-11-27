@@ -3,6 +3,7 @@ package com.orange.pfe.backend.service.maintenance;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.HistoryResponse;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.MaintenanceRequest;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.MaintenanceResponse;
+import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.TeamInfo;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceDtos.ResourceResponse;
 import com.orange.pfe.backend.dto.maintenance.MaintenanceFilter;
 import com.orange.pfe.backend.dto.org.UserRef;
@@ -14,11 +15,15 @@ import com.orange.pfe.backend.model.maintenance.MaintenanceChangeType;
 import com.orange.pfe.backend.model.maintenance.MaintenanceHistory;
 import com.orange.pfe.backend.model.maintenance.MaintenanceResourceType;
 import com.orange.pfe.backend.model.maintenance.MaintenanceStatus;
+import com.orange.pfe.backend.model.team.ResourceScope;
+import com.orange.pfe.backend.model.team.Team;
 import com.orange.pfe.backend.model.user.AppUser;
 import com.orange.pfe.backend.repository.AppUserRepository;
+import com.orange.pfe.backend.repository.IncidentRepository;
 import com.orange.pfe.backend.repository.MaintenanceHistoryRepository;
 import com.orange.pfe.backend.repository.MaintenanceRepository;
 import com.orange.pfe.backend.repository.MaintenanceSearchRepository;
+import com.orange.pfe.backend.repository.TeamRepository;
 import com.orange.pfe.backend.service.audit.AuditEvent;
 import com.orange.pfe.backend.service.audit.AuditSanitizer;
 import com.orange.pfe.backend.service.audit.AuditTrailService;
@@ -64,6 +69,8 @@ public class MaintenanceService {
     private final MaintenanceSearchRepository searchRepository;
     private final MaintenanceHistoryRepository historyRepository;
     private final AppUserRepository userRepository;
+    private final TeamRepository teamRepository;
+    private final IncidentRepository incidentRepository;
     private final MaintenanceResourceCatalog catalog;
     private final OrgAccessService access;
     private final AuditTrailService audit;
@@ -72,6 +79,8 @@ public class MaintenanceService {
                               MaintenanceSearchRepository searchRepository,
                               MaintenanceHistoryRepository historyRepository,
                               AppUserRepository userRepository,
+                              TeamRepository teamRepository,
+                              IncidentRepository incidentRepository,
                               MaintenanceResourceCatalog catalog,
                               OrgAccessService access,
                               AuditTrailService audit) {
@@ -79,6 +88,8 @@ public class MaintenanceService {
         this.searchRepository = searchRepository;
         this.historyRepository = historyRepository;
         this.userRepository = userRepository;
+        this.teamRepository = teamRepository;
+        this.incidentRepository = incidentRepository;
         this.catalog = catalog;
         this.access = access;
         this.audit = audit;
@@ -151,6 +162,7 @@ public class MaintenanceService {
         String resource = catalog.validateAndNormalize(request.resourceType(), request.resourceName());
         validatePeriod(request.startAt(), request.endAt(), true);
         AppUser responsible = request.responsibleId() == null ? null : requireEnabledUser(request.responsibleId());
+        Team team = resolveTeam(request.teamId(), request.resourceType());
         checkConflicts(request.resourceType(), resource, request.startAt(), request.endAt(), null);
 
         Maintenance m = new Maintenance();
@@ -165,6 +177,7 @@ public class MaintenanceService {
         m.setCreatedBy(actor);
         m.setCreatedByUsername(actor.getUsername());
         m.setResponsible(responsible);
+        m.setTeam(team);
         m = repository.save(m);
 
         Map<String, Object> now = values(m);
@@ -186,7 +199,7 @@ public class MaintenanceService {
         String title = requireTitle(request.title());
         String resource = catalog.validateAndNormalize(request.resourceType(), request.resourceName());
         validatePeriod(request.startAt(), request.endAt(), false);
-        if (m.getStatus() == MaintenanceStatus.IN_PROGRESS) {
+        if (m.getStatus().isStarted()) {   // EN COURS ou SUSPENDUE
             boolean sameResource = request.resourceType() == m.getResourceType()
                     && resource.equalsIgnoreCase(m.getResourceName());
             boolean sameStart = Objects.equals(seconds(request.startAt()), seconds(m.getStartAt()));
@@ -199,6 +212,10 @@ public class MaintenanceService {
             }
         }
         AppUser responsible = request.responsibleId() == null ? null : requireEnabledUser(request.responsibleId());
+        // Équipe inchangée sur le même type de ressource : conservée telle quelle, même si elle a été désactivée depuis.
+        boolean sameTeam = request.teamId() != null && m.getTeam() != null && request.teamId().equals(m.getTeam().getId())
+                && request.resourceType() == m.getResourceType();
+        Team team = sameTeam ? m.getTeam() : resolveTeam(request.teamId(), request.resourceType());
         checkConflicts(request.resourceType(), resource, request.startAt(), request.endAt(), m.getId());
 
         Map<String, Object> before = values(m);
@@ -210,6 +227,7 @@ public class MaintenanceService {
         m.setStartAt(request.startAt());
         m.setEndAt(request.endAt());
         m.setResponsible(responsible);
+        m.setTeam(team);
         Map<String, Object> after = values(m);
 
         Map<String, Object> oldChanged = new LinkedHashMap<>();
@@ -254,10 +272,103 @@ public class MaintenanceService {
         return toResponse(m);
     }
 
+    /**
+     * Suspend une maintenance EN COURS (IN_PROGRESS → SUSPENDED). Elle reste active et continue d'occuper sa ressource.
+     * Un motif et/ou l'incident déclencheur est obligatoire ; l'identifiant de l'incident est conservé tel quel.
+     * Réservé à {@link OrgPermission#MAINTENANCE_UPDATE}.
+     */
+    @Transactional
+    public MaintenanceResponse pause(AppUser actor, Long id, Long incidentId, String reason) {
+        access.require(actor, OrgPermission.MAINTENANCE_UPDATE);
+        return doPause(actor, id, incidentId, reason);
+    }
+
+    /**
+     * Suspension décidée par le RESPONSABLE d'une équipe (routage incident → équipe) : même règles que
+     * {@link #pause(AppUser, Long, Long, String)}, mais l'autorisation est soit {@code MAINTENANCE_UPDATE}, soit d'être
+     * le responsable ACTIF de l'équipe {@code leadTeamId}. Sans l'une ou l'autre : refus et trace d'audit
+     * {@code ACCESS_DENIED}. La matrice des permissions n'est pas modifiée.
+     */
+    @Transactional
+    public MaintenanceResponse pauseAsTeamLead(AppUser actor, Long id, Long incidentId, Long leadTeamId, String reason) {
+        requireUpdateOrLeadOf(actor, leadTeamId);
+        return doPause(actor, id, incidentId, reason);
+    }
+
+    private MaintenanceResponse doPause(AppUser actor, Long id, Long incidentId, String reason) {
+        Maintenance m = getOrThrow(id);
+        if (m.getStatus() != MaintenanceStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Seule une maintenance en cours peut être suspendue");
+        }
+        String why = blankToNull(reason);
+        if (incidentId == null && why == null) {
+            throw new IllegalArgumentException("Un motif ou l'incident déclencheur est obligatoire pour suspendre une maintenance");
+        }
+        if (incidentId != null && !incidentRepository.existsById(incidentId)) {
+            throw new IllegalArgumentException("Incident introuvable : " + incidentId);
+        }
+        m.setStatus(MaintenanceStatus.SUSPENDED);
+        m.markSuspended(LocalDateTime.now(), why, incidentId);
+        m = repository.save(m);
+        Map<String, Object> after = single("status", MaintenanceStatus.SUSPENDED);
+        after.put("incidentId", incidentId);
+        after.put("reason", why);
+        history(m, actor, MaintenanceChangeType.PAUSED, single("status", MaintenanceStatus.IN_PROGRESS), after);
+        audit.record(AuditEvent.of(AuditModule.MAINTENANCE, AuditAction.PAUSE).actor(actor)
+                .object("Maintenance", id)
+                .summary("Suspension de la maintenance « " + m.getTitle() + " » sur " + m.getResourceName()
+                        + (incidentId == null ? "" : " (incident #" + incidentId + ")"))
+                .oldValues(single("status", MaintenanceStatus.IN_PROGRESS)).newValues(after));
+        return toResponse(m);
+    }
+
+    /** Suspension déclenchée par un incident (étape de routage) : l'identifiant de l'incident est obligatoire. */
+    @Transactional
+    public MaintenanceResponse pause(AppUser actor, Long id, Long incidentId) {
+        return pause(actor, id, incidentId, null);
+    }
+
+    /** Reprend une maintenance SUSPENDUE (SUSPENDED → IN_PROGRESS). Réservé à {@link OrgPermission#MAINTENANCE_UPDATE}. */
+    @Transactional
+    public MaintenanceResponse resume(AppUser actor, Long id) {
+        access.require(actor, OrgPermission.MAINTENANCE_UPDATE);
+        return doResume(actor, id);
+    }
+
+    /** Reprise décidée par le responsable d'une équipe : mêmes règles et même autorisation que {@link #pauseAsTeamLead}. */
+    @Transactional
+    public MaintenanceResponse resumeAsTeamLead(AppUser actor, Long id, Long leadTeamId) {
+        requireUpdateOrLeadOf(actor, leadTeamId);
+        return doResume(actor, id);
+    }
+
+    private MaintenanceResponse doResume(AppUser actor, Long id) {
+        Maintenance m = getOrThrow(id);
+        if (m.getStatus() != MaintenanceStatus.SUSPENDED) {
+            throw new IllegalStateException("Seule une maintenance suspendue peut être reprise");
+        }
+        Map<String, Object> before = single("status", MaintenanceStatus.SUSPENDED);
+        before.put("incidentId", m.getSuspendIncidentId());
+        before.put("reason", m.getSuspendReason());
+        before.put("suspendedAt", m.getSuspendedAt());
+        m.setStatus(MaintenanceStatus.IN_PROGRESS);
+        m.clearSuspension();
+        m = repository.save(m);
+        history(m, actor, MaintenanceChangeType.RESUMED, before, single("status", MaintenanceStatus.IN_PROGRESS));
+        audit.record(AuditEvent.of(AuditModule.MAINTENANCE, AuditAction.RESUME).actor(actor)
+                .object("Maintenance", id)
+                .summary("Reprise de la maintenance « " + m.getTitle() + " » sur " + m.getResourceName())
+                .oldValues(before).newValues(single("status", MaintenanceStatus.IN_PROGRESS)));
+        return toResponse(m);
+    }
+
     @Transactional
     public MaintenanceResponse complete(AppUser actor, Long id) {
         access.require(actor, OrgPermission.MAINTENANCE_UPDATE);
         Maintenance m = getOrThrow(id);
+        if (m.getStatus() == MaintenanceStatus.SUSPENDED) {
+            throw new IllegalStateException("Une maintenance suspendue doit d'abord être reprise avant d'être terminée");
+        }
         if (m.getStatus() != MaintenanceStatus.IN_PROGRESS) {
             throw new IllegalStateException("Seule une maintenance en cours peut être terminée");
         }
@@ -283,6 +394,7 @@ public class MaintenanceService {
         }
         MaintenanceStatus old = m.getStatus();
         m.setStatus(MaintenanceStatus.CANCELLED);
+        m.clearSuspension();   // la suspension éventuelle reste tracée dans l'historique et l'audit
         m.setCancelReason(blankToNull(reason));
         m = repository.save(m);
         Map<String, Object> after = single("status", MaintenanceStatus.CANCELLED);
@@ -327,6 +439,39 @@ public class MaintenanceService {
         if (creation && !end.isAfter(LocalDateTime.now())) {
             throw new IllegalArgumentException("La période de maintenance est entièrement dans le passé");
         }
+    }
+
+    /** Autorise {@code MAINTENANCE_UPDATE} ou le responsable actif de l'équipe ; sinon refus journalisé (ACCESS_DENIED). */
+    private void requireUpdateOrLeadOf(AppUser actor, Long leadTeamId) {
+        if (actor != null && leadTeamId != null) {
+            boolean lead = teamRepository.findById(leadTeamId).filter(Team::isActive)
+                    .map(t -> t.getLead() != null && t.getLead().getId().equals(actor.getId())).orElse(false);
+            if (lead) {
+                return;
+            }
+        }
+        access.require(actor, OrgPermission.MAINTENANCE_UPDATE);
+    }
+
+    /**
+     * Équipe porteuse : doit exister, être active, et sa spécialité (si elle en a une) doit correspondre à la portée du
+     * type de ressource ({@link ResourceScope#fromMaintenance}). Une équipe sans spécialité peut porter tout type.
+     */
+    private Team resolveTeam(Long teamId, MaintenanceResourceType type) {
+        if (teamId == null) {
+            return null;
+        }
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new IllegalArgumentException("Équipe introuvable : " + teamId));
+        if (!team.isActive()) {
+            throw new IllegalArgumentException("L'équipe « " + team.getName() + " » est désactivée");
+        }
+        ResourceScope scope = ResourceScope.fromMaintenance(type);
+        if (team.getSpecialty() != null && team.getSpecialty() != scope) {
+            throw new IllegalArgumentException("L'équipe « " + team.getName() + " » est spécialisée en " + team.getSpecialty()
+                    + " : elle ne peut pas porter une maintenance de type " + type + " (portée " + scope + ")");
+        }
+        return team;
     }
 
     private void checkConflicts(MaintenanceResourceType type, String resource,
@@ -376,10 +521,16 @@ public class MaintenanceService {
                 : (m.getCreatedByUsername() == null ? null : new UserRef(null, m.getCreatedByUsername(), m.getCreatedByUsername()));
         return new MaintenanceResponse(m.getId(), m.getTitle(), m.getDescription(), m.getReason(),
                 m.getResourceType(), m.getResourceName(), m.getStartAt(), m.getEndAt(), m.getStatus(),
-                creator, UserRef.of(m.getResponsible()), m.getActualStartAt(), m.getActualEndAt(), m.getCancelReason(),
+                creator, UserRef.of(m.getResponsible()), teamInfo(m.getTeam()),
+                m.getActualStartAt(), m.getActualEndAt(), m.getCancelReason(),
+                m.getSuspendedAt(), m.getSuspendReason(), m.getSuspendIncidentId(),
                 m.getStatus() == MaintenanceStatus.PLANNED && !now.isBefore(m.getStartAt()),
-                m.getStatus() == MaintenanceStatus.IN_PROGRESS && now.isAfter(m.getEndAt()),
+                m.getStatus().isStarted() && now.isAfter(m.getEndAt()),
                 m.getCreatedAt(), m.getUpdatedAt());
+    }
+
+    private static TeamInfo teamInfo(Team t) {
+        return t == null ? null : new TeamInfo(t.getId(), t.getName(), t.getSpecialty(), UserRef.of(t.getLead()));
     }
 
     private static Map<String, Object> values(Maintenance m) {
@@ -390,6 +541,7 @@ public class MaintenanceService {
         v.put("endAt", m.getEndAt());
         v.put("status", m.getStatus());
         v.put("responsible", m.getResponsible() == null ? null : m.getResponsible().getUsername());
+        v.put("team", m.getTeam() == null ? null : m.getTeam().getName());
         v.put("reason", m.getReason());
         v.put("description", m.getDescription());
         return v;

@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { toParams } from '../../shared/params.util';
 import {
-  Maintenance, MaintenanceHistoryEntry, MaintenanceQuery, MaintenanceRequest, MaintenanceResource, Page
+  Maintenance, MaintenanceHistoryEntry, MaintenanceQuery, MaintenanceRequest, MaintenanceResource, Page, PauseRequest
 } from '../models/org.models';
 
 /** Gestion de la maintenance (API {@code /api/maintenance}). Module déclaratif : aucune action sur la supervision. */
@@ -52,6 +52,16 @@ export class MaintenanceService {
 
   start(id: number): Observable<Maintenance> {
     return this.http.post<Maintenance>(`${this.base}/${id}/start`, {});
+  }
+
+  /** Suspend une maintenance en cours (motif et/ou incident déclencheur obligatoire). */
+  pause(id: number, body: PauseRequest): Observable<Maintenance> {
+    return this.http.post<Maintenance>(`${this.base}/${id}/pause`, body);
+  }
+
+  /** Reprend une maintenance suspendue. */
+  resume(id: number): Observable<Maintenance> {
+    return this.http.post<Maintenance>(`${this.base}/${id}/resume`, {});
   }
 
   complete(id: number): Observable<Maintenance> {

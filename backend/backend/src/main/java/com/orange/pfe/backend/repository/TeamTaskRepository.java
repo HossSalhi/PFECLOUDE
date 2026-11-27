@@ -1,5 +1,6 @@
 package com.orange.pfe.backend.repository;
 
+import com.orange.pfe.backend.model.team.TaskSourceEvent;
 import com.orange.pfe.backend.model.team.TaskStatus;
 import com.orange.pfe.backend.model.team.TeamTask;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,10 +9,18 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface TeamTaskRepository extends JpaRepository<TeamTask, Long> {
 
     long countByTeamId(Long teamId);
+
+    /** Tâches automatiques du routage incident → équipe (idempotence : une par incident et par étape). */
+    boolean existsBySourceIncidentIdAndSourceEvent(Long sourceIncidentId, TaskSourceEvent sourceEvent);
+
+    Optional<TeamTask> findBySourceIncidentIdAndSourceEvent(Long sourceIncidentId, TaskSourceEvent sourceEvent);
+
+    List<TeamTask> findBySourceIncidentIdOrderByIdAsc(Long sourceIncidentId);
 
     long countByTeamIdAndAssigneeIdAndStatusIn(Long teamId, Long assigneeId, Collection<TaskStatus> statuses);
 

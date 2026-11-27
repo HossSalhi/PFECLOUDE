@@ -3,6 +3,8 @@ package com.orange.pfe.backend.model.team;
 import com.orange.pfe.backend.model.user.AppUser;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -35,6 +37,11 @@ public class Team {
 
     @Column(length = 1000)
     private String description;
+
+    /** Spécialité de l'équipe (une seule valeur) ; {@code null} = non spécialisée, jamais routée automatiquement. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private ResourceScope specialty;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "lead_id")
@@ -85,6 +92,8 @@ public class Team {
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
 
+    public ResourceScope getSpecialty() { return specialty; }
+    public void setSpecialty(ResourceScope specialty) { this.specialty = specialty; }
     public AppUser getLead() { return lead; }
     public void setLead(AppUser lead) { this.lead = lead; }
 

@@ -109,6 +109,8 @@ export interface UserData {
   blockedAt: string | null;
   blockedBy: string | null;
   blockReason: string | null;
+  /** Badges calculés « Chef / Technicien <spécialité> » (liste des utilisateurs uniquement). */
+  roleLabels?: string[];
 }
 
 export interface IncidentHistoryEntry {
@@ -400,6 +402,12 @@ export class ApiService {
   getInfrastructureHealth(): Observable<any> {
     return this.http.get<any>(`${this.baseUrl}/api/infrastructure/health`)
       .pipe(catchError(this.handleError));
+  }
+
+  /** Liens Prometheus / Grafana / Loki / Camunda (ADMIN et SUPER_ADMIN seulement, refusé sinon par le Backend). */
+  getMonitoringLinks(): Observable<{ prometheus: string; grafana: string; loki: string; camunda: string }> {
+    return this.http.get<{ prometheus: string; grafana: string; loki: string; camunda: string }>(
+      `${this.baseUrl}/api/infrastructure/monitoring-links`);
   }
 
   getMonitoredApps(): Observable<any> {

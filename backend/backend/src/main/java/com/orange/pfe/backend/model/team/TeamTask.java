@@ -65,6 +65,14 @@ public class TeamTask {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    /** Incident à l'origine d'une tâche créée automatiquement par le routage (null pour une tâche manuelle). */
+    @Column(name = "source_incident_id")
+    private Long sourceIncidentId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_event", length = 16)
+    private TaskSourceEvent sourceEvent;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -116,6 +124,15 @@ public class TeamTask {
 
     public LocalDate getDueDate() { return dueDate; }
     public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
+
+    public Long getSourceIncidentId() { return sourceIncidentId; }
+    public TaskSourceEvent getSourceEvent() { return sourceEvent; }
+
+    /** Rattache la tâche à l'incident et à l'étape de routage qui l'ont produite. */
+    public void markFromIncident(Long incidentId, TaskSourceEvent event) {
+        this.sourceIncidentId = incidentId;
+        this.sourceEvent = event;
+    }
 
     public LocalDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }

@@ -5,6 +5,8 @@ public enum MaintenanceChangeType {
     CREATED,
     UPDATED,
     STARTED,
+    PAUSED,
+    RESUMED,
     COMPLETED,
     CANCELLED
 }

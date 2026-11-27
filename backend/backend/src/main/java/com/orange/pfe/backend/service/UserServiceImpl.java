@@ -25,11 +25,14 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final TotpService totpService;
     private final EmailNotificationService emailNotificationService;
+    private final com.orange.pfe.backend.service.team.UserRoleLabelService roleLabelService;
 
     public UserServiceImpl(AppUserRepository userRepository,
                            PasswordEncoder passwordEncoder,
                            TotpService totpService,
-                           EmailNotificationService emailNotificationService) {
+                           EmailNotificationService emailNotificationService,
+                           com.orange.pfe.backend.service.team.UserRoleLabelService roleLabelService) {
+        this.roleLabelService = roleLabelService;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.totpService = totpService;
@@ -39,8 +42,9 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(readOnly = true)
     public List<UserResponse> findAll() {
-        return userRepository.findAllByOrderByCreatedAtDesc()
-                .stream().map(UserResponse::from).toList();
+        List<AppUser> all = userRepository.findAllByOrderByCreatedAtDesc();
+        var labels = roleLabelService.labelsFor(all.stream().map(AppUser::getId).toList());
+        return all.stream().map(u -> UserResponse.from(u).withRoleLabels(labels.get(u.getId()))).toList();
     }
 
     @Override

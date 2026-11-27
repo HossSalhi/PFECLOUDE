@@ -134,6 +134,7 @@ public class TeamService {
         Team team = new Team();
         team.setName(name);
         team.setDescription(blankToNull(request.description()));
+        team.setSpecialty(request.specialty());
         team.setLead(lead);
         team.setCreatedBy(actor);
         team.setCreatedByUsername(actor.getUsername());
@@ -167,6 +168,7 @@ public class TeamService {
 
         team.setName(name);
         team.setDescription(blankToNull(request.description()));
+        team.setSpecialty(request.specialty());   // remplacement complet : null efface la spécialité
         team.setLead(newLead);
         team = saveUnique(team);
         if (newLead != null && !memberRepository.existsByTeamIdAndUserId(id, newLead.getId())) {
@@ -352,7 +354,7 @@ public class TeamService {
             openTasks.put((Long) row[0], ((Number) row[1]).longValue());
         }
         return teams.stream().map(t -> new TeamResponse(
-                t.getId(), t.getName(), t.getDescription(), UserRef.of(t.getLead()), t.isActive(),
+                t.getId(), t.getName(), t.getDescription(), t.getSpecialty(), UserRef.of(t.getLead()), t.isActive(),
                 memberCounts.getOrDefault(t.getId(), 0), openTasks.getOrDefault(t.getId(), 0L),
                 t.getCreatedBy() != null ? UserRef.of(t.getCreatedBy())
                         : (t.getCreatedByUsername() == null ? null : new UserRef(null, t.getCreatedByUsername(), t.getCreatedByUsername())),
@@ -364,13 +366,14 @@ public class TeamService {
         boolean lead = team.getLead() != null && team.getLead().getId().equals(u.getId());
         return new TeamMemberResponse(u.getId(), u.getUsername(), UserRef.displayNameOf(u),
                 u.getRole() == null ? null : u.getRole().name(), u.isEnabled(), lead,
-                m.getAddedAt(), m.getAddedByUsername());
+                m.getAddedAt(), m.getAddedByUsername(), RoleLabels.of(team.getSpecialty(), lead));
     }
 
     private static Map<String, Object> values(Team t) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", t.getName());
         m.put("description", t.getDescription());
+        m.put("specialty", t.getSpecialty() == null ? null : t.getSpecialty().name());
         m.put("lead", t.getLead() == null ? null : t.getLead().getUsername());
         m.put("active", t.isActive());
         return m;

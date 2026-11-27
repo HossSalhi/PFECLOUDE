@@ -1,0 +1,49 @@
+<div class="org-scope">
+  <div class="org-page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-triangle-exclamation"></i> Incident pendant une maintenance</h1>
+        <p class="page-subtitle">Incident #{{ incidentId }} — décision du responsable d'équipe</p>
+      </div>
+      <div class="header-actions">
+        <a class="btn-secondary" [routerLink]="['/incidents', incidentId]">Voir l'incident</a>
+      </div>
+    </div>
+
+    @if (error) { <div class="alert-warning" role="alert">{{ error }}</div> }
+
+    @if (loading) {
+      <p>Chargement…</p>
+    } @else if (view) {
+      <p><strong>{{ view.incidentTitle }}</strong> ({{ view.incidentType }}, {{ view.incidentStatus }})</p>
+      <p><span class="badge st-planned" title="État">{{ stateLabels[view.state] }}</span>
+        @if (view.team) { Équipe : <strong>{{ view.team.name }}</strong> @if (view.team.lead) { — responsable {{ view.team.lead.displayName }} } }
+      </p>
+      @if (view.maintenance) {
+        <p>Maintenance : <strong>{{ view.maintenance.title }}</strong> sur {{ view.maintenance.resourceName }} ({{ view.maintenance.status }})</p>
+      }
+
+      @if (view.canDecide) {
+        <p>Continuer la maintenance malgré l'incident, ou la suspendre le temps de le traiter ?</p>
+        <div class="header-actions">
+          <button class="btn-secondary" [disabled]="busy" (click)="decide('CONTINUE')" [attr.data-highlight]="highlight === 'continue'">Continuer la maintenance</button>
+          <button class="btn-primary" [disabled]="busy" (click)="decide('PAUSE')" [attr.data-highlight]="highlight === 'pause'">Suspendre la maintenance</button>
+        </div>
+      }
+      @if (view.canResume) {
+        <p>L'incident est résolu : la maintenance suspendue peut reprendre.</p>
+        <button class="btn-primary" [disabled]="busy" (click)="resume()">Reprendre la maintenance</button>
+      }
+      @if (view.state === 'AWAITING_DECISION' && !view.canDecide) {
+        <p>Seuls le responsable de l'équipe ou un gestionnaire de maintenance peuvent décider.</p>
+      }
+
+      @if (view.tasks.length) {
+        <h2>Tâches d'équipe liées</h2>
+        <ul>
+          @for (t of view.tasks; track t.id) { <li>{{ t.title }} — {{ t.status }}</li> }
+        </ul>
+      }
+    }
+  </div>
+</div>

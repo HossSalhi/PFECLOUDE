@@ -10,6 +10,34 @@ export interface Page<T> {
 }
 
 /** Référence légère vers un utilisateur HELIOS existant (le Backend n'expose ni e-mail ni donnée sensible). */
+// ── Routage incident → équipe (maintenance en cours) ─────────────────────────
+export type RoutingDecision = 'CONTINUE' | 'PAUSE';
+export type RoutingState = 'NONE' | 'AWAITING_DECISION' | 'CONTINUED' | 'PAUSED' | 'AWAITING_RESUME' | 'RESUMED';
+export type TaskSourceEvent = 'DECISION' | 'FOLLOW_UP' | 'RESUME';
+
+export const ROUTING_STATE_LABELS: Record<RoutingState, string> = {
+  NONE: 'Aucun routage',
+  AWAITING_DECISION: 'Décision attendue',
+  CONTINUED: 'Maintenance poursuivie',
+  PAUSED: 'Maintenance suspendue',
+  AWAITING_RESUME: 'Reprise proposée',
+  RESUMED: 'Maintenance reprise'
+};
+
+export interface RoutingView {
+  incidentId: number;
+  incidentTitle: string;
+  incidentType: string;
+  incidentStatus: string;
+  scope: string | null;
+  team: { id: number; name: string; specialty: string | null; lead: UserRef | null } | null;
+  maintenance: { id: number; title: string; resourceType: string; resourceName: string; status: string } | null;
+  state: RoutingState;
+  canDecide: boolean;
+  canResume: boolean;
+  tasks: { id: number; title: string; event: TaskSourceEvent; status: string }[];
+}
+
 export interface UserRef {
   id: number | null;
   username: string;
@@ -33,8 +61,16 @@ export interface MyPermissions {
 
 // ── Maintenance ──────────────────────────────────────────────────────────────
 
-export type MaintenanceStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+export type MaintenanceStatus = 'PLANNED' | 'IN_PROGRESS' | 'SUSPENDED' | 'COMPLETED' | 'CANCELLED';
 export type MaintenanceResourceType = 'APPLICATION' | 'NODE' | 'VM' | 'SERVICE';
+
+/** Équipe porteuse d'une maintenance, avec sa spécialité et son responsable. */
+export interface MaintenanceTeam {
+  id: number;
+  name: string;
+  specialty?: ResourceScope | null;
+  lead: UserRef | null;
+}
 
 export interface Maintenance {
   id: number;
@@ -48,9 +84,15 @@ export interface Maintenance {
   status: MaintenanceStatus;
   createdBy: UserRef | null;
   responsible: UserRef | null;
+  /** Équipe porteuse (optionnelle : absente des maintenances antérieures). */
+  team?: MaintenanceTeam | null;
   actualStartAt: string | null;
   actualEndAt: string | null;
   cancelReason: string | null;
+  /** Renseignés seulement si le statut est SUSPENDED. */
+  suspendedAt?: string | null;
+  suspendReason?: string | null;
+  suspendIncidentId?: number | null;
   startOverdue: boolean;
   endOverdue: boolean;
   createdAt: string;
@@ -66,6 +108,14 @@ export interface MaintenanceRequest {
   startAt: string;
   endAt: string;
   responsibleId: number | null;
+  /** Envoyée seulement si renseignée (ou null pour effacer en modification) : les anciens appels restent identiques. */
+  teamId?: number | null;
+}
+
+/** Pause d'une maintenance : un motif et/ou l'incident déclencheur (au moins l'un des deux). */
+export interface PauseRequest {
+  incidentId?: number | null;
+  reason?: string | null;
 }
 
 export interface MaintenanceHistoryEntry {
@@ -99,10 +149,15 @@ export interface MaintenanceQuery {
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'ON_HOLD' | 'DONE' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
+/** Spécialité d'une équipe (enum Java ResourceScope). */
+export type ResourceScope = 'VM' | 'CLUSTER' | 'APPLICATION' | 'SERVICE';
+
 export interface Team {
   id: number;
   name: string;
   description: string | null;
+  /** Optionnelle : absente ou null = équipe non spécialisée. */
+  specialty?: ResourceScope | null;
   lead: UserRef | null;
   active: boolean;
   memberCount: number;
@@ -116,6 +171,8 @@ export interface TeamRequest {
   name: string;
   description: string | null;
   leadId: number | null;
+  /** Envoyée seulement si renseignée (ou null pour effacer en modification) : les anciens appels restent identiques. */
+  specialty?: ResourceScope | null;
 }
 
 export interface TeamMember {
@@ -127,6 +184,8 @@ export interface TeamMember {
   lead: boolean;
   addedAt: string;
   addedBy: string | null;
+  /** Badge calculé : « Chef <spécialité> » ou « Technicien <spécialité> ». */
+  roleLabel?: string;
 }
 
 export interface TaskSummary {
@@ -153,6 +212,9 @@ export interface TeamSummary {
 }
 
 export interface TeamTask {
+  /** Renseignés pour une tâche créée automatiquement par le routage incident → équipe. */
+  sourceIncidentId?: number | null;
+  sourceEvent?: TaskSourceEvent | null;
   id: number;
   title: string;
   description: string | null;
@@ -319,7 +381,7 @@ export interface ReportSchedule {
 // ── Libellés d'affichage ─────────────────────────────────────────────────────
 
 export const MAINTENANCE_STATUS_LABELS: Record<MaintenanceStatus, string> = {
-  PLANNED: 'Planifiée', IN_PROGRESS: 'En cours', COMPLETED: 'Terminée', CANCELLED: 'Annulée'
+  PLANNED: 'Planifiée', IN_PROGRESS: 'En cours', SUSPENDED: 'Suspendue', COMPLETED: 'Terminée', CANCELLED: 'Annulée'
 };
 
 export const RESOURCE_TYPE_LABELS: Record<MaintenanceResourceType, string> = {
@@ -350,7 +412,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   ROLE_CHANGE: 'Changement de rôle', PASSWORD_RESET: 'Réinitialisation du mot de passe', BLOCK: 'Blocage',
   UNBLOCK: 'Déblocage', TWO_FACTOR_CHANGE: 'Modification 2FA', MEMBER_ADD: 'Ajout de membre',
   MEMBER_REMOVE: 'Retrait de membre', LEAD_CHANGE: 'Changement de responsable', ASSIGN: 'Affectation',
-  STATUS_CHANGE: 'Changement de statut', START: 'Démarrage', COMPLETE: 'Fin', CANCEL: 'Annulation',
+  STATUS_CHANGE: 'Changement de statut', START: 'Démarrage', PAUSE: 'Suspension', RESUME: 'Reprise', COMPLETE: 'Fin', CANCEL: 'Annulation',
   ACTIVATE: 'Réactivation', DEACTIVATE: 'Désactivation', GENERATE: 'Génération', EXPORT: 'Export',
   SCHEDULE: 'Planification', ACCESS_DENIED: 'Accès refusé'
 };

@@ -1,5 +1,6 @@
 package com.orange.pfe.backend.model.maintenance;
 
+import com.orange.pfe.backend.model.team.Team;
 import com.orange.pfe.backend.model.user.AppUser;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -66,6 +67,22 @@ public class Maintenance {
     @JoinColumn(name = "responsible_id")
     private AppUser responsible;
 
+    /** Équipe porteuse de la maintenance (optionnelle : les maintenances antérieures n'en ont pas). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_id")
+    private Team team;
+
+    /** Suspension en cours (renseignés uniquement si le statut est SUSPENDED ; l'historique conserve les précédentes). */
+    @Column(name = "suspended_at")
+    private LocalDateTime suspendedAt;
+
+    @Column(name = "suspend_reason", length = 500)
+    private String suspendReason;
+
+    /** Incident déclencheur de la suspension (référence simple : l'incident peut être purgé sans toucher à la maintenance). */
+    @Column(name = "suspend_incident_id")
+    private Long suspendIncidentId;
+
     @Column(name = "actual_start_at")
     private LocalDateTime actualStartAt;
 
@@ -127,6 +144,27 @@ public class Maintenance {
 
     public AppUser getResponsible() { return responsible; }
     public void setResponsible(AppUser responsible) { this.responsible = responsible; }
+
+    public Team getTeam() { return team; }
+    public void setTeam(Team team) { this.team = team; }
+
+    public LocalDateTime getSuspendedAt() { return suspendedAt; }
+    public String getSuspendReason() { return suspendReason; }
+    public Long getSuspendIncidentId() { return suspendIncidentId; }
+
+    /** Enregistre une suspension (réservé au service : transition IN_PROGRESS → SUSPENDED). */
+    public void markSuspended(LocalDateTime at, String reason, Long incidentId) {
+        this.suspendedAt = at;
+        this.suspendReason = reason;
+        this.suspendIncidentId = incidentId;
+    }
+
+    /** Efface la suspension en cours (reprise ou annulation) ; la trace reste dans l'historique et l'audit. */
+    public void clearSuspension() {
+        this.suspendedAt = null;
+        this.suspendReason = null;
+        this.suspendIncidentId = null;
+    }
 
     public LocalDateTime getActualStartAt() { return actualStartAt; }
     public void setActualStartAt(LocalDateTime actualStartAt) { this.actualStartAt = actualStartAt; }

@@ -1,7 +1,9 @@
 package com.orange.pfe.backend.dto.team;
 
 import com.orange.pfe.backend.dto.org.UserRef;
+import com.orange.pfe.backend.model.team.ResourceScope;
 import com.orange.pfe.backend.model.team.TaskPriority;
+import com.orange.pfe.backend.model.team.TaskSourceEvent;
 import com.orange.pfe.backend.model.team.TaskStatus;
 
 import java.time.LocalDate;
@@ -21,6 +23,7 @@ public final class TeamResponses {
             Long id,
             String name,
             String description,
+            ResourceScope specialty,
             UserRef lead,
             boolean active,
             int memberCount,
@@ -38,7 +41,9 @@ public final class TeamResponses {
             boolean enabled,
             boolean lead,
             LocalDateTime addedAt,
-            String addedBy
+            String addedBy,
+            /** Badge calculé : « Chef &lt;spécialité&gt; » ou « Technicien &lt;spécialité&gt; » (jamais stocké). */
+            String roleLabel
     ) {}
 
     public record TaskResponse(
@@ -54,7 +59,9 @@ public final class TeamResponses {
             boolean overdue,
             LocalDateTime completedAt,
             LocalDateTime createdAt,
-            LocalDateTime updatedAt
+            LocalDateTime updatedAt,
+            Long sourceIncidentId,
+            TaskSourceEvent sourceEvent
     ) {}
 
     /** Avancement : compte par statut, retards et taux d'achèvement (% de tâches terminées hors annulées). */

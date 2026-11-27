@@ -26,4 +26,9 @@ public interface MaintenanceRepository extends JpaRepository<Maintenance, Long> 
                                       @Param("end") LocalDateTime end);
 
     List<Maintenance> findByStatusOrderByStartAtAsc(MaintenanceStatus status);
+
+    /** Maintenance actuellement suspendue à cause de cet incident (le lien est effacé à la reprise ou à l'annulation). */
+    java.util.Optional<Maintenance> findFirstBySuspendIncidentIdAndStatus(Long suspendIncidentId, MaintenanceStatus status);
+
+    List<Maintenance> findByStatusAndSuspendIncidentIdIsNotNullOrderByIdAsc(MaintenanceStatus status);
 }

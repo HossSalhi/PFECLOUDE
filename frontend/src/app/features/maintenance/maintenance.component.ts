@@ -1,10 +1,12 @@
-import { Component, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { Component, Injector, OnInit, ChangeDetectionStrategy } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { MaintenanceService } from '../../core/services/maintenance.service';
 import { ApiService, UserData } from '../../core/services/api.service';
 import { OrgPermissionsService } from '../../core/services/org-permissions.service';
+import { TeamService } from '../../core/services/team.service';
 import {
   Maintenance, MaintenanceHistoryEntry, MaintenanceRequest, MaintenanceResource, MaintenanceResourceType,
-  MaintenanceStatus, MAINTENANCE_STATUS_LABELS, RESOURCE_TYPE_LABELS
+  MaintenanceStatus, MAINTENANCE_STATUS_LABELS, RESOURCE_TYPE_LABELS, ResourceScope, Team
 } from '../../core/models/org.models';
 import { buildMonthGrid, CalendarDay, gridRange, MONTH_NAMES, WEEKDAY_NAMES } from '../../shared/calendar.util';
 import { errorMessage, formatDateTime, toDatetimeLocalValue, toLocalIso } from '../../shared/date.util';
@@ -13,7 +15,7 @@ import { NgClass, SlicePipe } from '@angular/common';
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'Titre', resource: 'Ressource', startAt: 'Début', endAt: 'Fin', status: 'Statut',
-  responsible: 'Responsable', reason: 'Motif', description: 'Description'
+  responsible: 'Responsable', team: 'Équipe', reason: 'Motif', description: 'Description'
 };
 
 /**
@@ -25,7 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
     selector: 'app-maintenance',
     templateUrl: './maintenance.component.html',
     changeDetection: ChangeDetectionStrategy.Eager,
-    imports: [FormsModule, NgClass, SlicePipe]
+    imports: [FormsModule, NgClass, SlicePipe, RouterLink]
 })
 export class MaintenanceComponent implements OnInit {
 
@@ -57,6 +59,7 @@ export class MaintenanceComponent implements OnInit {
   // Référentiels
   users: UserData[] = [];
   resources: MaintenanceResource[] = [];
+  teams: Team[] = [];
 
   // Messages
   error = '';
@@ -77,6 +80,9 @@ export class MaintenanceComponent implements OnInit {
   // Confirmations
   showCancel = false;
   cancelReason = '';
+  showPause = false;
+  pauseReason = '';
+  pauseIncident = '';
   showDelete = false;
   confirm: { title: string; message: string; label: string; run: () => void } | null = null;
   busy = false;
@@ -89,7 +95,8 @@ export class MaintenanceComponent implements OnInit {
   constructor(
     private service: MaintenanceService,
     private api: ApiService,
-    public perms: OrgPermissionsService
+    public perms: OrgPermissionsService,
+    private injector: Injector
   ) {}
 
   // ── Droits d'affichage (le Backend applique les mêmes règles) ─────────────
@@ -99,7 +106,7 @@ export class MaintenanceComponent implements OnInit {
   get canCancel(): boolean { return this.perms.can('MAINTENANCE_CANCEL'); }
   get canDelete(): boolean { return this.perms.can('MAINTENANCE_DELETE'); }
 
-  isActive(m: Maintenance): boolean { return m.status === 'PLANNED' || m.status === 'IN_PROGRESS'; }
+  isActive(m: Maintenance): boolean { return m.status === 'PLANNED' || m.status === 'IN_PROGRESS' || m.status === 'SUSPENDED'; }
 
   // ── Cycle de vie du composant ─────────────────────────────────────────────
 
@@ -229,15 +236,39 @@ export class MaintenanceComponent implements OnInit {
     return {
       title: '', description: '', reason: '',
       resourceType: 'APPLICATION' as MaintenanceResourceType,
-      resourceName: '', startAt: '', endAt: '', responsibleId: null as number | null
+      resourceName: '', startAt: '', endAt: '', responsibleId: null as number | null, teamId: null as number | null
     };
   }
 
   openCreate(): void {
     this.editing = null;
     this.form = this.emptyForm();
+    this.loadTeams();
     this.modalError = '';
     this.showForm = true;
+  }
+
+  /**
+   * Équipes proposables dans le formulaire. Liste facultative : si elle est indisponible (droit TEAMS_VIEW absent,
+   * erreur réseau), le formulaire reste utilisable sans équipe ; le Backend reste l'autorité sur la cohérence.
+   */
+  private loadTeams(): void {
+    try {
+      this.injector.get(TeamService).listTeams(false, '').subscribe({ next: t => this.teams = t, error: () => {} });
+    } catch {
+      this.teams = [];
+    }
+  }
+
+  /** Portée d'un type de ressource de maintenance (miroir de ResourceScope.fromMaintenance du Backend). */
+  private scopeOf(type: MaintenanceResourceType): ResourceScope {
+    return type === 'NODE' ? 'CLUSTER' : type;
+  }
+
+  /** Équipes actives dont la spécialité est compatible avec le type de ressource choisi (ou sans spécialité). */
+  teamsForType(): Team[] {
+    const scope = this.scopeOf(this.form.resourceType);
+    return this.teams.filter(t => t.active && (!t.specialty || t.specialty === scope));
   }
 
   openEdit(m: Maintenance): void {
@@ -246,8 +277,10 @@ export class MaintenanceComponent implements OnInit {
       title: m.title, description: m.description || '', reason: m.reason || '',
       resourceType: m.resourceType, resourceName: m.resourceName,
       startAt: toDatetimeLocalValue(m.startAt), endAt: toDatetimeLocalValue(m.endAt),
-      responsibleId: m.responsible ? m.responsible.id : null
+      responsibleId: m.responsible ? m.responsible.id : null,
+      teamId: m.team ? m.team.id : null
     };
+    this.loadTeams();
     this.modalError = '';
     this.selected = null;
     this.showForm = true;
@@ -256,7 +289,7 @@ export class MaintenanceComponent implements OnInit {
   closeForm(): void { this.showForm = false; this.editing = null; }
 
   /** Le début et la ressource ne sont plus modifiables une fois la maintenance démarrée (règle du Backend). */
-  get lockedFields(): boolean { return !!this.editing && this.editing.status === 'IN_PROGRESS'; }
+  get lockedFields(): boolean { return !!this.editing && (this.editing.status === 'IN_PROGRESS' || this.editing.status === 'SUSPENDED'); }
 
   resourcesOfType(): MaintenanceResource[] {
     return this.resources.filter(r => r.type === this.form.resourceType);
@@ -287,6 +320,9 @@ export class MaintenanceComponent implements OnInit {
       endAt: toLocalIso(new Date(this.form.endAt)),
       responsibleId: this.form.responsibleId
     };
+    // L'équipe n'est envoyée que si elle est choisie, ou pour être retirée d'une maintenance qui en avait une
+    // (la modification est un remplacement complet côté serveur) : sinon la requête reste identique à l'ancienne.
+    if (this.form.teamId || (this.editing && this.editing.team)) { body.teamId = this.form.teamId; }
     this.saving = true;
     this.modalError = '';
     const call = this.editing ? this.service.update(this.editing.id, body) : this.service.create(body);
@@ -310,6 +346,41 @@ export class MaintenanceComponent implements OnInit {
       message: `Démarrer la maintenance « ${m.title} » sur ${m.resourceName} ? C'est une information de gestion : la supervision et les mécanismes de sécurité restent actifs.`,
       label: 'Démarrer',
       run: () => this.act(this.service.start(m.id), 'Maintenance démarrée.')
+    };
+  }
+
+  /** Ouvre la fenêtre de suspension : un motif et/ou le numéro de l'incident déclencheur est obligatoire. */
+  askPause(m: Maintenance): void {
+    this.selected = m;
+    this.pauseReason = '';
+    this.pauseIncident = '';
+    this.modalError = '';
+    this.showPause = true;
+  }
+
+  submitPause(): void {
+    if (!this.selected) { return; }
+    const reason = this.pauseReason.trim();
+    const incidentText = this.pauseIncident.trim();
+    const incidentId = incidentText ? Number(incidentText) : null;
+    if (incidentText && (!Number.isInteger(incidentId) || (incidentId as number) <= 0)) {
+      this.modalError = "Le numéro d'incident doit être un entier positif."; return;
+    }
+    if (!reason && incidentId === null) { this.modalError = "Indiquez un motif ou l'incident à l'origine de la suspension."; return; }
+    const m = this.selected;
+    this.busy = true;
+    this.service.pause(m.id, { incidentId, reason: reason || null }).subscribe({
+      next: updated => { this.busy = false; this.showPause = false; this.selected = null; this.flash('Maintenance suspendue.'); this.openDetail(updated); this.refreshAll(); },
+      error: e => { this.busy = false; this.modalError = errorMessage(e); }
+    });
+  }
+
+  askResume(m: Maintenance): void {
+    this.confirm = {
+      title: 'Reprendre la maintenance',
+      message: `Reprendre la maintenance « ${m.title} » sur ${m.resourceName} ? Elle repasse « En cours ».`,
+      label: 'Reprendre',
+      run: () => this.act(this.service.resume(m.id), 'Maintenance reprise.')
     };
   }
 

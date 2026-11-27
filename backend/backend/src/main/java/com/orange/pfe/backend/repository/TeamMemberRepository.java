@@ -14,6 +14,10 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     @Query("select m from TeamMember m join fetch m.user where m.team.id = :teamId order by m.user.username")
     List<TeamMember> findByTeamIdWithUser(@Param("teamId") Long teamId);
 
+    /** Appartenances à des équipes ACTIVES (badges de rôle calculés). */
+    @Query("select m from TeamMember m join fetch m.team t join fetch m.user u where t.active = true and u.id in :userIds")
+    List<TeamMember> findActiveByUserIds(@Param("userIds") Collection<Long> userIds);
+
     Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
 
     boolean existsByTeamIdAndUserId(Long teamId, Long userId);

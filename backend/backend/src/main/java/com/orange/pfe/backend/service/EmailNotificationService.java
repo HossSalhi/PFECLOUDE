@@ -69,6 +69,16 @@ public class EmailNotificationService {
 
     // ── Incidents ─────────────────────────────────────────────────────────────
 
+    /**
+     * Envoie un e-mail à UNE personne (par exemple le responsable d'une équipe), avec un corps HTML déjà construit par
+     * l'appelant (routage incident → équipe). Sans effet si l'envoi d'e-mails n'est pas configuré ; un échec d'envoi
+     * est journalisé, jamais propagé.
+     */
+    @Async
+    public void sendTeamNotification(String toEmail, String subject, String htmlBody) {
+        sendTo(toEmail, subject, htmlBody);
+    }
+
     @Async
     public void sendIncidentDetected(Incident incident) {
         if (!shouldNotify(incident.getSeverity())) return;

@@ -4,6 +4,7 @@ import com.orange.pfe.backend.model.user.AppUser;
 import com.orange.pfe.backend.model.user.UserRole;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record UserResponse(
         Long id,
@@ -21,8 +22,16 @@ public record UserResponse(
         LocalDateTime createdAt,
         LocalDateTime blockedAt,
         String blockedBy,
-        String blockReason
+        String blockReason,
+        /** Badges « Chef / Technicien &lt;spécialité&gt; » calculés depuis les équipes ; vide hors liste des utilisateurs. */
+        List<String> roleLabels
 ) {
+    public UserResponse withRoleLabels(List<String> labels) {
+        return new UserResponse(id, username, email, firstName, lastName, role, enabled, twoFactorEnabled, lastLoginAt,
+                lastLoginIp, failedAttempts, lockedUntil, createdAt, blockedAt, blockedBy, blockReason,
+                labels == null ? List.of() : labels);
+    }
+
     public static UserResponse from(AppUser u) {
         return new UserResponse(
                 u.getId(),
@@ -40,7 +49,8 @@ public record UserResponse(
                 u.getCreatedAt(),
                 u.getBlockedAt(),
                 u.getBlockedBy(),
-                u.getBlockReason()
+                u.getBlockReason(),
+                List.of()
         );
     }
 }

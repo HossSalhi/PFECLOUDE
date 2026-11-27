@@ -24,6 +24,8 @@ public enum AuditAction {
     ASSIGN,
     STATUS_CHANGE,
     START,
+    PAUSE,
+    RESUME,
     COMPLETE,
     CANCEL,
     ACTIVATE,

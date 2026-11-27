@@ -1,6 +1,8 @@
 package com.orange.pfe.backend.controller;
 
 import com.orange.pfe.backend.config.AiopsPollingProperties;
+import com.orange.pfe.backend.config.InfraHealthProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.orange.pfe.backend.service.InfrastructureHealthService;
 import com.orange.pfe.backend.service.KubernetesDiscoveryService;
 import org.springframework.http.ResponseEntity;
@@ -22,14 +24,40 @@ public class InfrastructureController {
     private final AiopsPollingProperties pollingProperties;
     private final org.springframework.beans.factory.ObjectProvider<com.orange.pfe.backend.service.vmpower.VmPowerWatch> vmPowerWatch;
 
+    private final InfraHealthProperties infraProperties;
+
+    /** Constructeur historique (tests) : les liens de supervision prennent alors les valeurs par défaut. */
     public InfrastructureController(InfrastructureHealthService healthService,
                                     KubernetesDiscoveryService discoveryService,
                                     AiopsPollingProperties pollingProperties,
                                     org.springframework.beans.factory.ObjectProvider<com.orange.pfe.backend.service.vmpower.VmPowerWatch> vmPowerWatch) {
+        this(healthService, discoveryService, pollingProperties, vmPowerWatch, new InfraHealthProperties());
+    }
+
+    @Autowired
+    public InfrastructureController(InfrastructureHealthService healthService,
+                                    KubernetesDiscoveryService discoveryService,
+                                    AiopsPollingProperties pollingProperties,
+                                    org.springframework.beans.factory.ObjectProvider<com.orange.pfe.backend.service.vmpower.VmPowerWatch> vmPowerWatch,
+                                    InfraHealthProperties infraProperties) {
+        this.infraProperties = infraProperties;
         this.healthService = healthService;
         this.discoveryService = discoveryService;
         this.pollingProperties = pollingProperties;
         this.vmPowerWatch = vmPowerWatch;
+    }
+
+    /** Adresses des outils de supervision, affichées en liens « ouvrir dans un nouvel onglet ». */
+    public record MonitoringLinks(String prometheus, String grafana, String loki, String camunda) {}
+
+    /**
+     * Liens de supervision tirés de la configuration existante ({@code infra.health.*-url}). Réservé à ADMIN et
+     * SUPER_ADMIN par {@code SecurityConfig}. Lecture seule : ne contacte aucun de ces services.
+     */
+    @GetMapping("/monitoring-links")
+    public MonitoringLinks monitoringLinks() {
+        return new MonitoringLinks(infraProperties.getPrometheusUrl(), infraProperties.getGrafanaUrl(),
+                infraProperties.getLokiUrl(), infraProperties.getCamundaUrl());
     }
 
     @GetMapping("/health")
