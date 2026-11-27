@@ -28,11 +28,12 @@ super-administrateur : toutes les équipes. Chef d'équipe : uniquement l'équip
 | `HELIOS_AI_ASSIST_AUDIT_ANOMALIES` | `…audit-anomalies.enabled` | `false` | Anomalies d'audit |
 | `HELIOS_AI_ASSIST_TASK_ASSIGNMENT` | `…task-assignment.enabled` | `false` | Assignation de tâche |
 | `HELIOS_AI_ASSIST_MAINTENANCE_WINDOW` | `…maintenance-window.enabled` | `false` | Fenêtre de maintenance |
-| `HELIOS_AI_ASSIST_PROVIDER` | `…provider` | `mistral` | `mistral` ou `groq` |
+| `HELIOS_AI_ASSIST_PROVIDER` | `…provider` | `groq` | `groq` (gratuit, très rapide) ou `mistral` |
 | `HELIOS_AI_ASSIST_API_KEY` | `…api-key` | vide | **Clé API (secret)** |
 | `HELIOS_AI_ASSIST_BASE_URL` | `…base-url` | selon le fournisseur | Surcharge facultative |
-| `HELIOS_AI_ASSIST_MODEL` | `…model` | `mistral-small-latest` / `llama-3.1-8b-instant` | Surcharge facultative |
-| `HELIOS_AI_ASSIST_TIMEOUT_SECONDS` | `…timeout-seconds` | `20` | Délai d'un appel |
+| `HELIOS_AI_ASSIST_MODEL` | `…model` | `llama-3.1-8b-instant` (Groq) / `mistral-small-latest` | Surcharge facultative |
+| `HELIOS_AI_ASSIST_TIMEOUT_SECONDS` | `…timeout-seconds` | `10` | Délai d'un appel |
+| `HELIOS_AI_ASSIST_MAX_TOKENS` | `…max-tokens` | `250` | Longueur maximale de la réponse (économie de tokens) |
 
 Une fonction n'est utilisable que si l'interrupteur global **et** son drapeau sont à `true` **et** si la clé est présente.
 Désactivée, elle est invisible dans l'interface. Activée sans clé, elle s'affiche avec « non configurée » et son bouton est bloqué.

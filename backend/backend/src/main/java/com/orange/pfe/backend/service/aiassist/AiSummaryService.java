@@ -71,7 +71,7 @@ public class AiSummaryService {
         for (JsonNode s : content.path("sections")) {
             prompt.append("Tableau « ").append(s.path("title").asText("")).append(" » : ").append(s.path("rows").size()).append(" ligne(s).\n");
         }
-        prompt.append("\nRédige un résumé exécutif de 4 à 6 phrases : situation globale, points d'attention chiffrés, évolution "
+        prompt.append("\nRédige un résumé exécutif de 3 à 4 phrases : situation globale, points d'attention chiffrés, évolution "
                 + "par rapport à la période précédente si elle est fournie. Aucune action à exécuter.");
         Narrative n = guard.narrate(AiFeature.REPORTS_SUMMARY, AiAssistGuard.SYSTEM, prompt.toString(), null);
         return new ReportSummaryResponse(reportId, title, period, facts, n);
@@ -108,7 +108,7 @@ public class AiSummaryService {
                     .append(m.open()).append(" ouverte(s), ").append(m.done()).append(" terminée(s), ")
                     .append(m.overdue()).append(" en retard\n");
         }
-        prompt.append("\nRédige une synthèse de 4 à 6 phrases : état d'avancement, répartition de la charge, points d'attention. "
+        prompt.append("\nRédige une synthèse de 3 à 4 phrases : état d'avancement, répartition de la charge, points d'attention. "
                 + "Aucune action à exécuter.");
         Narrative n = guard.narrate(AiFeature.REPORTS_SUMMARY, AiAssistGuard.SYSTEM, prompt.toString(), names);
         return new TeamSummaryAiResponse(team.getId(), team.getName(), facts, members, n);

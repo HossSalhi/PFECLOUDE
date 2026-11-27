@@ -116,7 +116,7 @@ public class MaintenanceWindowAdvisor {
                     .append(", charge moyenne ").append(Math.round(w.averageLoad())).append(" %, pic ")
                     .append(Math.round(w.peakLoad())).append(" %\n");
         }
-        prompt.append("Aucune maintenance existante ne chevauche ces fenêtres sur cette ressource.\n\nRédige en 3 à 5 phrases la "
+        prompt.append("Aucune maintenance existante ne chevauche ces fenêtres sur cette ressource.\n\nRédige en 2 à 3 phrases la "
                 + "recommandation : quelle fenêtre privilégier et pourquoi, en citant uniquement ces chiffres. C'est une suggestion "
                 + "que le responsable valide ; ne planifie rien.");
         Narrative n = guard.narrate(AiFeature.MAINTENANCE_WINDOW, AiAssistGuard.SYSTEM, prompt.toString(), null);

@@ -158,16 +158,18 @@ class AiCompletionClientTest {
 
     @Test
     void providerDefaultsAndReadiness() {
+        AiAssistProperties byDefault = new AiAssistProperties();          // gratuit et rapide par défaut : Groq, petit modèle
+        assertThat(byDefault.effectiveBaseUrl()).isEqualTo("https://api.groq.com/openai/v1");
+        assertThat(byDefault.effectiveModel()).isEqualTo("llama-3.1-8b-instant");
+        assertThat(byDefault.getMaxTokens()).isEqualTo(250);
+        assertThat(byDefault.getTimeoutSeconds()).isEqualTo(10);
+
         AiAssistProperties mistral = new AiAssistProperties();
+        mistral.setProvider("mistral");
         assertThat(mistral.effectiveBaseUrl()).isEqualTo("https://api.mistral.ai/v1");
         assertThat(mistral.effectiveModel()).isEqualTo("mistral-small-latest");
 
-        AiAssistProperties groq = new AiAssistProperties();
-        groq.setProvider("groq");
-        assertThat(groq.effectiveBaseUrl()).isEqualTo("https://api.groq.com/openai/v1");
-        assertThat(groq.effectiveModel()).isEqualTo("llama-3.1-8b-instant");
-
-        assertThat(client(mistral).ready(AiFeature.REPORTS_SUMMARY)).isFalse();       // tout est désactivé par défaut
+        assertThat(client(byDefault).ready(AiFeature.REPORTS_SUMMARY)).isFalse();       // tout est désactivé par défaut
         assertThat(client(props(true, true, "k")).ready(AiFeature.REPORTS_SUMMARY)).isTrue();
     }
 }

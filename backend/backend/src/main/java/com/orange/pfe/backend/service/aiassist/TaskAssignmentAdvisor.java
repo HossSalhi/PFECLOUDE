@@ -101,7 +101,7 @@ public class TaskAssignmentAdvisor {
                     .append(", ").append(c.openTasks()).append(" tâche(s) ouverte(s), ").append(c.overdueTasks())
                     .append(" en retard, ").append(c.similarDone()).append(" tâche(s) similaire(s) déjà terminée(s)\n");
         }
-        prompt.append("\nRédige en 2 à 4 phrases la justification de la première place, en t'appuyant uniquement sur ces chiffres. "
+        prompt.append("\nRédige en 2 phrases la justification de la première place, en t'appuyant uniquement sur ces chiffres. "
                 + "Dis clairement que c'est une suggestion que le responsable peut ignorer.");
         Narrative n = guard.narrate(AiFeature.TASK_ASSIGNMENT, AiAssistGuard.SYSTEM, prompt.toString(), names);
         return new AssignmentRecommendation(team.getId(), team.getName(), facts, ranked, top.userId(), n);

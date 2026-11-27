@@ -23,12 +23,12 @@ public class AiAssistProperties {
     }
 
     private boolean enabled = false;
-    private String provider = "mistral";
+    private String provider = "groq";
     private String baseUrl = "";
     private String apiKey = "";
     private String model = "";
-    private int timeoutSeconds = 20;
-    private int maxTokens = 500;
+    private int timeoutSeconds = 10;
+    private int maxTokens = 250;
     private double temperature = 0.2;
 
     private Flag reportsSummary = new Flag();
@@ -67,7 +67,7 @@ public class AiAssistProperties {
         if (model != null && !model.isBlank()) {
             return model.trim();
         }
-        return "groq".equalsIgnoreCase(provider == null ? "" : provider.trim()) ? "llama-3.1-8b-instant" : "mistral-small-latest";
+        return "mistral".equalsIgnoreCase(provider == null ? "" : provider.trim()) ? "mistral-small-latest" : "llama-3.1-8b-instant";
     }
 
     public boolean isEnabled() { return enabled; }
