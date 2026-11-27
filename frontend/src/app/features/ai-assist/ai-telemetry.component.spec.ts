@@ -190,6 +190,21 @@ describe('AiTelemetryComponent', () => {
     expect(f.nativeElement.querySelector('.ai-trace li.ai-low')).not.toBeNull();       // couverture < 80 % signalée
   });
 
+  it("sépare les constats côté application et côté infrastructure, avec des libellés lisibles", () => {
+    const api = setup(caps(), page([]));
+    const app = { ...finding, scope: 'APPLICATION', entity: 'pfe/backend', signal: 'WORKLOAD', rule: 'POD_RESTARTS', detail: 'Le conteneur a redémarré 7 fois', queryRef: 'PROBE_RESTARTS' };
+    const infra = { ...finding, scope: 'SERVICE', entity: 'service Loki', signal: 'MONITORING', rule: 'MONITORING_NOT_READY', detail: "Loki n'est pas prêt : HTTP 503", queryRef: 'PROBE_TOOLS_READY' };
+    api.analyseTelemetry.and.returnValue(of(analysis({ findings: [app, infra], anomalyCount: 2 })));
+    const f = create();
+    runButton(f).click();
+    f.detectChanges();
+    const sides = Array.from(f.nativeElement.querySelectorAll('app-ai-card .ai-side') as NodeListOf<HTMLElement>).map(e => e.textContent!.trim());
+    expect(sides).toEqual(['Application', 'Infrastructure']);
+    expect(text(f)).toContain('Redémarrages');
+    expect(text(f)).toContain('Outil non prêt');
+    expect(text(f)).toContain('Charge de travail');
+  });
+
   it("l'IA indisponible garde le verdict et les constats calculés", () => {
     const api = setup(caps());
     api.analyseTelemetry.and.returnValue(of(analysis({ analysis: narrative({ status: 'UNAVAILABLE', message: 'Le quota du fournisseur IA est dépassé.', text: null }) })));

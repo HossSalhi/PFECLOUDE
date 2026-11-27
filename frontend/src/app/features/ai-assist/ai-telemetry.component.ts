@@ -74,11 +74,12 @@ import { AiCardComponent } from './ai-card.component';
           @if (a.findings.length > 0) {
             <div style="overflow-x:auto">
               <table class="org-table ai-table">
-                <thead><tr><th>Gravité</th><th>Entité</th><th>Signal</th><th>Règle</th><th>Période</th><th>Mesuré</th><th>Référence</th><th>Détail</th></tr></thead>
+                <thead><tr><th>Gravité</th><th>Côté</th><th>Entité</th><th>Signal</th><th>Règle</th><th>Période</th><th>Mesuré</th><th>Référence</th><th>Détail</th></tr></thead>
                 <tbody>
                   @for (f of a.findings; track $index) {
                     <tr>
                       <td><span class="ai-sev" [attr.data-sev]="f.severity">{{ sevLabel(f.severity) }}</span></td>
+                      <td><span class="ai-side" [attr.data-side]="sideOf(f.scope)">{{ sideOf(f.scope) === 'APPLICATION' ? 'Application' : 'Infrastructure' }}</span></td>
                       <td><strong>{{ f.entity }}</strong><div class="text-muted text-small">{{ scopeLabel(f.scope) }}</div></td>
                       <td>{{ signalLabel(f.signal) }}</td>
                       <td>{{ ruleLabel(f.rule) }}</td>
@@ -253,16 +254,20 @@ export class AiTelemetryComponent implements OnInit {
     return v === 'NO_ANOMALY' ? 'fa-circle-check' : v === 'ANOMALIES' || v === 'PARTIAL_COVERAGE' ? 'fa-triangle-exclamation' : 'fa-circle-question';
   }
 
+  sideOf(scope: string): 'APPLICATION' | 'INFRASTRUCTURE' { return scope === 'APPLICATION' ? 'APPLICATION' : 'INFRASTRUCTURE'; }
+
   sevLabel(s: string): string { return s === 'HIGH' ? 'Haute' : s === 'MEDIUM' ? 'Moyenne' : 'Faible'; }
 
   signalLabel(s: string): string {
-    return ({ CPU: 'CPU', MEMORY: 'Mémoire', DISK: 'Disque', LOG_ERRORS: 'Erreurs des logs' } as Record<string, string>)[s] ?? s;
+    return ({ CPU: 'CPU', MEMORY: 'Mémoire', DISK: 'Disque', LOG_ERRORS: 'Erreurs des logs', TARGET: 'Cible de supervision', ALERT: 'Alerte Prometheus', WORKLOAD: 'Charge de travail', MONITORING: 'Outil de supervision' } as Record<string, string>)[s] ?? s;
   }
 
   ruleLabel(r: string): string {
     return ({
       SUSTAINED_HIGH: 'Dépassement soutenu', JUMP_VS_BASELINE: 'Hausse nette', FILLING_UP: 'Saturation prévue',
-      NEW_ERRORS: 'Nouvelles erreurs', ERROR_SPIKE: "Pic d'erreurs"
+      NEW_ERRORS: 'Nouvelles erreurs', ERROR_SPIKE: "Pic d'erreurs", TARGET_DOWN: 'Cible injoignable', TARGET_UNSTABLE: 'Cible instable',
+      ALERT_FIRING: 'Alerte en cours', DEPLOYMENT_UNAVAILABLE: 'Déploiement incomplet', POD_RESTARTS: 'Redémarrages', POD_NOT_RUNNING: 'Pods arrêtés',
+      POD_STUCK: 'Conteneur bloqué', MONITORING_NOT_READY: 'Outil non prêt'
     } as Record<string, string>)[r] ?? r;
   }
 
