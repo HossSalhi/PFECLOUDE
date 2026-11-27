@@ -43,4 +43,39 @@ public final class SelfHealingDtos {
 
     public record ActionLogs(boolean available, String reason, String source, LocalDateTime from, LocalDateTime to,
                              boolean truncated, List<LogLine> lines) {}
+
+    // ── Alertes liées à l'incident (Prometheus, Alertmanager, Grafana, Loki) ──
+    /** {@code status} : OK, UNAVAILABLE (outil en panne) ou NOT_CONFIGURED (adresse ou jeton absent, ou rien de configuré). */
+    public record AlertItem(String name, String severity, String summary, java.util.Map<String, String> labels,
+                            LocalDateTime firstFiring, LocalDateTime lastFiring, boolean activeNow, String ruleState,
+                            String ruleIncidentType, boolean typeMatches) {}
+
+    public record ToolAlerts(String tool, String status, String message, List<AlertItem> alerts) {}
+
+    public record LokiRules(String status, String message, List<String> rules) {}
+
+    public record Alerts(LocalDateTime from, LocalDateTime to, boolean truncated, ToolAlerts prometheus, ToolAlerts alertmanager,
+                         ToolAlerts grafana, LokiRules loki) {}
+
+    // ── Signaux de logs (équivalent d'alertes Loki, dérivé du catalogue de significations) ──
+    public record LogSignal(String category, String label, String meaning, String advice, long count, LocalDateTime first,
+                            LocalDateTime last, String example) {}
+
+    public record LogSignals(boolean available, String reason, String source, LocalDateTime from, LocalDateTime to,
+                             boolean truncated, int linesRead, List<LogSignal> signals) {}
+
+    // ── Trace Camunda de l'incident ───────────────────────────────────────────
+    public record CamundaStepInfo(String name, String type, String state, LocalDateTime start, LocalDateTime end, Long durationMs,
+                                  boolean incident) {}
+
+    public record CamundaIncidentInfo(String errorType, String message, String element, LocalDateTime createdAt) {}
+
+    public record WorkflowLogLine(LocalDateTime at, String message) {}
+
+    /** Une exécution de workflow de l'incident ; les champs Camunda sont nuls si l'instance n'a pas pu être lue. */
+    public record CamundaRun(Long workflowId, String workflowName, String status, String processInstanceKey, String definitionId,
+                             String state, LocalDateTime start, LocalDateTime end, boolean hasIncident, String note,
+                             List<CamundaStepInfo> steps, List<CamundaIncidentInfo> incidents, List<WorkflowLogLine> logs) {}
+
+    public record CamundaTrace(boolean available, String error, List<CamundaRun> runs) {}
 }

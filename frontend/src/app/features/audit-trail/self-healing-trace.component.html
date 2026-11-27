@@ -124,6 +124,107 @@
           </table>
           <p class="sup-muted">La sortie complète des commandes n'est pas reprise ici.</p>
         }
+
+        <!-- ═════════ Alertes (Prometheus, Alertmanager, Grafana, règles Loki) ═════════ -->
+        <h2 class="sup-h">Alertes liées à l'incident</h2>
+        @if (!alerts.data && !alerts.loading) {
+          <button class="btn-secondary" (click)="loadAlerts()">Charger les alertes</button>
+        }
+        @if (alerts.loading) { <p class="sup-muted">Chargement des alertes…</p> }
+        @if (alerts.error) { <div class="alert-warning" role="alert">{{ alerts.error }}</div> }
+        @if (alerts.data; as a) {
+          <p class="sup-muted">Période étudiée : {{ fmt(a.from) }} → {{ fmt(a.to) }}@if (a.truncated) { · liste limitée (trop de séries) }</p>
+          @for (src of sources(a); track src.tool) {
+            <div class="sup-error">
+              <div class="sup-error-head">
+                <strong>{{ src.tool }}</strong>
+                <span class="badge" [class.st-completed]="src.status === 'OK'" [class.st-cancelled]="src.status === 'UNAVAILABLE'" [class.st-planned]="src.status === 'NOT_CONFIGURED'">{{ statusLabel(src.status) }}</span>
+              </div>
+              @if (src.message) { <div class="sup-muted">{{ src.message }}</div> }
+              @for (al of src.alerts; track $index) {
+                <div class="sup-alert">
+                  <span class="badge st-cancelled">{{ al.severity || 'alerte' }}</span>
+                  <strong>{{ al.name }}</strong>
+                  @if (al.activeNow) { <span class="badge st-planned">active maintenant</span> }
+                  @if (al.typeMatches) { <span class="badge st-completed" title="La règle déclare ce type d'incident">type d'incident concordant</span> }
+                  <span class="sup-muted">{{ fmt(al.firstFiring) }} → {{ fmt(al.lastFiring) }}@if (al.ruleState) { · règle {{ al.ruleState }} }</span>
+                  @if (al.summary) { <div>{{ al.summary }}</div> }
+                </div>
+              }
+            </div>
+          }
+          <div class="sup-error">
+            <div class="sup-error-head">
+              <strong>Règles d'alerte Loki</strong>
+              <span class="badge" [class.st-completed]="a.loki.status === 'OK'" [class.st-cancelled]="a.loki.status === 'UNAVAILABLE'" [class.st-planned]="a.loki.status === 'NOT_CONFIGURED'">{{ statusLabel(a.loki.status) }}</span>
+            </div>
+            @if (a.loki.message) { <div class="sup-muted">{{ a.loki.message }}</div> }
+            @for (r of a.loki.rules; track r) { <span class="sup-chip">{{ r }}</span> }
+          </div>
+        }
+
+        <!-- ═════════ Signaux de logs (équivalent d'alertes Loki) ═════════ -->
+        <h2 class="sup-h">Signaux dans les logs de la ressource</h2>
+        @if (!signals.data && !signals.loading) {
+          <button class="btn-secondary" (click)="loadSignals()">Charger les signaux de logs</button>
+        }
+        @if (signals.loading) { <p class="sup-muted">Chargement des logs (quelques secondes)…</p> }
+        @if (signals.error) { <div class="alert-warning" role="alert">{{ signals.error }}</div> }
+        @if (signals.data; as s) {
+          @if (!s.available) { <div class="alert-warning" role="status">{{ s.reason }}</div> }
+          @if (s.available) {
+            <p class="sup-muted">{{ s.source }} · {{ fmt(s.from) }} → {{ fmt(s.to) }} · {{ s.linesRead }} lignes lues@if (s.truncated) { (limite atteinte) }</p>
+            @if (s.reason) { <p class="sup-muted">{{ s.reason }}</p> }
+            @for (g of s.signals; track g.category) {
+              <div class="sup-error">
+                <div class="sup-error-head"><span class="badge st-planned">{{ g.category }}</span> <strong>{{ g.label }}</strong>
+                  <span class="sup-muted">× {{ g.count }} · {{ fmt(g.first) }} → {{ fmt(g.last) }}</span></div>
+                <div>{{ g.meaning }}</div>
+                @if (g.advice) { <div class="sup-advice"><i class="fas fa-lightbulb"></i> {{ g.advice }}</div> }
+                <code class="sup-code">{{ g.example }}</code>
+              </div>
+            }
+          }
+        }
+
+        <!-- ═════════ Trace Camunda ═════════ -->
+        <h2 class="sup-h">Trace Camunda</h2>
+        @if (!camundaTrace.data && !camundaTrace.loading) {
+          <button class="btn-secondary" (click)="loadCamunda()">Charger la trace Camunda</button>
+        }
+        @if (camundaTrace.loading) { <p class="sup-muted">Chargement…</p> }
+        @if (camundaTrace.error) { <div class="alert-warning" role="alert">{{ camundaTrace.error }}</div> }
+        @if (camundaTrace.data; as c) {
+          @if (!c.available) { <div class="alert-warning" role="status">{{ c.error }}</div> }
+          @if (c.runs.length === 0) { <p class="sup-muted">Aucun workflow n'est associé à cet incident.</p> }
+          @for (run of c.runs; track run.workflowId) {
+            <div class="sup-error">
+              <div class="sup-error-head">
+                <strong>{{ run.workflowName || 'Workflow' }}</strong>
+                <span class="badge st-planned">{{ run.state || run.status || '—' }}</span>
+                @if (run.hasIncident) { <span class="badge st-cancelled">incident Camunda</span> }
+                <span class="sup-muted">{{ fmt(run.start) }} → {{ fmt(run.end) }}@if (run.processInstanceKey) { · instance {{ run.processInstanceKey }} }</span>
+              </div>
+              @if (run.note) { <div class="sup-muted">{{ run.note }}</div> }
+              @if (run.steps.length) {
+                <ol class="sup-steps">
+                  @for (st of run.steps; track $index) {
+                    <li [class.is-error]="st.incident">{{ st.name }} <span class="sup-muted">{{ st.type }} · {{ st.state }} · {{ duration(st.durationMs) }}</span>@if (st.incident) { <span class="badge st-cancelled">incident</span> }</li>
+                  }
+                </ol>
+              }
+              @for (i of run.incidents; track $index) {
+                <div class="sup-advice"><i class="fas fa-circle-exclamation"></i> {{ i.errorType }} @if (i.element) { ({{ i.element }}) } — {{ i.message }}</div>
+              }
+              @if (run.logs.length) {
+                <details class="sup-details"><summary>Journal HELIOS du workflow ({{ run.logs.length }} lignes)</summary>
+                  <div class="sup-logs">@for (l of run.logs; track $index) { <div class="sup-log"><span class="sup-time">{{ fmt(l.at) }}</span> {{ l.message }}</div> }</div>
+                </details>
+              }
+            </div>
+          }
+          <p class="sup-muted">Les variables du processus ne sont jamais lues.</p>
+        }
       }
     }
   </div>

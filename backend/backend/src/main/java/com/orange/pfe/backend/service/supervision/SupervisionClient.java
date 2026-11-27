@@ -54,6 +54,16 @@ public class SupervisionClient {
                 "Prometheus");
     }
 
+    /** {@code /api/v1/alerts} : alertes Prometheus actives ({@code data.alerts}). */
+    public JsonNode promAlerts() {
+        return data(infra.getPrometheusUrl(), "/api/v1/alerts", params(), "Prometheus").path("alerts");
+    }
+
+    /** {@code /api/v1/rules} : groupes de règles ({@code data.groups}). */
+    public JsonNode promRules() {
+        return data(infra.getPrometheusUrl(), "/api/v1/rules", params(), "Prometheus").path("groups");
+    }
+
     /** {@code /loki/api/v1/query} (requête de métrique instantanée) : renvoie {@code data.result}. */
     public JsonNode lokiInstant(String logql, long timeSec) {
         return get(infra.getLokiUrl(), "/loki/api/v1/query",
@@ -82,6 +92,11 @@ public class SupervisionClient {
     }
 
     private JsonNode get(String base, String path, Map<String, String> params, String tool) {
+        return data(base, path, params, tool).path("result");
+    }
+
+    /** Contenu {@code data} d'une réponse réussie (certaines routes y mettent {@code result}, d'autres {@code alerts} ou {@code groups}). */
+    private JsonNode data(String base, String path, Map<String, String> params, String tool) {
         if (base == null || base.isBlank()) {
             throw new UnavailableException(tool + " n'est pas configuré", null);
         }
@@ -99,7 +114,7 @@ public class SupervisionClient {
             if (!"success".equals(body.path("status").asText())) {
                 throw new UnavailableException(tool + " a refusé la requête", null);
             }
-            return body.path("data").path("result");
+            return body.path("data");
         } catch (UnavailableException e) {
             throw e;
         } catch (IOException e) {

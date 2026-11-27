@@ -30,4 +30,20 @@ public class SelfHealingReadRepository {
                 .setParameter("from", from).setParameter("to", to).setParameter("excluded", NOT_REMEDIATION)
                 .setMaxResults(max).getResultList();
     }
+
+    /** Exécutions de workflow d'un incident (au plus 20), de la plus ancienne à la plus récente. */
+    @Transactional(readOnly = true)
+    public List<com.orange.pfe.backend.model.workflow.WorkflowInstance> workflowsOfIncident(Long incidentId) {
+        return em.createQuery("select w from WorkflowInstance w where w.incident.id = :id order by w.createdAt",
+                com.orange.pfe.backend.model.workflow.WorkflowInstance.class)
+                .setParameter("id", incidentId).setMaxResults(20).getResultList();
+    }
+
+    /** Journal HELIOS d'un workflow (au plus {@code max} lignes), dans l'ordre chronologique. */
+    @Transactional(readOnly = true)
+    public List<com.orange.pfe.backend.model.workflow.WorkflowLog> workflowLogs(Long workflowId, int max) {
+        return em.createQuery("select l from WorkflowLog l where l.workflow.id = :id order by l.createdAt",
+                com.orange.pfe.backend.model.workflow.WorkflowLog.class)
+                .setParameter("id", workflowId).setMaxResults(max).getResultList();
+    }
 }

@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { SelfHealingService } from '../../core/services/self-healing.service';
-import { ActionLogs, SelfHealingItem, SelfHealingListing, SelfHealingTrace, TraceAction } from '../../core/models/self-healing.models';
+import {
+  ActionLogs, CamundaTrace, IncidentAlerts, LogSignals, SelfHealingItem, SelfHealingListing, SelfHealingTrace, ToolAlerts, TraceAction
+} from '../../core/models/self-healing.models';
 import { errorMessage, formatDateTime, toLocalIso } from '../../shared/date.util';
 
 /** Un bloc qui se charge seul : une panne de Loki n'empêche pas d'afficher la chronologie. */
@@ -33,6 +35,11 @@ export class SelfHealingTraceComponent implements OnInit {
   logs = new Map<number, Block<ActionLogs>>();
   openLogs = new Set<number>();
 
+  // Sections chargées à la demande : chacune interroge un outil différent (Prometheus, Loki, Camunda).
+  alerts: Block<IncidentAlerts> = { loading: false, data: null, error: '' };
+  signals: Block<LogSignals> = { loading: false, data: null, error: '' };
+  camundaTrace: Block<CamundaTrace> = { loading: false, data: null, error: '' };
+
   readonly fmt = formatDateTime;
 
   ngOnInit(): void {
@@ -58,6 +65,9 @@ export class SelfHealingTraceComponent implements OnInit {
     this.selectedId = id;
     this.logs = new Map();
     this.openLogs = new Set();
+    this.alerts = { loading: false, data: null, error: '' };
+    this.signals = { loading: false, data: null, error: '' };
+    this.camundaTrace = { loading: false, data: null, error: '' };
     this.trace = { loading: true, data: null, error: '' };
     this.api.trace(id).subscribe({
       next: d => this.trace = { loading: false, data: d, error: '' },
@@ -78,6 +88,47 @@ export class SelfHealingTraceComponent implements OnInit {
       next: d => { block.loading = false; block.data = d; },
       error: e => { block.loading = false; block.error = errorMessage(e, 'Impossible de charger les logs.'); }
     });
+  }
+
+  loadAlerts(): void {
+    if (this.selectedId == null) { return; }
+    this.alerts = { loading: true, data: null, error: '' };
+    this.api.alerts(this.selectedId).subscribe({
+      next: d => this.alerts = { loading: false, data: d, error: '' },
+      error: e => this.alerts = { loading: false, data: null, error: errorMessage(e, 'Impossible de charger les alertes.') }
+    });
+  }
+
+  loadSignals(): void {
+    if (this.selectedId == null) { return; }
+    this.signals = { loading: true, data: null, error: '' };
+    this.api.logSignals(this.selectedId).subscribe({
+      next: d => this.signals = { loading: false, data: d, error: '' },
+      error: e => this.signals = { loading: false, data: null, error: errorMessage(e, 'Impossible de charger les signaux de logs.') }
+    });
+  }
+
+  loadCamunda(): void {
+    if (this.selectedId == null) { return; }
+    this.camundaTrace = { loading: true, data: null, error: '' };
+    this.api.camunda(this.selectedId).subscribe({
+      next: d => this.camundaTrace = { loading: false, data: d, error: '' },
+      error: e => this.camundaTrace = { loading: false, data: null, error: errorMessage(e, 'Impossible de charger la trace Camunda.') }
+    });
+  }
+
+  /** Les trois sources d'alertes à afficher, dans l'ordre. */
+  sources(a: IncidentAlerts): ToolAlerts[] { return [a.prometheus, a.alertmanager, a.grafana]; }
+
+  statusLabel(status: string): string {
+    return status === 'OK' ? 'Disponible' : status === 'NOT_CONFIGURED' ? 'Non configuré' : 'Indisponible';
+  }
+
+  duration(ms: number | null): string {
+    if (ms == null) { return '—'; }
+    if (ms < 1000) { return `${ms} ms`; }
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
   }
 
   logsOf(action: TraceAction): Block<ActionLogs> | undefined { return this.logs.get(action.id); }

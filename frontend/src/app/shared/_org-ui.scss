@@ -270,3 +270,10 @@
   .sup-log code { white-space: pre-wrap; word-break: break-all; }
   .sup-log.is-error { background: #fdecea; }
 }
+
+/* Alertes et trace Camunda de l'incident (Audit-trail, onglet Auto-remédiation). */
+.org-scope {
+  .sup-alert { padding: 6px 0; border-top: 1px solid var(--border, #eee); font-size: 13px; }
+  .sup-alert .badge { margin-right: 4px; }
+  .sup-steps li.is-error { color: #c62828; }
+}

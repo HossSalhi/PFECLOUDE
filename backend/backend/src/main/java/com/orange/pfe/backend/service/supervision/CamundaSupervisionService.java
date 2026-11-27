@@ -158,6 +158,53 @@ public class CamundaSupervisionService {
         }, CamundaSteps::available);
     }
 
+    /** Historique d'UNE instance de processus : état, étapes réellement exécutées, incidents (jamais les variables). */
+    public record InstanceDetail(boolean available, String error, String definitionId, String state, LocalDateTime start,
+                                 LocalDateTime end, boolean hasIncident,
+                                 List<com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaStepInfo> steps,
+                                 List<com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaIncidentInfo> incidents) {}
+
+    /**
+     * Lit l'instance, ses étapes (100 au plus, dans l'ordre) et ses incidents (20 au plus). Lecture seule : les VARIABLES
+     * du processus ne sont jamais lues, car elles peuvent contenir des données sensibles.
+     */
+    public InstanceDetail instanceDetail(String processInstanceKey) {
+        if (processInstanceKey == null || !KEY.matcher(processInstanceKey).matches()) {
+            throw new IllegalArgumentException("Identifiant d'instance invalide");
+        }
+        return cached("instance:" + processInstanceKey, () -> {
+            try {
+                JsonNode inst = get("/v2/process-instances/" + processInstanceKey);
+                JsonNode elements = post("/v2/element-instances/search", "{\"filter\":{\"processInstanceKey\":\"" + processInstanceKey
+                        + "\"},\"sort\":[{\"field\":\"startDate\",\"order\":\"ASC\"}],\"page\":{\"limit\":100}}");
+                JsonNode incs = post("/v2/incidents/search", "{\"filter\":{\"processInstanceKey\":\"" + processInstanceKey
+                        + "\"},\"page\":{\"limit\":20}}");
+                List<com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaStepInfo> steps = new ArrayList<>();
+                for (JsonNode e : elements.path("items")) {
+                    Instant s = parse(e.path("startDate").asText(null));
+                    Instant en = parse(e.path("endDate").asText(null));
+                    String name = e.path("elementName").asText("");
+                    steps.add(new com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaStepInfo(
+                            name.isBlank() ? e.path("elementId").asText("") : truncate(name, 160), e.path("type").asText(""),
+                            e.path("state").asText(""), local(s), local(en), s != null && en != null ? en.toEpochMilli() - s.toEpochMilli() : null,
+                            e.path("hasIncident").asBoolean()));
+                }
+                List<com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaIncidentInfo> incidents = new ArrayList<>();
+                for (JsonNode i : incs.path("items")) {
+                    incidents.add(new com.orange.pfe.backend.dto.audit.SelfHealingDtos.CamundaIncidentInfo(i.path("errorType").asText(),
+                            truncate(i.path("errorMessage").asText(""), 300), i.path("elementId").asText(), local(parse(i.path("creationTime").asText(null)))));
+                }
+                return new InstanceDetail(true, null, inst.path("processDefinitionId").asText(null), inst.path("state").asText(null),
+                        local(parse(inst.path("startDate").asText(null))), local(parse(inst.path("endDate").asText(null))),
+                        inst.path("hasIncident").asBoolean(), steps, incidents);
+            } catch (UnavailableException e) {
+                String msg = e.getMessage() != null && e.getMessage().contains("HTTP 404")
+                        ? "Instance introuvable dans Camunda (purgée ou jamais créée)" : e.getMessage();
+                return new InstanceDetail(false, msg, null, null, null, null, false, List.of(), List.of());
+            }
+        }, InstanceDetail::available);
+    }
+
     // ── BPMN ──────────────────────────────────────────────────────────────────
 
     private static final Map<String, String> KINDS = Map.ofEntries(

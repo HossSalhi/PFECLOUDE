@@ -26,3 +26,33 @@ export interface TraceLogLine { at: string; text: string; error: boolean; catego
 export interface ActionLogs {
   available: boolean; reason: string | null; source: string | null; from: string; to: string; truncated: boolean; lines: TraceLogLine[];
 }
+
+// ── Alertes, signaux de logs et trace Camunda de l'incident ──────────────────
+export type ToolStatus = 'OK' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
+export interface AlertItem {
+  name: string; severity: string | null; summary: string | null; labels: Record<string, string>;
+  firstFiring: string | null; lastFiring: string | null; activeNow: boolean; ruleState: string | null;
+  ruleIncidentType: string | null; typeMatches: boolean;
+}
+export interface ToolAlerts { tool: string; status: ToolStatus; message: string | null; alerts: AlertItem[]; }
+export interface LokiRules { status: ToolStatus; message: string | null; rules: string[]; }
+export interface IncidentAlerts {
+  from: string; to: string; truncated: boolean; prometheus: ToolAlerts; alertmanager: ToolAlerts; grafana: ToolAlerts; loki: LokiRules;
+}
+
+export interface LogSignal {
+  category: string; label: string; meaning: string; advice: string | null; count: number; first: string; last: string; example: string;
+}
+export interface LogSignals {
+  available: boolean; reason: string | null; source: string | null; from: string; to: string; truncated: boolean; linesRead: number; signals: LogSignal[];
+}
+
+export interface CamundaStepInfo { name: string; type: string; state: string; start: string | null; end: string | null; durationMs: number | null; incident: boolean; }
+export interface CamundaIncidentInfo { errorType: string; message: string; element: string; createdAt: string | null; }
+export interface WorkflowLogLine { at: string; message: string; }
+export interface CamundaRun {
+  workflowId: number; workflowName: string | null; status: string | null; processInstanceKey: string | null; definitionId: string | null;
+  state: string | null; start: string | null; end: string | null; hasIncident: boolean; note: string | null;
+  steps: CamundaStepInfo[]; incidents: CamundaIncidentInfo[]; logs: WorkflowLogLine[];
+}
+export interface CamundaTrace { available: boolean; error: string | null; runs: CamundaRun[]; }

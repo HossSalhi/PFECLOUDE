@@ -215,17 +215,28 @@ public class SelfHealingTraceService {
     /** Où lire les logs : requête LogQL fixe et libellé lisible. Jamais construite à partir d'une valeur non validée. */
     record Source(String label, String logql) {}
 
+    /** Source des logs d'un incident, sans action particulière. */
+    static Optional<Source> source(Incident i) {
+        return source(i, null);
+    }
+
+    /** Signification d'une ligne d'erreur (mot-clé de niveau ou motif connu du catalogue) ; null si ce n'est pas une erreur. */
+    static LogMeaningCatalog.Meaning errorMeaning(String text) {
+        LogMeaningCatalog.Meaning known = LogMeaningCatalog.classify(text);
+        return ERROR_LINE.matcher(text).find() || known != LogMeaningCatalog.OTHER ? known : null;
+    }
+
     static Optional<Source> source(Incident i, IncidentAction a) {
         boolean node = "k8s-nodes".equals(i.getNamespace())
-                || a.getTargetKind() == com.orange.pfe.backend.model.action.RemediationTargetKind.NODE;
+                || (a != null && a.getTargetKind() == com.orange.pfe.backend.model.action.RemediationTargetKind.NODE);
         if (node) {
-            String name = firstNonBlank(i.getApp(), a.getTargetName());
+            String name = firstNonBlank(i.getApp(), a == null ? null : a.getTargetName());
             String host = name == null ? null : LOKI_HOSTS.get(name.toLowerCase(Locale.ROOT));
             return host == null ? Optional.empty()
                     : Optional.of(new Source("VM " + host, "{job=~\"vm-syslog|node-syslog\", host=\"" + host + "\"}"));
         }
-        String ns = firstNonBlank(i.getNamespace(), a.getTargetNamespace());
-        String app = firstNonBlank(i.getApp(), a.getTargetName());
+        String ns = firstNonBlank(i.getNamespace(), a == null ? null : a.getTargetNamespace());
+        String app = firstNonBlank(i.getApp(), a == null ? null : a.getTargetName());
         if (ns == null || app == null || !K8S_NAME.matcher(ns).matches() || !K8S_NAME.matcher(app).matches()) {
             return Optional.empty();
         }
