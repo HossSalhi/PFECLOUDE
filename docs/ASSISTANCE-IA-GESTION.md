@@ -19,6 +19,25 @@ super-administrateur : toutes les équipes. Chef d'équipe : uniquement l'équip
 (même notion que `pauseAsTeamLead`). Technicien simple : aucun accès. Un refus est tracé (`ACCESS_DENIED`). La matrice
 `OrgPermissionPolicy` n'est pas modifiée : un chef d'équipe n'obtient aucun droit supplémentaire en dehors de l'IA.
 
+### 5e fonction — Analyse IA des logs et métriques (historique traçable)
+
+Page **Supervision**, carte « Analyse IA des logs et métriques ». Qui : administrateurs (tout ou un périmètre), chef **actif** d'une
+équipe (le périmètre de la **spécialité** de son équipe : VM, cluster, application ou service ; une équipe sans spécialité couvre tout).
+
+- **Détection déterministe, sans IA** : métriques Prometheus (CPU, mémoire, disque par machine) — dépassement soutenu d'un seuil
+  (CPU 85 %, mémoire 90 %, disque 85 % pendant au moins 15 min), hausse nette par rapport à la période précédente, saturation
+  prévue du disque (projection) ; logs Loki — nouvelles erreurs, pic d'erreurs par heure par rapport aux heures habituelles.
+  Verdict explicite : **Aucune anomalie**, **N anomalies** ou **Données insuffisantes**.
+- **L'IA ne rédige que la synthèse**, à la demande, à partir des constats chiffrés (aucune ligne de log brute n'est envoyée).
+- **Qualité des données** : un trou de mesure est signalé (« couverture partielle ») et n'est jamais compté comme une anomalie.
+- **Historique traçable** : chaque analyse est enregistrée (table `telemetry_analysis_run`, migration **V33**, ajout seul, aucune
+  suppression possible) : qui, quand, période, périmètre, constats, requête PromQL/LogQL utilisée, synthèse IA, modèle, durée.
+  Elle est aussi inscrite à l'audit-trail (module AUDIT, action GENERATE). Un chef ne relit que l'historique de ses équipes.
+- **Limites mesurées** : Prometheus ne garde que **7 jours** (rétention `1w`) et a des trous ; les logs sont analysés sur **24 h au
+  plus**, comparés aux 12 h précédentes (Loki : environ 5 s pour 36 h avec le filtre simple retenu, 11 fois plus rapide que le filtre
+  avec limites de mot). Durées d'analyse mesurées : 2 s (1 h), 5 s (6 h), 12 s (24 h à 7 jours).
+- Variable d'activation : `HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS` (désactivée par défaut).
+
 ## Configuration (tout est désactivé par défaut)
 
 | Variable d'environnement | Propriété | Défaut | Rôle |
@@ -28,6 +47,7 @@ super-administrateur : toutes les équipes. Chef d'équipe : uniquement l'équip
 | `HELIOS_AI_ASSIST_AUDIT_ANOMALIES` | `…audit-anomalies.enabled` | `false` | Anomalies d'audit |
 | `HELIOS_AI_ASSIST_TASK_ASSIGNMENT` | `…task-assignment.enabled` | `false` | Assignation de tâche |
 | `HELIOS_AI_ASSIST_MAINTENANCE_WINDOW` | `…maintenance-window.enabled` | `false` | Fenêtre de maintenance |
+| `HELIOS_AI_ASSIST_TELEMETRY_ANALYSIS` | `…telemetry-analysis.enabled` | `false` | Analyse des logs et métriques |
 | `HELIOS_AI_ASSIST_PROVIDER` | `…provider` | `groq` | `groq` (gratuit, très rapide) ou `mistral` |
 | `HELIOS_AI_ASSIST_API_KEY` | `…api-key` | vide | **Clé API (secret)** |
 | `HELIOS_AI_ASSIST_BASE_URL` | `…base-url` | selon le fournisseur | Surcharge facultative |
@@ -104,4 +124,14 @@ Attendre `rollout status` et contrôler la consommation dans la console Groq ent
 
 `GET /capabilities` · `POST /reports/{id}/summary` · `POST /teams/{id}/summary` · `GET /audit/anomalies?teamId&days` ·
 `POST /audit/anomalies/explain?teamId&days` · `POST /tasks/recommendation` · `POST /tasks/recommendation/feedback` ·
-`POST /maintenance/window`.
+`POST /maintenance/window` · `POST /telemetry/analyses` · `GET /telemetry/analyses?teamId&page&size` · `GET /telemetry/analyses/{id}`.
+
+## Analyse IA des logs et métriques : corrections de fiabilité (27 nov. 2026, NON déployées)
+
+- **Verdicts** : `NO_ANOMALY` seulement si toutes les sources demandées répondent et si chaque entité a ≥ 80 % de couverture ; sinon `PARTIAL_COVERAGE` ; `INSUFFICIENT_DATA` si rien d'exploitable ; `ANOMALIES` reste affiché avec un avertissement si la qualité est partielle. Une absence de mesure n'est jamais une absence d'anomalie.
+- **Pannes de sources** : chaque requête Prometheus/Loki en échec est listée (source, requête exacte, motif).
+- **Traçabilité** (`trace_json`, V33) : requêtes exactes, pas, période analysée et de référence, seuils, version des règles, couverture par entité, valeurs mesurées et références.
+- **Immuabilité** : déclencheurs `UPDATE`/`DELETE`/`TRUNCATE` refusés (`ENABLE ALWAYS`). Le propriétaire d'une table pouvant les désactiver, exécuter après V33, en superutilisateur : `psql -v app_role=appuser -v owner_role=postgres -f backend/backend/infra/sql/telemetry_analysis_run_harden.sql` (transfert de propriété, droits SELECT/INSERT seuls, déclencheur d'événement anti-`DROP`). Limite : `DROP DATABASE` et superutilisateur restent possibles.
+- **Concurrence** : aucune transaction pendant Prometheus/Loki/Groq ; limiteur en base (1 analyse par utilisateur, 3 au total, péremption 90 s), HTTP 429 sinon.
+- **Confidentialité** : le prompt ne contient ni IP, ni nom de machine/application, ni utilisateur, ni équipe, ni secret (alias « Machine A », « Application A »).
+- **Rétrospective** (lecture seule) : `mvnw test -Dtest=TelemetryRetrospectiveLiveTest "-DargLine=-Dhelios.retro=true -Dhelios.retro.out=target/retrospective.md"`.
