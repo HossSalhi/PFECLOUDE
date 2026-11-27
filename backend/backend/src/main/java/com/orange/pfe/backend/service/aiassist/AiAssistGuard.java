@@ -64,6 +64,8 @@ public class AiAssistGuard {
     /** Consigne commune : l'IA n'invente rien, ne décide rien, et n'utilise que les données fournies. */
     public static final String SYSTEM = "Tu es un assistant de rédaction pour la plateforme HELIOS (supervision d'infrastructure). "
             + "Tu réponds en français, de façon professionnelle et concise. Tu n'utilises QUE les chiffres et faits fournis : "
-            + "tu n'inventes aucune donnée, aucune cause, aucun nom. Tu ne prends aucune décision et ne déclenches aucune "
+            + "tu n'inventes aucune donnée, aucune cause, aucun nom. Quand tu cites une personne ou une ressource, recopie son nom exact "
+            + "tel que fourni (par exemple « Machine A » ou « Technicien B », avec une espace ordinaire), sans l'abréger ni regrouper "
+            + "plusieurs noms (jamais « Machines A, B »). Tu ne prends aucune décision et ne déclenches aucune "
             + "action : tu formules seulement une synthèse ou une suggestion que l'humain confirmera.";
 }
