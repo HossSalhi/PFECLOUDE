@@ -7,7 +7,7 @@ export const OFF: AiFeatureState = { enabled: false, ready: false, message: null
 export function caps(over: Partial<AiCapabilities> = {}): AiCapabilities {
   return {
     admin: true, ledTeams: [], allowed: true,
-    reportsSummary: ON, teamSummary: ON, auditAnomalies: ON, taskAssignment: ON, maintenanceWindow: ON, ...over
+    reportsSummary: ON, teamSummary: ON, auditAnomalies: ON, taskAssignment: ON, maintenanceWindow: ON, telemetryAnalysis: ON, ...over
   };
 }
 

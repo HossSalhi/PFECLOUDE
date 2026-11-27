@@ -13,6 +13,8 @@
 
     @if (isAdmin) { <app-monitoring-links /> }
 
+    <app-ai-telemetry />
+
     <div class="sup-tabs" role="tablist">
       @for (t of tabs; track t.id) {
         <button role="tab" class="sup-tab" [class.active]="tab === t.id" [attr.aria-selected]="tab === t.id" (click)="open(t.id)">

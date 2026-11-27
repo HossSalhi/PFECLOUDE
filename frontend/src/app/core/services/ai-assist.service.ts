@@ -4,7 +4,7 @@ import { Observable, catchError, defer, map, of, shareReplay } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AiAnomalies, AiAssignment, AiAssignmentRequest, AiCapabilities, AiMaintenanceWindows, AiReportSummary, AiTeamSummary,
-  AiWindowRequest
+  AiWindowRequest, TelemetryAnalysis, TelemetryPage, TelemetryRequest
 } from '../models/ai-assist.models';
 
 /**
@@ -66,6 +66,21 @@ export class AiAssistService {
     return defer(() => this.http().post<AiMaintenanceWindows>(`${this.base}/maintenance/window`, request));
   }
 
+  /** Analyse des logs et métriques : règles déterministes + synthèse IA, enregistrée dans l'historique. */
+  analyseTelemetry(request: TelemetryRequest): Observable<TelemetryAnalysis> {
+    return defer(() => this.http().post<TelemetryAnalysis>(`${this.base}/telemetry/analyses`, request));
+  }
+
+  telemetryHistory(teamId: number | null, page: number, size: number): Observable<TelemetryPage> {
+    let p = new HttpParams().set('page', page).set('size', size);
+    if (teamId !== null) { p = p.set('teamId', teamId); }
+    return defer(() => this.http().get<TelemetryPage>(`${this.base}/telemetry/analyses`, { params: p }));
+  }
+
+  telemetryAnalysis(id: number): Observable<TelemetryAnalysis> {
+    return defer(() => this.http().get<TelemetryAnalysis>(`${this.base}/telemetry/analyses/${id}`));
+  }
+
   private anomalyParams(teamId: number | null, days: number): HttpParams {
     let p = new HttpParams().set('days', days);
     if (teamId !== null) { p = p.set('teamId', teamId); }
@@ -77,6 +92,7 @@ export class AiAssistService {
 export function aiErrorMessage(e: { status?: number } | null | undefined): string {
   if (e?.status === 403) { return 'Action non autorisée pour votre rôle ou votre équipe.'; }
   if (e?.status === 404) { return 'Élément introuvable.'; }
+  if (e?.status === 429) { return 'Une analyse est déjà en cours (ou la plateforme est occupée) : attendez quelques secondes puis réessayez.'; }
   if (e?.status === 400) { return 'Demande invalide : vérifiez les champs saisis.'; }
   return "Le serveur n'a pas pu répondre.";
 }

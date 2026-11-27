@@ -14,6 +14,7 @@ import { MonitoringLinksComponent } from '../infrastructure/monitoring-links.com
 import { CamundaPanelComponent } from './camunda-panel.component';
 import { GrafanaPanelComponent } from './grafana-panel.component';
 import { LogsViewerComponent } from './logs-viewer.component';
+import { AiTelemetryComponent } from '../ai-assist/ai-telemetry.component';
 
 export type SupTab = 'overview' | 'metrics' | 'logs' | 'camunda' | 'grafana';
 
@@ -32,7 +33,7 @@ const empty = <T>(): Section<T> => ({ loading: false, data: null, error: '' });
   standalone: true,
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './supervision.component.html',
-  imports: [NgChartsModule, DecimalPipe, DatePipe, RouterLink, MonitoringLinksComponent, CamundaPanelComponent, GrafanaPanelComponent, LogsViewerComponent]
+  imports: [NgChartsModule, DecimalPipe, DatePipe, RouterLink, MonitoringLinksComponent, CamundaPanelComponent, GrafanaPanelComponent, LogsViewerComponent, AiTelemetryComponent]
 })
 export class SupervisionComponent implements OnInit {
   private api = inject(SupervisionService);
