@@ -3,6 +3,10 @@ package com.orange.pfe.backend.repository;
 import com.orange.pfe.backend.model.audit.AuditAction;
 import com.orange.pfe.backend.model.audit.AuditResult;
 import com.orange.pfe.backend.model.enums.IncidentStatus;
+import com.orange.pfe.backend.model.maintenance.MaintenanceChangeType;
+import com.orange.pfe.backend.model.maintenance.MaintenanceHistory;
+import com.orange.pfe.backend.model.maintenance.MaintenanceStatus;
+import com.orange.pfe.backend.model.team.TaskSourceEvent;
 import com.orange.pfe.backend.model.team.TaskStatus;
 import com.orange.pfe.backend.model.team.TeamTask;
 import jakarta.persistence.EntityManager;
@@ -136,6 +140,54 @@ public class ReportDataRepository {
         return em.createQuery("select t from TeamTask t left join fetch t.team left join fetch t.assignee "
                 + "where t.status in :open", TeamTask.class)
                 .setParameter("open", TaskStatus.OPEN).setMaxResults(MAX_ROWS).getResultList();
+    }
+
+    // ── Suspensions de maintenance et routage incident → équipe ───────────────
+
+    /** Plafond des lignes lues pour les indicateurs de suspension et de routage (comme MAINTENANCE_SCAN_LIMIT). */
+    static final int ROUTING_SCAN_LIMIT = 5_000;
+
+    /**
+     * Entrées d'historique PAUSED et RESUMED de la période, triées par maintenance puis par date. Le détail JSON de PAUSED
+     * porte l'incident déclencheur ; celui de RESUMED porte l'heure de suspension.
+     */
+    @Transactional(readOnly = true)
+    public List<MaintenanceHistory> pauseResumeHistory(LocalDateTime from, LocalDateTime to) {
+        return em.createQuery("select h from MaintenanceHistory h join fetch h.maintenance m "
+                + "where h.changeType in :types and h.changedAt >= :from and h.changedAt < :to "
+                + "order by m.id, h.changedAt", MaintenanceHistory.class)
+                .setParameter("types", java.util.List.of(MaintenanceChangeType.PAUSED, MaintenanceChangeType.RESUMED))
+                .setParameter("from", from).setParameter("to", to).setMaxResults(ROUTING_SCAN_LIMIT).getResultList();
+    }
+
+    /** Maintenances suspendues à l'instant présent (état actuel). */
+    @Transactional(readOnly = true)
+    public long suspendedMaintenanceCount() {
+        return em.createQuery("select count(m) from Maintenance m where m.status = :s", Long.class)
+                .setParameter("s", MaintenanceStatus.SUSPENDED).getSingleResult();
+    }
+
+    /** Tâches « décision » du routage créées dans la période : une par incident routé pendant une maintenance. */
+    @Transactional(readOnly = true)
+    public List<TeamTask> routingDecisionTasks(LocalDateTime from, LocalDateTime to) {
+        return em.createQuery("select t from TeamTask t where t.sourceEvent = :ev and t.createdAt >= :from "
+                + "and t.createdAt < :to order by t.createdAt", TeamTask.class)
+                .setParameter("ev", TaskSourceEvent.DECISION)
+                .setParameter("from", from).setParameter("to", to).setMaxResults(ROUTING_SCAN_LIMIT).getResultList();
+    }
+
+    /** Parmi ces incidents, ceux dont le responsable a choisi de suspendre (une tâche de suivi existe). */
+    @Transactional(readOnly = true)
+    public java.util.Set<Long> incidentsWithFollowUp(java.util.Collection<Long> incidentIds) {
+        java.util.Set<Long> out = new java.util.HashSet<>();
+        List<Long> ids = new java.util.ArrayList<>(incidentIds);
+        for (int i = 0; i < ids.size(); i += 1000) {   // lots de 1 000 : limite de paramètres des SGBD
+            out.addAll(em.createQuery("select distinct t.sourceIncidentId from TeamTask t where t.sourceEvent = :ev "
+                    + "and t.sourceIncidentId in :ids", Long.class)
+                    .setParameter("ev", TaskSourceEvent.FOLLOW_UP)
+                    .setParameter("ids", ids.subList(i, Math.min(i + 1000, ids.size()))).getResultList());
+        }
+        return out;
     }
 
     // ── Outils ────────────────────────────────────────────────────────────────

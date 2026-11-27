@@ -176,9 +176,63 @@ public class ReportBuilders {
                 actualN == 0 ? 0.0 : ReportContent.round1(actualSum / actualN));
     }
 
+    /** Suspensions de la période : maintenances distinctes, cause (incident / décision manuelle), durée des reprises. */
+    private record Suspensions(long maintenances, long byIncident, long manual, double avgMinutes, List<List<Object>> rows) {}
+
+    private Suspensions suspensions(ReportPeriod p) {
+        java.util.Set<Long> all = new java.util.HashSet<>();
+        java.util.Set<Long> byIncident = new java.util.HashSet<>();
+        java.util.Set<Long> manual = new java.util.HashSet<>();
+        List<Long> minutes = new ArrayList<>();
+        List<List<Object>> rows = new ArrayList<>();
+        for (com.orange.pfe.backend.model.maintenance.MaintenanceHistory h : data.pauseResumeHistory(p.from(), p.to())) {
+            com.fasterxml.jackson.databind.JsonNode details = json(h.getDetails());
+            Maintenance m = h.getMaintenance();
+            if (h.getChangeType() == com.orange.pfe.backend.model.maintenance.MaintenanceChangeType.PAUSED) {
+                com.fasterxml.jackson.databind.JsonNode incident = details.path("new").path("incidentId");
+                boolean viaIncident = incident.isNumber();
+                all.add(m.getId());
+                (viaIncident ? byIncident : manual).add(m.getId());
+                if (rows.size() < DETAIL_LIMIT) {
+                    String reason = details.path("new").path("reason").asText("");
+                    rows.add(row(m.getId(), m.getTitle(), m.getResourceName(), STAMP.format(h.getChangedAt()),
+                            viaIncident ? "Incident #" + incident.asLong() : "Décision manuelle", reason.isEmpty() ? "—" : reason));
+                }
+            } else {
+                // la durée se lit dans la reprise elle-même : heure de reprise − heure de suspension enregistrée
+                LocalDateTime since = parseTime(details.path("old").path("suspendedAt").asText(null));
+                if (since != null) {
+                    minutes.add(Math.max(0, Duration.between(since, h.getChangedAt()).toMinutes()));
+                }
+            }
+        }
+        double avg = minutes.isEmpty() ? 0.0 : ReportContent.round1(minutes.stream().mapToLong(Long::longValue).average().orElse(0));
+        return new Suspensions(all.size(), byIncident.size(), manual.size(), avg, rows);
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private static com.fasterxml.jackson.databind.JsonNode json(String text) {
+        try {
+            return text == null || text.isBlank() ? JSON.createObjectNode() : JSON.readTree(text);
+        } catch (Exception e) {
+            return JSON.createObjectNode();
+        }
+    }
+
+    private static LocalDateTime parseTime(String iso) {
+        try {
+            return iso == null || iso.isBlank() ? null : LocalDateTime.parse(iso);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private ReportContent maintenance(ReportPeriod p, ReportPeriod prev) {
         MaintStats cur = maintStats(p);
         MaintStats old = prev == null ? null : maintStats(prev);
+        Suspensions susp = suspensions(p);
+        Suspensions oldSusp = prev == null ? null : suspensions(prev);
         ReportContent c = new ReportContent()
                 .metric("Maintenances de la période", cur.list.size(), old == null ? null : old.list.size(), null)
                 .metric("Terminées", cur.byStatus.get(MaintenanceStatus.COMPLETED),
@@ -187,7 +241,12 @@ public class ReportBuilders {
                         old == null ? null : old.byStatus.get(MaintenanceStatus.CANCELLED), null)
                 .metric("Heures de maintenance planifiées", cur.plannedHours, old == null ? null : old.plannedHours, "h")
                 .metric("Terminées dans les temps", cur.completedOnTime, old == null ? null : old.completedOnTime, null)
-                .metric("Durée réelle moyenne", cur.avgActualHours, old == null ? null : old.avgActualHours, "h");
+                .metric("Durée réelle moyenne", cur.avgActualHours, old == null ? null : old.avgActualHours, "h")
+                .metric("Maintenances suspendues", susp.maintenances, oldSusp == null ? null : oldSusp.maintenances, null)
+                .metric("Suspendues à cause d'un incident", susp.byIncident, oldSusp == null ? null : oldSusp.byIncident, null)
+                .metric("Suspendues par décision manuelle", susp.manual, oldSusp == null ? null : oldSusp.manual, null)
+                .metric("Durée moyenne de suspension", susp.avgMinutes, oldSusp == null ? null : oldSusp.avgMinutes, "min")
+                .metric("Maintenances suspendues en ce moment (état actuel)", data.suspendedMaintenanceCount(), null, null);
 
         Map<String, long[]> byResource = new LinkedHashMap<>();   // [nombre, annulées]
         Map<String, Double> hoursByResource = new LinkedHashMap<>();
@@ -217,6 +276,8 @@ public class ReportBuilders {
         }
         c.section("Détail des maintenances", List.of("N°", "Titre", "Ressource", "Début", "Fin", "Statut", "Responsable"),
                 detail);
+        c.section("Suspensions (pauses de la période)", List.of("N°", "Titre", "Ressource", "Suspendue le", "Cause", "Motif"),
+                susp.rows);
 
         List<String> statusLabels = new ArrayList<>();
         List<Long> statusValues = new ArrayList<>();
@@ -247,16 +308,25 @@ public class ReportBuilders {
 
         Number prevCreated = null;
         Number prevCompleted = null;
+        List<TeamTask> prevList = null;
         if (prev != null) {
-            prevCreated = data.tasksCreatedBetween(prev.from(), prev.to()).size();
+            prevList = data.tasksCreatedBetween(prev.from(), prev.to());
+            prevCreated = prevList.size();
             prevCompleted = data.tasksCompletedBetween(prev.from(), prev.to());
         }
+        long auto = created.stream().filter(t -> t.getSourceIncidentId() != null).count();
+        Long prevAuto = prevList == null ? null : prevList.stream().filter(t -> t.getSourceIncidentId() != null).count();
+        long pendingDecisions = open.stream()
+                .filter(t -> t.getSourceEvent() == com.orange.pfe.backend.model.team.TaskSourceEvent.DECISION).count();
         ReportContent c = new ReportContent()
                 .metric("Tâches créées", created.size(), prevCreated, null)
                 .metric("Tâches terminées dans la période", completed, prevCompleted, null)
                 .metric("Tâches ouvertes (état actuel)", open.size(), null, null)
                 .metric("Tâches en retard (état actuel)", overdueNow, null, null)
-                .metric("Taux d'achèvement des tâches créées", sum.completionRate(), null, "%");
+                .metric("Taux d'achèvement des tâches créées", sum.completionRate(), null, "%")
+                .metric("Tâches créées automatiquement (routage incident)", auto, prevAuto, null)
+                .metric("Tâches créées manuellement", created.size() - auto, prevList == null ? null : prevList.size() - prevAuto, null)
+                .metric("Tâches de décision en attente (état actuel)", pendingDecisions, null, null);
 
         Map<String, long[]> byTeam = new LinkedHashMap<>();   // [créées, terminées, ouvertes, en retard]
         for (TeamTask t : created) {
@@ -288,6 +358,32 @@ public class ReportBuilders {
         });
         c.section("Par équipe (tâches créées dans la période)",
                 List.of("Équipe", "Créées", "Terminées", "Ouvertes", "En retard"), teamRows);
+
+        // tâches automatiques du routage incident → équipe, par étape (décision, suivi, reprise)
+        Map<com.orange.pfe.backend.model.team.TaskSourceEvent, long[]> byEvent = new EnumMap<>(com.orange.pfe.backend.model.team.TaskSourceEvent.class);
+        for (com.orange.pfe.backend.model.team.TaskSourceEvent ev : com.orange.pfe.backend.model.team.TaskSourceEvent.values()) {
+            byEvent.put(ev, new long[3]);   // [créées, terminées, ouvertes]
+        }
+        for (TeamTask t : created) {
+            if (t.getSourceEvent() != null) {
+                long[] n = byEvent.get(t.getSourceEvent());
+                n[0]++;
+                if (t.getStatus() == com.orange.pfe.backend.model.team.TaskStatus.DONE) {
+                    n[1]++;
+                }
+                if (t.getStatus().isOpen()) {
+                    n[2]++;
+                }
+            }
+        }
+        List<List<Object>> eventRows = new ArrayList<>();
+        byEvent.forEach((ev, n) -> eventRows.add(row(switch (ev) {
+            case DECISION -> "Décision (continuer ou suspendre)";
+            case FOLLOW_UP -> "Suivi de l'incident";
+            case RESUME -> "Reprise de la maintenance";
+        }, n[0], n[1], n[2])));
+        c.section("Tâches automatiques du routage incident → équipe (créées dans la période)",
+                List.of("Étape", "Créées", "Terminées", "Ouvertes"), eventRows);
 
         List<List<Object>> memberRows = new ArrayList<>();
         for (MemberTaskStats m : TaskStats.byMember(created, today)) {
@@ -379,9 +475,39 @@ public class ReportBuilders {
                 sum(actions), actions.getOrDefault("COMPLETED", 0L), actions.getOrDefault("FAILED", 0L));
     }
 
+    /**
+     * Routage incident → équipe de la période. Le délai de décision part de la création de la tâche « décision », faite au
+     * même instant que l'envoi de la notification au responsable (ce n'est pas l'heure de réception du message).
+     */
+    private record Routing(long routed, long decided, double avgMinutes, double medianMinutes, long paused, long continued) {}
+
+    private Routing routing(ReportPeriod p) {
+        List<TeamTask> tasks = data.routingDecisionTasks(p.from(), p.to());
+        List<TeamTask> decided = tasks.stream().filter(t -> t.getStatus() == com.orange.pfe.backend.model.team.TaskStatus.DONE
+                && t.getCompletedAt() != null && t.getSourceIncidentId() != null).toList();
+        java.util.Set<Long> suspended = decided.isEmpty() ? java.util.Set.of()
+                : data.incidentsWithFollowUp(decided.stream().map(TeamTask::getSourceIncidentId).toList());
+        List<Long> minutes = new ArrayList<>();
+        long paused = 0;
+        for (TeamTask t : decided) {
+            minutes.add(Math.max(0, Duration.between(t.getCreatedAt(), t.getCompletedAt()).toMinutes()));
+            if (suspended.contains(t.getSourceIncidentId())) {
+                paused++;
+            }
+        }
+        minutes.sort(Comparator.naturalOrder());
+        double avg = minutes.isEmpty() ? 0.0 : ReportContent.round1(minutes.stream().mapToLong(Long::longValue).average().orElse(0));
+        double median = minutes.isEmpty() ? 0.0 : (minutes.size() % 2 == 1
+                ? minutes.get(minutes.size() / 2)
+                : (minutes.get(minutes.size() / 2 - 1) + minutes.get(minutes.size() / 2)) / 2.0);
+        return new Routing(tasks.size(), decided.size(), avg, ReportContent.round1(median), paused, decided.size() - paused);
+    }
+
     private ReportContent performance(ReportPeriod p, ReportPeriod prev) {
         Perf cur = perf(p);
         Perf old = prev == null ? null : perf(prev);
+        Routing route = routing(p);
+        Routing oldRoute = prev == null ? null : routing(prev);
         double rate = cur.created == 0 ? 0.0 : ReportContent.round1(cur.resolved * 100.0 / cur.created);
         Double oldRate = old == null ? null : (old.created == 0 ? 0.0 : ReportContent.round1(old.resolved * 100.0 / old.created));
         long finished = cur.actionsCompleted + cur.actionsFailed;
@@ -399,7 +525,12 @@ public class ReportBuilders {
                 .metric("Temps de résolution médian", cur.mttrMedian, old == null ? null : old.mttrMedian, "min")
                 .metric("Actions de remédiation terminées", cur.actionsCompleted, old == null ? null : old.actionsCompleted, null)
                 .metric("Actions de remédiation en échec", cur.actionsFailed, old == null ? null : old.actionsFailed, null)
-                .metric("Taux de réussite des actions", success, oldSuccess, "%");
+                .metric("Taux de réussite des actions", success, oldSuccess, "%")
+                .metric("Incidents routés vers une équipe pendant une maintenance", route.routed, oldRoute == null ? null : oldRoute.routed, null)
+                .metric("Décisions du responsable : suspendre la maintenance", route.paused, oldRoute == null ? null : oldRoute.paused, null)
+                .metric("Décisions du responsable : continuer la maintenance", route.continued, oldRoute == null ? null : oldRoute.continued, null)
+                .metric("Délai moyen de décision du responsable (depuis la notification)", route.avgMinutes, oldRoute == null ? null : oldRoute.avgMinutes, "min")
+                .metric("Délai médian de décision du responsable", route.medianMinutes, oldRoute == null ? null : oldRoute.medianMinutes, "min");
 
         List<List<Object>> rows = new ArrayList<>();
         List<String> labels = new ArrayList<>();
