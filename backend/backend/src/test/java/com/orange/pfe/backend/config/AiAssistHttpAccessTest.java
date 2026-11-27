@@ -56,6 +56,7 @@ class AiAssistHttpAccessTest {
     @MockitoBean private AuditAnomalyService anomalies;
     @MockitoBean private TaskAssignmentAdvisor assignment;
     @MockitoBean private MaintenanceWindowAdvisor windows;
+    @MockitoBean private com.orange.pfe.backend.service.aiassist.telemetry.TelemetryAnalysisService telemetry;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private MockHttpServletRequestBuilder as(String role, MockHttpServletRequestBuilder b) {
@@ -79,12 +80,15 @@ class AiAssistHttpAccessTest {
         assertThat(status(post("/api/ai-assist/reports/1/summary"))).isEqualTo(403);
         assertThat(status(post("/api/ai-assist/teams/1/summary"))).isEqualTo(403);
         assertThat(status(post("/api/ai-assist/maintenance/window").contentType("application/json").content("{}"))).isEqualTo(403);
+        assertThat(status(post("/api/ai-assist/telemetry/analyses").contentType("application/json").content("{}"))).isEqualTo(403);
+        assertThat(status(get("/api/ai-assist/telemetry/analyses"))).isEqualTo(403);
+        assertThat(status(get("/api/ai-assist/telemetry/analyses/1"))).isEqualTo(403);
     }
 
     @Test
     void aConnectedUserReachesTheCapabilitiesAndTheServiceDecidesTheRest() throws Exception {
         when(capabilities.capabilities(any())).thenReturn(new Capabilities(false, List.of(new com.orange.pfe.backend.dto.aiassist.AiAssistDtos.LedTeam(7L, "Réseau")), true,
-                FeatureState.off(), FeatureState.off(), FeatureState.off(), FeatureState.off(), FeatureState.off()));
+                FeatureState.off(), FeatureState.off(), FeatureState.off(), FeatureState.off(), FeatureState.off(), FeatureState.off()));
         when(anomalies.detect(any(), any(), anyInt())).thenReturn(new AnomalyResponse(7L, 7, List.of(), List.of(), Narrative.none()));
 
         assertThat(status(as("USER", get("/api/ai-assist/capabilities")))).isEqualTo(200);
@@ -94,10 +98,14 @@ class AiAssistHttpAccessTest {
     @Test
     void anAccessDeniedFromTheRuleBecomes403() throws Exception {
         when(summaries.teamSummary(any(), anyLong())).thenThrow(new AccessDeniedException("autre équipe"));
+        when(telemetry.analyse(any(), any())).thenThrow(new AccessDeniedException("autre équipe"));
+        when(telemetry.get(any(), anyLong())).thenThrow(new AccessDeniedException("autre équipe"));
         when(summaries.reportSummary(any(), anyLong())).thenThrow(new AccessDeniedException("admin seulement"));
         when(anomalies.explain(any(), any(), anyInt())).thenThrow(new AccessDeniedException("autre équipe"));
 
         assertThat(status(as("USER", post("/api/ai-assist/teams/2/summary")))).isEqualTo(403);
+        assertThat(status(as("USER", post("/api/ai-assist/telemetry/analyses").contentType("application/json").content("{\"teamId\":2}")))).isEqualTo(403);
+        assertThat(status(as("USER", get("/api/ai-assist/telemetry/analyses/9")))).isEqualTo(403);
         assertThat(status(as("USER", post("/api/ai-assist/reports/1/summary")))).isEqualTo(403);
         assertThat(status(as("USER", post("/api/ai-assist/audit/anomalies/explain?teamId=2")))).isEqualTo(403);
     }

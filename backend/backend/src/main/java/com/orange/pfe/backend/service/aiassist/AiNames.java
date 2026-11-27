@@ -15,10 +15,17 @@ public final class AiNames {
 
     private final Map<String, String> aliasByReal = new LinkedHashMap<>();
 
+    private final Map<String, Integer> counters = new LinkedHashMap<>();
+
     /** Alias stable d'une personne (créé à la première demande). */
     public String alias(String realName) {
+        return alias(realName, "Technicien");
+    }
+
+    /** Alias stable d'un nom quelconque, numéroté par catégorie : « Machine A », « Application B »… */
+    public String alias(String realName, String prefix) {
         String key = realName == null || realName.isBlank() ? "inconnu" : realName.trim();
-        return aliasByReal.computeIfAbsent(key, k -> "Technicien " + letters(aliasByReal.size()));
+        return aliasByReal.computeIfAbsent(key, k -> prefix + " " + letters(counters.merge(prefix, 1, Integer::sum) - 1));
     }
 
     /** Remplace les alias du texte généré par les vrais noms (les plus longs d'abord : « Technicien AA » avant « A »). */

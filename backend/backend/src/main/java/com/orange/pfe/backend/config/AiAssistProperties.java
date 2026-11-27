@@ -35,6 +35,7 @@ public class AiAssistProperties {
     private Flag auditAnomalies = new Flag();
     private Flag taskAssignment = new Flag();
     private Flag maintenanceWindow = new Flag();
+    private Flag telemetryAnalysis = new Flag();
 
     public boolean isFeatureEnabled(AiFeature feature) {
         if (!enabled || feature == null) {
@@ -45,6 +46,7 @@ public class AiAssistProperties {
             case AUDIT_ANOMALIES -> auditAnomalies.isEnabled();
             case TASK_ASSIGNMENT -> taskAssignment.isEnabled();
             case MAINTENANCE_WINDOW -> maintenanceWindow.isEnabled();
+            case TELEMETRY_ANALYSIS -> telemetryAnalysis.isEnabled();
         };
     }
 
@@ -94,4 +96,6 @@ public class AiAssistProperties {
     public void setTaskAssignment(Flag f) { this.taskAssignment = f; }
     public Flag getMaintenanceWindow() { return maintenanceWindow; }
     public void setMaintenanceWindow(Flag f) { this.maintenanceWindow = f; }
+    public Flag getTelemetryAnalysis() { return telemetryAnalysis; }
+    public void setTelemetryAnalysis(Flag f) { this.telemetryAnalysis = f; }
 }

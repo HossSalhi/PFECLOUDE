@@ -9,12 +9,17 @@ import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.MaintenanceWindowRespons
 import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.ReportSummaryResponse;
 import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.TaskRecommendationRequest;
 import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.TeamSummaryAiResponse;
+import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.TelemetryAnalysisRequest;
+import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.TelemetryAnalysisView;
+import com.orange.pfe.backend.dto.aiassist.AiAssistDtos.TelemetryRunSummary;
 import com.orange.pfe.backend.model.user.AppUser;
 import com.orange.pfe.backend.service.aiassist.AiCapabilitiesService;
 import com.orange.pfe.backend.service.aiassist.AiSummaryService;
 import com.orange.pfe.backend.service.aiassist.AuditAnomalyService;
 import com.orange.pfe.backend.service.aiassist.MaintenanceWindowAdvisor;
 import com.orange.pfe.backend.service.aiassist.TaskAssignmentAdvisor;
+import com.orange.pfe.backend.service.aiassist.telemetry.TelemetryAnalysisService;
+import org.springframework.data.domain.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
@@ -42,14 +47,16 @@ public class AiAssistController {
     private final AuditAnomalyService anomalies;
     private final TaskAssignmentAdvisor assignment;
     private final MaintenanceWindowAdvisor windows;
+    private final TelemetryAnalysisService telemetry;
 
     public AiAssistController(AiCapabilitiesService capabilities, AiSummaryService summaries, AuditAnomalyService anomalies,
-                              TaskAssignmentAdvisor assignment, MaintenanceWindowAdvisor windows) {
+                              TaskAssignmentAdvisor assignment, MaintenanceWindowAdvisor windows, TelemetryAnalysisService telemetry) {
         this.capabilities = capabilities;
         this.summaries = summaries;
         this.anomalies = anomalies;
         this.assignment = assignment;
         this.windows = windows;
+        this.telemetry = telemetry;
     }
 
     @Operation(summary = "Fonctions IA proposées à l'utilisateur (aucun appel IA)")
@@ -95,6 +102,25 @@ public class AiAssistController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void feedback(@AuthenticationPrincipal AppUser actor, @RequestBody AssignmentFeedback feedback) {
         assignment.feedback(actor, feedback);
+    }
+
+    @Operation(summary = "Analyse IA des logs et métriques : règles déterministes, synthèse IA, enregistrée dans l'historique")
+    @PostMapping("/telemetry/analyses")
+    public TelemetryAnalysisView analyse(@AuthenticationPrincipal AppUser actor, @RequestBody TelemetryAnalysisRequest request) {
+        return telemetry.analyse(actor, request);
+    }
+
+    @Operation(summary = "Historique des analyses (administrateurs : tout ; chef d'équipe : ses équipes)")
+    @GetMapping("/telemetry/analyses")
+    public Page<TelemetryRunSummary> analyses(@AuthenticationPrincipal AppUser actor, @RequestParam(required = false) Long teamId,
+                                              @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
+        return telemetry.history(actor, teamId, page, size);
+    }
+
+    @Operation(summary = "Relit une analyse enregistrée, à l'identique")
+    @GetMapping("/telemetry/analyses/{id}")
+    public TelemetryAnalysisView analysis(@AuthenticationPrincipal AppUser actor, @PathVariable Long id) {
+        return telemetry.get(actor, id);
     }
 
     @Operation(summary = "Fenêtres de maintenance recommandées (charge Prometheus + conflits + justification IA)")

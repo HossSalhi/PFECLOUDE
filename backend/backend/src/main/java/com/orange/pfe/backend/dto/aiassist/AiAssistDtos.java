@@ -57,7 +57,7 @@ public final class AiAssistDtos {
     /** Ce que l'utilisateur peut faire : l'interface n'affiche une fonction que si elle est activée ET permise. */
     public record Capabilities(boolean admin, List<LedTeam> ledTeams, boolean allowed,
                                FeatureState reportsSummary, FeatureState teamSummary, FeatureState auditAnomalies,
-                               FeatureState taskAssignment, FeatureState maintenanceWindow) {
+                               FeatureState taskAssignment, FeatureState maintenanceWindow, FeatureState telemetryAnalysis) {
     }
 
     /** Équipe dont l'utilisateur est le responsable actif. */
@@ -100,6 +100,34 @@ public final class AiAssistDtos {
     }
 
     public record AssignmentFeedback(Long teamId, Long userId, boolean accepted) {
+    }
+
+    // ── (e) Analyse des logs et métriques ────────────────────────────────────────────────────────────────────────
+
+    /** {@code scope} : ALL | VM | CLUSTER | APPLICATION | SERVICE (ignoré pour un chef d'équipe : sa spécialité s'applique). */
+    public record TelemetryAnalysisRequest(Long teamId, String scope, Integer minutes) {
+    }
+
+    public record FindingView(String scope, String entity, String signal, String rule, String severity, LocalDateTime start,
+                              LocalDateTime end, Double observed, Double baseline, String unit, String detail, String evidence,
+                              String queryRef) {
+    }
+
+    public record QualityView(String source, boolean available, double coverage, String note) {
+    }
+
+    /** Une analyse complète, telle qu'elle est enregistrée dans l'historique (relue à l'identique par l'écran). */
+    public record TelemetryAnalysisView(Long id, LocalDateTime requestedAt, String requestedBy, Long teamId, String teamName,
+                                        String scope, int minutes, LocalDateTime windowStart, LocalDateTime windowEnd,
+                                        String verdict, String dataQuality, int anomalyCount, int highCount, long durationMs,
+                                        List<Fact> facts, List<FindingView> findings, List<QualityView> quality,
+                                        com.orange.pfe.backend.service.aiassist.telemetry.TelemetryModels.Trace trace,
+                                        Narrative analysis) {
+    }
+
+    public record TelemetryRunSummary(Long id, LocalDateTime requestedAt, String requestedBy, Long teamId, String teamName,
+                                      String scope, int minutes, String verdict, String dataQuality, int anomalyCount,
+                                      int highCount, String narrativeStatus) {
     }
 
     // ── (d) Fenêtre de maintenance ───────────────────────────────────────────────────────────────────────────────

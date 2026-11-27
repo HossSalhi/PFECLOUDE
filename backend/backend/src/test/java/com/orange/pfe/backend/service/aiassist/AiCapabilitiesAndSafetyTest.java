@@ -30,6 +30,7 @@ class AiCapabilitiesAndSafetyTest {
         p.getAuditAnomalies().setEnabled(all);
         p.getTaskAssignment().setEnabled(all);
         p.getMaintenanceWindow().setEnabled(all);
+        p.getTelemetryAnalysis().setEnabled(all);
         p.setApiKey(key);
         return p;
     }
@@ -47,7 +48,7 @@ class AiCapabilitiesAndSafetyTest {
         Capabilities c = capabilities(admin, new AiAssistProperties(), List.of());
 
         assertThat(c.admin()).isTrue();
-        for (var f : List.of(c.reportsSummary(), c.teamSummary(), c.auditAnomalies(), c.taskAssignment(), c.maintenanceWindow())) {
+        for (var f : List.of(c.reportsSummary(), c.teamSummary(), c.auditAnomalies(), c.taskAssignment(), c.maintenanceWindow(), c.telemetryAnalysis())) {
             assertThat(f.enabled()).isFalse();
             assertThat(f.ready()).isFalse();
         }
@@ -131,7 +132,8 @@ class AiCapabilitiesAndSafetyTest {
     @Test
     void noAiCallCanBeTriggeredAutomatically() {
         // aucune méthode des services IA n'est planifiée ni branchée sur un événement ou un démarrage
-        List<Class<?>> classes = List.of(AiCompletionClient.class, AiSummaryService.class, AuditAnomalyService.class,
+        List<Class<?>> classes = List.of(com.orange.pfe.backend.service.aiassist.telemetry.TelemetryAnalysisService.class,
+                com.orange.pfe.backend.service.aiassist.telemetry.TelemetryDetector.class, AiCompletionClient.class, AiSummaryService.class, AuditAnomalyService.class,
                 TaskAssignmentAdvisor.class, MaintenanceWindowAdvisor.class, AiCapabilitiesService.class, AiAssistGuard.class);
         for (Class<?> c : classes) {
             for (Method m : c.getDeclaredMethods()) {

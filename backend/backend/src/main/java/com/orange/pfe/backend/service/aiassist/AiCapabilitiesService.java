@@ -37,7 +37,8 @@ public class AiCapabilitiesService {
                 state(allowed, AiFeature.REPORTS_SUMMARY),             // résumé de l'activité d'une équipe : admin ou chef actif
                 state(allowed, AiFeature.AUDIT_ANOMALIES),
                 state(allowed, AiFeature.TASK_ASSIGNMENT),
-                state(allowed, AiFeature.MAINTENANCE_WINDOW));
+                state(allowed, AiFeature.MAINTENANCE_WINDOW),
+                state(allowed, AiFeature.TELEMETRY_ANALYSIS));
     }
 
     private FeatureState state(boolean permitted, AiFeature feature) {
