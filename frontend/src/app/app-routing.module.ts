@@ -42,6 +42,7 @@ const routes: Routes = [
   { path: 'incidents',      loadComponent: () => import('./features/incidents/incidents.component').then(m => m.IncidentsComponent),     canActivate: [AuthGuard] },
   { path: 'incidents/:id',  loadComponent: () => import('./features/incidents/incident-detail/incident-detail.component').then(m => m.IncidentDetailComponent), canActivate: [AuthGuard] },
   { path: 'applications',   loadComponent: () => import('./features/applications/applications.component').then(m => m.ApplicationsComponent),  canActivate: [AuthGuard] },
+  { path: 'supervision', loadComponent: () => import('./features/supervision/supervision.component').then(m => m.SupervisionComponent), canActivate: [AuthGuard] },
   { path: 'infrastructure', loadComponent: () => import('./features/infrastructure/infrastructure.component').then(m => m.InfrastructureComponent), canActivate: [AuthGuard] },
 
   // ADMIN + SUPER_ADMIN only

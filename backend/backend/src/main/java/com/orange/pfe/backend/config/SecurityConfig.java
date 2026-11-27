@@ -132,6 +132,9 @@ public class SecurityConfig {
                 // rester AVANT la règle « /api/infrastructure/** » ouverte au rôle USER (la première règle qui correspond gagne).
                 auth.requestMatchers(HttpMethod.GET, "/api/infrastructure/monitoring-links").hasAnyRole("ADMIN", "SUPER_ADMIN");
 
+                // Supervision (métriques, logs, rapprochement avec les incidents) : lecture seule, tout utilisateur connecté.
+                auth.requestMatchers(HttpMethod.GET, "/api/supervision/**").hasAnyRole("USER", "ADMIN", "SUPER_ADMIN");
+
                 // ── USER : lecture seule ─────────────────────────────────────
                 auth.requestMatchers(HttpMethod.GET,
                         "/api/incidents",

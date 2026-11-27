@@ -1,0 +1,260 @@
+<div class="org-scope">
+  <div class="org-page">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="fas fa-binoculars"></i> Supervision</h1>
+        <p class="page-subtitle">Machines, métriques, logs, Camunda et dashboards — consultation en lecture seule.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn-secondary" (click)="refresh()"><i class="fas fa-rotate-right"></i> Actualiser</button>
+      </div>
+    </div>
+
+    @if (isAdmin) { <app-monitoring-links /> }
+
+    <div class="sup-tabs" role="tablist">
+      @for (t of tabs; track t.id) {
+        <button role="tab" class="sup-tab" [class.active]="tab === t.id" [attr.aria-selected]="tab === t.id" (click)="open(t.id)">
+          <i class="fas" [class]="t.icon"></i> {{ t.label }}
+        </button>
+      }
+    </div>
+
+    <!-- ═════════ Vue d'ensemble ═════════ -->
+    @if (tab === 'overview') {
+      <h2 class="sup-h">Machines</h2>
+      @if (hosts.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (hosts.error) { <div class="alert-warning" role="alert">{{ hosts.error }}</div> }
+      @if (hosts.data && !hosts.data.available) { <div class="alert-warning" role="alert">Prometheus indisponible : {{ hosts.data.error }}</div> }
+      @if (hosts.data?.available) {
+        <div class="sup-grid">
+          @for (h of hosts.data!.hosts; track h.instance) {
+            <div class="sup-card" [class.is-down]="!h.up">
+              <div class="sup-card-head"><strong>{{ h.name }}</strong> <span class="badge" [class.st-completed]="h.up" [class.st-cancelled]="!h.up">{{ h.up ? 'En ligne' : 'Hors ligne' }}</span></div>
+              @for (g of [{ l: 'CPU', v: h.cpuPercent }, { l: 'Mémoire', v: h.memoryPercent }, { l: 'Disque', v: h.diskPercent }]; track g.l) {
+                <div class="sup-gauge" [attr.data-level]="level(g.v)">
+                  <span class="sup-gauge-label">{{ g.l }}</span>
+                  <span class="sup-gauge-bar"><span [style.width.%]="g.v ?? 0"></span></span>
+                  <span class="sup-gauge-value">{{ g.v == null ? '—' : (g.v | number:'1.0-0') + ' %' }}</span>
+                </div>
+              }
+            </div>
+          }
+        </div>
+        <h2 class="sup-h">Cibles surveillées par Prometheus</h2>
+        <div class="sup-targets">
+          @for (t of hosts.data!.targets; track t.job) {
+            <span class="sup-chip" [class.is-bad]="t.up < t.total">{{ t.job }} <strong>{{ t.up }}/{{ t.total }}</strong></span>
+          }
+        </div>
+      }
+
+      <h2 class="sup-h">Camunda</h2>
+      @if (camunda.data?.available) {
+        <div class="sup-tiles">
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.healthy ? 'Sain' : 'À vérifier' }}</div><div>Moteur {{ camunda.data!.version }}</div></div>
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.active | number }}</div><div>Instances actives</div></div>
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.completed | number }}</div><div>Terminées</div></div>
+          <div class="sup-tile" [class.is-bad]="camunda.data!.incidents > 0"><div class="sup-tile-v">{{ camunda.data!.incidents | number }}</div><div>Incidents Camunda</div></div>
+        </div>
+      } @else if (camunda.data) {
+        <div class="alert-warning" role="alert">Camunda indisponible : {{ camunda.data.error }}</div>
+      }
+
+      <h2 class="sup-h">Erreurs de logs et CPU face aux incidents HELIOS ({{ periodLabel(logMinutes) }})</h2>
+      <div class="sup-periods">
+        @for (p of logPeriods; track p) { <button class="sup-period" [class.active]="logMinutes === p" (click)="setLogMinutes(p)">{{ periodLabel(p) }}</button> }
+      </div>
+      @if (correlation.loading) { <p class="sup-muted">Chargement des logs (quelques secondes)…</p> }
+      @if (correlation.data && !correlation.data.available) { <div class="alert-warning" role="alert">Données indisponibles : {{ correlation.data.error }}</div> }
+      @if (correlation.data?.available && correlationChart) {
+        <div class="sup-chart"><canvas baseChart [data]="correlationChart" [options]="correlationOptions" type="line"></canvas></div>
+        @if (correlation.data!.incidents.length) {
+          <table class="org-table">
+            <thead><tr><th>Incident</th><th>Type</th><th>Ressource</th><th>Gravité</th><th>Statut</th><th>Détecté à</th><th>Logs d'erreur autour (±5 min)</th></tr></thead>
+            <tbody>
+              @for (i of correlation.data!.incidents; track i.id) {
+                <tr><td><a [routerLink]="['/incidents', i.id]">#{{ i.id }}</a></td><td>{{ i.type }}</td><td>{{ i.resource }}</td><td>{{ i.severity }}</td><td>{{ i.status }}</td>
+                  <td>{{ i.createdAt | date:'HH:mm:ss' }}</td><td>{{ i.errorLogsAround | number }}</td></tr>
+              }
+            </tbody>
+          </table>
+        } @else { <p class="sup-muted">Aucun incident HELIOS sur cette période.</p> }
+      }
+    }
+
+    <!-- ═════════ Métriques ═════════ -->
+    @if (tab === 'metrics') {
+      <div class="sup-periods">
+        @for (m of metrics; track m.id) { <button class="sup-period" [class.active]="metric === m.id" (click)="setMetric(m.id)">{{ m.label }}</button> }
+        <span class="sup-sep"></span>
+        @for (p of metricPeriods; track p) { <button class="sup-period" [class.active]="metricMinutes === p" (click)="setMetricMinutes(p)">{{ periodLabel(p) }}</button> }
+      </div>
+      @if (series.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (series.error) { <div class="alert-warning" role="alert">{{ series.error }}</div> }
+      @if (series.data && !series.data.available) { <div class="alert-warning" role="alert">Prometheus indisponible : {{ series.data.error }}</div> }
+      @if (series.data?.available && metricChart) {
+        <div class="sup-chart tall"><canvas baseChart [data]="metricChart" [options]="lineOptions" type="line"></canvas></div>
+        <p class="sup-muted">Pourcentage d'utilisation par machine, un point toutes les {{ series.data!.stepSeconds }} s.</p>
+      }
+    }
+
+    <!-- ═════════ Logs ═════════ -->
+    @if (tab === 'logs') {
+      <div class="sup-periods">
+        @for (p of logPeriods; track p) { <button class="sup-period" [class.active]="logMinutes === p" (click)="setLogMinutes(p)">{{ periodLabel(p) }}</button> }
+        <span class="sup-muted">Au-delà de 3 h, Loki serait trop lent pour une consultation.</span>
+      </div>
+      @if (logs.loading) { <p class="sup-muted">Chargement des logs (quelques secondes)…</p> }
+      @if (logs.error) { <div class="alert-warning" role="alert">{{ logs.error }}</div> }
+      @if (logs.data && !logs.data.available) { <div class="alert-warning" role="alert">Loki indisponible : {{ logs.data.error }}</div> }
+      @if (logs.data?.available) {
+        <div class="sup-tiles">
+          <div class="sup-tile"><div class="sup-tile-v">{{ logs.data!.total | number }}</div><div>Lignes de logs</div></div>
+          <div class="sup-tile is-bad"><div class="sup-tile-v">{{ logs.data!.errors | number }}</div><div>Erreurs</div></div>
+          <div class="sup-tile is-warn"><div class="sup-tile-v">{{ logs.data!.warnings | number }}</div><div>Avertissements</div></div>
+        </div>
+
+        <h2 class="sup-h">Messages d'erreur les plus fréquents et leur signification</h2>
+        @if (topErrors.data?.available && topErrors.data!.patterns.length) {
+          <div class="sup-errors">
+            @for (p of topErrors.data!.patterns; track p.pattern) {
+              <div class="sup-error">
+                <div class="sup-error-head"><span class="badge st-planned">{{ p.category }}</span> <strong>{{ p.label }}</strong>
+                  <span class="sup-muted">× {{ p.count | number }} — {{ p.host }}</span></div>
+                <div>{{ p.meaning }}</div>
+                @if (p.advice) { <div class="sup-advice"><i class="fas fa-lightbulb"></i> {{ p.advice }}</div> }
+                <code class="sup-code">{{ p.example }}</code>
+              </div>
+            }
+          </div>
+        } @else if (topErrors.data?.available) { <p class="sup-muted">Aucune erreur sur la période.</p> }
+
+        <h2 class="sup-h">Par machine</h2>
+        <table class="org-table">
+          <thead><tr><th>Machine</th><th>Lignes</th><th>Erreurs</th><th>Avertissements</th><th>Taux d'erreur</th></tr></thead>
+          <tbody>
+            @for (g of logs.data!.byHost; track g.key) {
+              <tr><td>{{ g.key }}</td><td>{{ g.total | number }}</td><td>{{ g.errors | number }}</td><td>{{ g.warnings | number }}</td><td>{{ errorRate(g) | number:'1.1-1' }} %</td></tr>
+            }
+          </tbody>
+        </table>
+        <h2 class="sup-h">Par application (conteneurs)</h2>
+        <table class="org-table">
+          <thead><tr><th>Application</th><th>Lignes</th><th>Erreurs</th><th>Avertissements</th><th>Taux d'erreur</th></tr></thead>
+          <tbody>
+            @for (g of logs.data!.byApplication; track g.key) {
+              <tr><td>{{ g.key }}</td><td>{{ g.total | number }}</td><td>{{ g.errors | number }}</td><td>{{ g.warnings | number }}</td><td>{{ errorRate(g) | number:'1.1-1' }} %</td></tr>
+            }
+          </tbody>
+        </table>
+
+        <details class="sup-details" (toggle)="loadMeanings()">
+          <summary>Catalogue des significations de messages</summary>
+          @if (meanings.data) {
+            <table class="org-table">
+              <thead><tr><th>Catégorie</th><th>Signification</th><th>Que faire</th></tr></thead>
+              <tbody>
+                @for (m of meanings.data; track m.label) { <tr><td><strong>{{ m.label }}</strong><div class="sup-muted">{{ m.category }}</div></td><td>{{ m.meaning }}</td><td>{{ m.advice }}</td></tr> }
+              </tbody>
+            </table>
+          }
+        </details>
+      }
+    }
+
+    <!-- ═════════ Camunda ═════════ -->
+    @if (tab === 'camunda') {
+      @if (camunda.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (camunda.error) { <div class="alert-warning" role="alert">{{ camunda.error }}</div> }
+      @if (camunda.data && !camunda.data.available) { <div class="alert-warning" role="alert">Camunda indisponible : {{ camunda.data.error }}</div> }
+      @if (camunda.data?.available) {
+        <div class="sup-tiles">
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.healthy ? 'Sain' : 'À vérifier' }}</div><div>Moteur {{ camunda.data!.version }} ({{ camunda.data!.clusterSize }} nœud)</div></div>
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.active | number }}</div><div>Actives</div></div>
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.completed | number }}</div><div>Terminées</div></div>
+          <div class="sup-tile"><div class="sup-tile-v">{{ camunda.data!.terminated | number }}</div><div>Annulées</div></div>
+          <div class="sup-tile" [class.is-bad]="camunda.data!.incidents > 0"><div class="sup-tile-v">{{ camunda.data!.incidents | number }}</div><div>Incidents</div></div>
+        </div>
+
+        <h2 class="sup-h">Processus déployés</h2>
+        <table class="org-table">
+          <thead><tr><th>Processus</th><th>Version</th><th></th></tr></thead>
+          <tbody>
+            @for (d of camunda.data!.definitions; track d.key) {
+              <tr><td>{{ d.name }} <span class="sup-muted">{{ d.id }}</span></td><td>{{ d.version }}</td>
+                <td><button class="btn-secondary" (click)="showSteps(d.key)">{{ stepsFor === d.key ? 'Masquer les étapes' : 'Voir les étapes' }}</button></td></tr>
+              @if (stepsFor === d.key) {
+                <tr><td colspan="3">
+                  @if (steps.loading) { Chargement… }
+                  @if (steps.data && !steps.data.available) { <span class="sup-muted">{{ steps.data.error }}</span> }
+                  @if (steps.data?.available) {
+                    <ol class="sup-steps">
+                      @for (s of steps.data!.steps; track s.id) { <li><span class="badge st-planned">{{ s.kind }}</span> {{ s.name }}</li> }
+                    </ol>
+                  }
+                </td></tr>
+              }
+            }
+          </tbody>
+        </table>
+      }
+
+      <h2 class="sup-h">Instances récentes</h2>
+      <div class="sup-periods">
+        @for (s of instanceStates; track s) { <button class="sup-period" [class.active]="instanceState === s" (click)="setInstanceState(s)">{{ s || 'Toutes' }}</button> }
+      </div>
+      @if (instances.data?.available) {
+        <table class="org-table">
+          <thead><tr><th>Processus</th><th>État</th><th>Démarrée</th><th>Durée</th><th>Incident</th></tr></thead>
+          <tbody>
+            @for (i of instances.data!.items; track i.key) {
+              <tr><td>{{ i.definitionName }} <span class="sup-muted">v{{ i.version }} · {{ i.key }}</span></td><td>{{ i.state }}</td>
+                <td>{{ i.startedAt | date:'dd/MM HH:mm:ss' }}</td><td>{{ duration(i.durationMs) }}</td><td>{{ i.hasIncident ? 'Oui' : '—' }}</td></tr>
+            }
+          </tbody>
+        </table>
+        <p class="sup-muted">{{ instances.data!.total | number }} instances au total pour ce filtre.</p>
+      }
+
+      <h2 class="sup-h">Incidents Camunda actifs</h2>
+      @if (camundaIncidents.data?.available) {
+        @if (camundaIncidents.data!.items.length) {
+          <table class="org-table">
+            <thead><tr><th>Type</th><th>Étape</th><th>Message</th><th>Depuis</th></tr></thead>
+            <tbody>
+              @for (i of camundaIncidents.data!.items; track i.key) {
+                <tr><td>{{ i.errorType }}</td><td>{{ i.elementId }}</td><td>{{ i.errorMessage }}</td><td>{{ i.createdAt | date:'dd/MM/yyyy HH:mm' }}</td></tr>
+              }
+            </tbody>
+          </table>
+          <p class="sup-muted">{{ camundaIncidents.data!.total | number }} incidents actifs au total.</p>
+        } @else { <p class="sup-muted">Aucun incident actif.</p> }
+      }
+    }
+
+    <!-- ═════════ Grafana ═════════ -->
+    @if (tab === 'grafana') {
+      @if (grafana.loading) { <p class="sup-muted">Chargement…</p> }
+      @if (grafana.data) {
+        @if (grafana.data.embedEnabled && grafana.data.dashboards.length) {
+          <div class="sup-periods">
+            @for (d of grafana.data.dashboards; track d.uid) {
+              <button class="sup-period" [class.active]="selectedDashboard?.uid === d.uid" (click)="chooseDashboard(d)">{{ d.title }}</button>
+            }
+          </div>
+          @if (dashboardUrl) {
+            <iframe class="sup-frame" [src]="dashboardUrl" title="Dashboard Grafana" loading="lazy" referrerpolicy="no-referrer"></iframe>
+          }
+        } @else {
+          <div class="alert-warning" role="status">
+            Les dashboards Grafana ne sont pas encore intégrés dans HELIOS : Grafana doit d'abord autoriser l'affichage dans une
+            autre page (réglage à faire par un administrateur sur la VM de supervision). En attendant, utilisez les onglets
+            Métriques et Logs, qui montrent les mêmes données directement dans HELIOS.
+          </div>
+        }
+      }
+    }
+  </div>
+</div>
