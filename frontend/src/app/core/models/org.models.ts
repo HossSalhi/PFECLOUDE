@@ -215,6 +215,8 @@ export interface TeamTask {
   /** Renseignés pour une tâche créée automatiquement par le routage incident → équipe. */
   sourceIncidentId?: number | null;
   sourceEvent?: TaskSourceEvent | null;
+  /** Chef de l'équipe de la tâche : seul à pouvoir changer son statut (absent = repli sur le droit de gestion). */
+  teamLeadUsername?: string | null;
   id: number;
   title: string;
   description: string | null;

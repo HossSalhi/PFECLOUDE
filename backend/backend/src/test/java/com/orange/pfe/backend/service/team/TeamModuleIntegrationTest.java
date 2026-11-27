@@ -211,19 +211,23 @@ class TeamModuleIntegrationTest {
     }
 
     @Test
-    void theAssigneeMovesItsOwnTaskForwardButCannotCancelNorTouchOthers() {
+    void theAssigneeCannotChangeStatusAndOnlyTheTeamLeadCan() {
         TeamResponse team = newTeam("Statuts", lead.getId());
         teams.addMember(admin, team.id(), member.getId());
         TaskResponse task = newTask(team, member, "Corriger");
 
-        assertThat(tasks.changeStatus(member, task.id(), TaskStatus.IN_PROGRESS).status()).isEqualTo(TaskStatus.IN_PROGRESS);
-        TaskResponse done = tasks.changeStatus(member, task.id(), TaskStatus.DONE);
+        // la personne assignée ne choisit pas le statut de sa propre tâche
+        assertThatThrownBy(() -> tasks.changeStatus(member, task.id(), TaskStatus.IN_PROGRESS))
+                .isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> tasks.changeStatus(member, task.id(), TaskStatus.DONE))
+                .isInstanceOf(AccessDeniedException.class);
+
+        // le chef de l'équipe, lui, le fait
+        assertThat(tasks.changeStatus(lead, task.id(), TaskStatus.IN_PROGRESS).status()).isEqualTo(TaskStatus.IN_PROGRESS);
+        TaskResponse done = tasks.changeStatus(lead, task.id(), TaskStatus.DONE);
         assertThat(done.status()).isEqualTo(TaskStatus.DONE);
         assertThat(done.completedAt()).isNotNull();
 
-        TaskResponse other = newTask(team, lead, "Autre tâche");
-        assertThatThrownBy(() -> tasks.changeStatus(member, other.id(), TaskStatus.IN_PROGRESS))
-                .isInstanceOf(AccessDeniedException.class);
         TaskResponse mine = newTask(team, member, "Annulable");
         assertThatThrownBy(() -> tasks.changeStatus(member, mine.id(), TaskStatus.CANCELLED))
                 .isInstanceOf(AccessDeniedException.class);
@@ -232,19 +236,19 @@ class TeamModuleIntegrationTest {
     }
 
     @Test
-    void anAdminCanReopenAClosedTaskAndInvalidTransitionsAreRefused() {
+    void onlyTheTeamLeadCanReopenAClosedTaskAndInvalidTransitionsAreRefused() {
         TeamResponse team = newTeam("Réouverture", lead.getId());
         TaskResponse task = newTask(team, lead, "Terminer");
-        tasks.changeStatus(admin, task.id(), TaskStatus.DONE);
+        tasks.changeStatus(lead, task.id(), TaskStatus.DONE);
 
-        assertThatThrownBy(() -> tasks.changeStatus(lead, task.id(), TaskStatus.IN_PROGRESS))
-                .isInstanceOf(AccessDeniedException.class);
-        assertThatThrownBy(() -> tasks.changeStatus(admin, task.id(), TaskStatus.TODO))
+        assertThatThrownBy(() -> tasks.changeStatus(admin, task.id(), TaskStatus.IN_PROGRESS))
+                .isInstanceOf(AccessDeniedException.class);          // l'administrateur n'a plus ce droit
+        assertThatThrownBy(() -> tasks.changeStatus(lead, task.id(), TaskStatus.TODO))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("Transition interdite");
-        assertThatThrownBy(() -> tasks.changeStatus(admin, task.id(), TaskStatus.DONE))
+        assertThatThrownBy(() -> tasks.changeStatus(lead, task.id(), TaskStatus.DONE))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        TaskResponse reopened = tasks.changeStatus(admin, task.id(), TaskStatus.IN_PROGRESS);
+        TaskResponse reopened = tasks.changeStatus(lead, task.id(), TaskStatus.IN_PROGRESS);
         assertThat(reopened.status()).isEqualTo(TaskStatus.IN_PROGRESS);
         assertThat(reopened.completedAt()).isNull();
         assertThat(actionsOn("TeamTask", task.id())).contains(AuditAction.CREATE, AuditAction.STATUS_CHANGE);
@@ -254,7 +258,7 @@ class TeamModuleIntegrationTest {
     void aClosedTaskCannotBeEditedOrReassigned() {
         TeamResponse team = newTeam("Figée", lead.getId());
         TaskResponse task = newTask(team, lead, "Figer");
-        tasks.changeStatus(admin, task.id(), TaskStatus.CANCELLED);
+        tasks.changeStatus(lead, task.id(), TaskStatus.CANCELLED);
 
         assertThatThrownBy(() -> tasks.assign(admin, task.id(), null)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> tasks.update(admin, task.id(),
@@ -291,7 +295,7 @@ class TeamModuleIntegrationTest {
         teams.addMember(admin, team.id(), member.getId());
         TaskResponse a = newTask(team, member, "Alpha-" + tag);
         TaskResponse b = newTask(team, lead, "Bravo-" + tag);
-        tasks.changeStatus(admin, b.id(), TaskStatus.IN_PROGRESS);
+        tasks.changeStatus(lead, b.id(), TaskStatus.IN_PROGRESS);
 
         assertThat(tasks.search(admin, new TeamTaskService.Query(team.id(), null, TaskStatus.IN_PROGRESS, null, false, false, null), 0, 50)
                 .getContent()).extracting(TaskResponse::id).containsExactly(b.id());
@@ -311,9 +315,9 @@ class TeamModuleIntegrationTest {
         TaskResponse running = newTask(team, member, "En cours");
         TaskResponse todo = newTask(team, lead, "À faire");
         TaskResponse cancelled = newTask(team, lead, "Annulée");
-        tasks.changeStatus(admin, done.id(), TaskStatus.DONE);
-        tasks.changeStatus(admin, running.id(), TaskStatus.IN_PROGRESS);
-        tasks.changeStatus(admin, cancelled.id(), TaskStatus.CANCELLED);
+        tasks.changeStatus(lead, done.id(), TaskStatus.DONE);
+        tasks.changeStatus(lead, running.id(), TaskStatus.IN_PROGRESS);
+        tasks.changeStatus(lead, cancelled.id(), TaskStatus.CANCELLED);
 
         TeamTask lateEntity = taskRepository.findById(todo.id()).orElseThrow();
         lateEntity.setDueDate(LocalDate.now().minusDays(2));

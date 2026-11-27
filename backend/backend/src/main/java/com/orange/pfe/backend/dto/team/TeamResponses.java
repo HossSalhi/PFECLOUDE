@@ -61,7 +61,9 @@ public final class TeamResponses {
             LocalDateTime createdAt,
             LocalDateTime updatedAt,
             Long sourceIncidentId,
-            TaskSourceEvent sourceEvent
+            TaskSourceEvent sourceEvent,
+            /** Nom d'utilisateur du chef de l'équipe de la tâche (seul à pouvoir changer son statut) ; null si pas de chef. */
+            String teamLeadUsername
     ) {}
 
     /** Avancement : compte par statut, retards et taux d'achèvement (% de tâches terminées hors annulées). */

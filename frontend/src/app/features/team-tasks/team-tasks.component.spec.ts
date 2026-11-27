@@ -78,10 +78,10 @@ describe('TeamTasksComponent', () => {
     expect(component.statusChoices(task({ status: 'DONE' }))).toEqual(['IN_PROGRESS']);
   });
 
-  it("le responsable d'une tâche peut la faire avancer mais pas l'annuler", () => {
+  it("la personne assignée n'a plus de choix de statut : seul le chef d'équipe décide", () => {
     create('TASKS_VIEW', 'TASKS_UPDATE_OWN_STATUS');
-    expect(component.statusChoices(task({ status: 'TODO' }))).toEqual(['IN_PROGRESS', 'ON_HOLD', 'DONE']);
-    expect(component.statusChoices(task({ status: 'DONE' }))).toEqual([]);          // pas de réouverture
+    expect(component.statusChoices(task({ status: 'TODO' }))).toEqual([]);
+    expect(component.statusChoices(task({ status: 'DONE' }))).toEqual([]);
   });
 
   it("un membre n'a aucun choix de statut sur la tâche d'un autre", () => {

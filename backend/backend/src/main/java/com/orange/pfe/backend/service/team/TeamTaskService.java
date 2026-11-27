@@ -191,14 +191,17 @@ public class TeamTaskService {
     public TaskResponse changeStatus(AppUser actor, Long id, TaskStatus newStatus) {
         access.requireUser(actor);
         TeamTask task = getOrThrow(id);
-        boolean fullRights = access.has(actor, OrgPermission.TASKS_UPDATE);
-        if (!fullRights) {
-            access.require(actor, OrgPermission.TASKS_UPDATE_OWN_STATUS);
-            boolean own = task.getAssignee() != null && task.getAssignee().getId().equals(actor.getId());
-            if (!own) {
-                recordDenied(actor, task, "Seul le responsable de la tâche peut modifier son statut");
-                throw new AccessDeniedException("Seul le responsable de la tâche peut modifier son statut");
+        // Règle : SEUL le chef de l'équipe de la tâche choisit son statut (ni la personne assignée, ni un administrateur).
+        // Repli pour ne jamais bloquer une tâche : sans équipe, ou si l'équipe n'a pas de chef, le droit TASKS_UPDATE s'applique.
+        Team owner = task.getTeam();
+        boolean hasLead = owner != null && owner.getLead() != null;
+        if (hasLead) {
+            if (!owner.getLead().getId().equals(actor.getId())) {
+                recordDenied(actor, task, "Seul le chef de l'équipe peut modifier le statut d'une tâche");
+                throw new AccessDeniedException("Seul le chef de l'équipe « " + owner.getName() + " » peut modifier le statut d'une tâche");
             }
+        } else {
+            access.require(actor, OrgPermission.TASKS_UPDATE);
         }
 
         TaskStatus old = task.getStatus();
@@ -208,11 +211,6 @@ public class TeamTaskService {
         if (!transitionAllowed(old, newStatus)) {
             throw new IllegalStateException("Transition interdite : " + old + " → " + newStatus);
         }
-        if (!fullRights && (newStatus == TaskStatus.CANCELLED || old.isClosed())) {
-            recordDenied(actor, task, "Annulation ou réouverture réservée aux administrateurs");
-            throw new AccessDeniedException("Seul un administrateur peut annuler ou rouvrir une tâche");
-        }
-
         task.setStatus(newStatus);
         task.setCompletedAt(newStatus == TaskStatus.DONE ? LocalDateTime.now() : null);
         task = taskRepository.save(task);
@@ -332,7 +330,8 @@ public class TeamTaskService {
         return new TaskResponse(t.getId(), t.getTitle(), t.getDescription(), team, creator,
                 UserRef.of(t.getAssignee()), t.getPriority(), t.getStatus(), t.getDueDate(),
                 t.isOverdue(LocalDate.now()), t.getCompletedAt(), t.getCreatedAt(), t.getUpdatedAt(),
-                t.getSourceIncidentId(), t.getSourceEvent());
+                t.getSourceIncidentId(), t.getSourceEvent(),
+                t.getTeam() == null || t.getTeam().getLead() == null ? null : t.getTeam().getLead().getUsername());
     }
 
     private static Map<String, Object> values(TeamTask t) {

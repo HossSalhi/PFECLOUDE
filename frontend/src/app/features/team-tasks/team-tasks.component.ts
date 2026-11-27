@@ -133,13 +133,15 @@ export class TeamTasksComponent implements OnInit {
 
   isOpen(t: TeamTask): boolean { return t.status !== 'DONE' && t.status !== 'CANCELLED'; }
 
-  /** Statuts proposés pour cette tâche (même règle que le Backend : un membre simple ne touche qu'à ses tâches). */
+  /**
+   * Statuts proposés pour cette tâche (même règle que le Backend) : SEUL le chef de l'équipe de la tâche choisit son
+   * statut. Repli : sans chef d'équipe connu, le droit de gestion des tâches s'applique.
+   */
   statusChoices(t: TeamTask): TaskStatus[] {
-    if (this.canUpdate) { return allowedTransitions(t.status, true); }
-    if (this.canOwnStatus && t.assignee && t.assignee.username === this.perms.currentUsername()) {
-      return allowedTransitions(t.status, false);
+    if (t.teamLeadUsername) {
+      return t.teamLeadUsername === this.perms.currentUsername() ? allowedTransitions(t.status, true) : [];
     }
-    return [];
+    return this.canUpdate ? allowedTransitions(t.status, true) : [];
   }
 
   // ── Changement de statut ──────────────────────────────────────────────────
