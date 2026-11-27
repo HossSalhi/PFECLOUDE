@@ -3,7 +3,9 @@ package com.orange.pfe.backend.service.org;
 import com.orange.pfe.backend.model.audit.AuditAction;
 import com.orange.pfe.backend.model.audit.AuditModule;
 import com.orange.pfe.backend.model.audit.AuditResult;
+import com.orange.pfe.backend.model.team.Team;
 import com.orange.pfe.backend.model.user.AppUser;
+import com.orange.pfe.backend.model.user.UserRole;
 import com.orange.pfe.backend.service.audit.AuditEvent;
 import com.orange.pfe.backend.service.audit.AuditTrailService;
 import org.slf4j.Logger;
@@ -60,6 +62,49 @@ public class OrgAccessService {
                 .map(Enum::name)
                 .sorted(Comparator.naturalOrder())
                 .toList();
+    }
+
+    // ── Assistance IA (lecture / suggestion seulement) ─────────────────────────────────────────────────────────────
+
+    /** Administrateur ou super-administrateur : toutes les équipes et toutes les ressources. */
+    public boolean isAdminRole(AppUser actor) {
+        return actor != null && (actor.getRole() == UserRole.SUPER_ADMIN || actor.getRole() == UserRole.ADMIN);
+    }
+
+    /**
+     * Droit d'utiliser l'assistance IA pour UNE équipe : administrateur, ou responsable ACTIF de cette équipe précise
+     * (même notion que {@code MaintenanceService.pauseAsTeamLead}). Un responsable de l'équipe A n'a jamais accès à
+     * l'équipe B ; un technicien simple n'a aucun accès. La matrice {@link OrgPermissionPolicy} n'est pas modifiée.
+     */
+    public boolean canUseAiAssistFor(AppUser actor, Team team) {
+        if (actor == null) {
+            return false;
+        }
+        if (isAdminRole(actor)) {
+            return true;
+        }
+        return team != null && team.isActive() && team.getLead() != null && team.getLead().getId() != null
+                && team.getLead().getId().equals(actor.getId());
+    }
+
+    /** Comme {@link #canUseAiAssistFor} ; un refus est tracé (ACCESS_DENIED) puis lève {@link AccessDeniedException}. */
+    public void requireAiAssistFor(AppUser actor, Team team) {
+        requireUser(actor);
+        if (!canUseAiAssistFor(actor, team)) {
+            recordAiDenied(actor, team);
+            throw new AccessDeniedException("Assistance IA réservée aux administrateurs et au responsable de l'équipe concernée");
+        }
+    }
+
+    private void recordAiDenied(AppUser actor, Team team) {
+        try {
+            auditTrailService.recordIndependent(AuditEvent.of(AuditModule.TEAMS, AuditAction.ACCESS_DENIED)
+                    .actor(actor)
+                    .result(AuditResult.DENIED)
+                    .summary("Assistance IA refusée" + (team == null || team.getId() == null ? "" : " pour l'équipe #" + team.getId())));
+        } catch (RuntimeException e) {
+            log.error("Audit: refus d'assistance IA non tracé: {}", e.toString());
+        }
     }
 
     private void recordDenied(AppUser actor, OrgPermission permission) {
