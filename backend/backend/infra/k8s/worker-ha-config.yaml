@@ -171,6 +171,15 @@ data:
         Validated 2026-06-05: worker-down kept UI at HTTP 200 with no interruption (API ~15s
         DB-failover blip). See frontend-deployment.yaml.
 
+    MISE À JOUR 28 nov. 2026 — cette règle « épingler l'opérateur sur le master » est REMPLACÉE.
+    Elle a créé le risque inverse (arrêt de .153 pendant une bascule de base = base sans primaire, incident du 18 nov.).
+    Configuration actuelle (appliquée en production) : 2 répliques de l'opérateur, élection de leader (--leader-elect,
+    bail 60 s), anti-affinité REQUISE par nœud, nodeSelector control-plane SEULEMENT (plus de hostname), stratégie
+    RollingUpdate (maxSurge 0, maxUnavailable 1). Placement observé : un opérateur sur chaque worker. Tout arrêt d'un
+    seul nœud laisse donc au moins un opérateur actif ; le survivant prend le bail en 60 s au plus. L'image 1.28.4 doit
+    être présente sur LES TROIS nœuds (ctr -n k8s.io images import) avant tout changement de placement.
+    Retour arrière : docs/HA-ARRET-NOEUD.md.
+
     GAP 2 (RESOLVED by GAP 1 fix) — postgres failover is now AUTOMATIC (~1 min)
     --------------------------------------------------------------------------
     With the operator alive on master, CNPG auto-fails-over when a worker dies:

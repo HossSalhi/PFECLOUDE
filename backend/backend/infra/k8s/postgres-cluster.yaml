@@ -9,6 +9,10 @@ spec:
     # (HA DB : la panne d'un nœud ne peut pas tuer les 2 instances à la fois). En preferred,
     # un reschedule après panne pouvait les co-localiser -> perte de la garantie de failover.
     podAntiAffinityType: required
+    tolerations:   # 28 nov. 2026 : permet l'instance sur le master (taint control-plane conservé)
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
   backup:
     retentionPolicy: 7d
     target: prefer-standby
@@ -40,7 +44,7 @@ spec:
   enableSuperuserAccess: false
   failoverDelay: 0
   imageName: ghcr.io/cloudnative-pg/postgresql:16
-  instances: 2
+  instances: 3   # 28 nov. 2026 : une instance par nœud (.153, .155, .158) ; avant : 2
   logLevel: info
   maxSyncReplicas: 1
   minSyncReplicas: 1
