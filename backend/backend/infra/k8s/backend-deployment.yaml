@@ -11,7 +11,7 @@ metadata:
     helios.io/monitor: "true"
     aiops.io/app: "backend"
 spec:
-  replicas: 2
+  replicas: 3   # 28 nov. 2026 : une par nœud (anti-affinité requise) ; piloté par backend-hpa (min=max=3)
   revisionHistoryLimit: 2
   strategy:
     type: RollingUpdate
@@ -65,6 +65,9 @@ spec:
           operator: Exists
           effect: NoExecute
           tolerationSeconds: 60
+        - key: node-role.kubernetes.io/control-plane   # 28 nov. 2026 : une réplique aussi sur le master (.153, taint conservé)
+          operator: Exists
+          effect: NoSchedule
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

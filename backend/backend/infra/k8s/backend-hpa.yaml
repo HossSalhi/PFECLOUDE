@@ -8,8 +8,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: backend
-  minReplicas: 2
-  maxReplicas: 4
+  minReplicas: 3   # 28 nov. 2026 : une réplique par nœud (.153, .155, .158) ; l'HPA min=max fige le nombre
+  maxReplicas: 3
   metrics:
     - type: Resource
       resource:
